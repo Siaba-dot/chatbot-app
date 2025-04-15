@@ -3,7 +3,7 @@ import openai
 import os
 
 # Naudojam slaptą API raktą iš secrets
-openai.api_key = st.secrets["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"]
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.set_page_config(page_title="Chatbot", page_icon="💬")
 st.title("🤖 Chatbot")
