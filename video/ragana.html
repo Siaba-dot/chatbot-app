@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ragana sniege</title>
+<link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #05070f; }
+  body { display: grid; place-items: center; overflow: hidden; }
+  canvas { height: 100vh; max-width: 100vw; aspect-ratio: 9 / 16; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// Animacija piešiama funkcija draw(t), t – laikas sekundėmis.
+// Scenos: 0–7.5 s ragana bėga per sniegą, 7–11.5 s „Jau greitai“, 11–17 s žiemos pradžia.
+const DURATION = 17;
+const W = 1080, H = 1920, GROUND = 1500;
+const ctx = document.getElementById("c").getContext("2d");
+const { sin, cos, PI, max, min, abs } = Math;
+
+const clamp = (v, a = 0, b = 1) => min(b, max(a, v));
+const smooth = (a, b, v) => { const x = clamp((v - a) / (b - a)); return x * x * (3 - 2 * x); };
+const lerp = (a, b, k) => a + (b - a) * k;
+
+function rng(seed) {
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- Paruošti atsitiktiniai elementai ----------
+const R = rng(7);
+const stars = Array.from({ length: 140 }, () => ({ x: R() * W, y: R() * 1150, r: 0.8 + R() * 2.2, ph: R() * 6.28 }));
+const flakes = Array.from({ length: 260 }, () => ({
+  x: R() * W, y: R() * H, r: 2 + R() * 6, spd: 60 + R() * 140, drift: 10 + R() * 40, ph: R() * 6.28, layer: R()
+}));
+const farPines = Array.from({ length: 16 }, (_, i) => ({ x: i * 75 + R() * 40 - 20, h: 120 + R() * 110 }));
+const nearPines = [{ x: 90, h: 520 }, { x: 980, h: 460 }, { x: 230, h: 330 }];
+const glints = Array.from({ length: 70 }, () => ({ x: R() * W, y: 1400 + R() * 500, ph: R() * 6.28 }));
+
+// Šerkšno šakelės iš kampų (žiemos scenai)
+const frost = [];
+function branch(x, y, a, len, depth, t0) {
+  const x2 = x + cos(a) * len, y2 = y + sin(a) * len, t1 = t0 + len / 420;
+  frost.push({ x, y, x2, y2, t0, t1, w: depth * 1.2 + 0.6 });
+  if (depth <= 0) return;
+  const FR = rng(Math.floor(x * 13 + y * 7 + depth));
+  branch(x2, y2, a + (FR() - 0.5) * 0.5, len * 0.78, depth - 1, t1);
+  branch(x2, y2, a + 0.7 + FR() * 0.3, len * 0.45, depth - 2, t1);
+  branch(x2, y2, a - 0.7 - FR() * 0.3, len * 0.45, depth - 2, t1);
+}
+[[0, 0, 0.75], [W, 0, PI - 0.75], [0, H, -0.75], [W, H, PI + 0.75]].forEach(([x, y, a]) => {
+  for (let k = -1; k <= 1; k++) branch(x, y, a + k * 0.45, 150, 5, 0);
+});
+
+// ---------- Pagalbinės piešimo funkcijos ----------
+function star(x, y, r, color, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = i * PI / 4, rr = i % 2 ? r * 0.28 : r;
+    ctx.lineTo(x + cos(a) * rr, y + sin(a) * rr);
+  }
+  ctx.fill();
+  ctx.restore();
+}
+
+function pine(x, base, h, color, snow) {
+  const w = h * 0.42;
+  ctx.fillStyle = "#3b2a22";
+  ctx.fillRect(x - h * 0.03, base - h * 0.12, h * 0.06, h * 0.14);
+  for (let i = 0; i < 3; i++) {
+    const top = base - h + i * h * 0.26, bot = base - h * 0.08 - (2 - i) * h * 0.22;
+    const ww = w * (0.55 + i * 0.25);
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x + ww, bot); ctx.lineTo(x - ww, bot); ctx.fill();
+    if (snow > 0) {
+      const sh = (bot - top) * 0.45 * snow;
+      ctx.fillStyle = "#f4f8ff";
+      ctx.beginPath();
+      ctx.moveTo(x, top - 2);
+      ctx.lineTo(x + ww * sh / (bot - top) + 4, top + sh);
+      for (let k = 3; k >= -3; k--) ctx.lineTo(x + k * ww * sh / (bot - top) / 3, top + sh + (k % 2 ? 6 : -2) * snow);
+      ctx.lineTo(x - ww * sh / (bot - top) - 4, top + sh);
+      ctx.fill();
+    }
+  }
+}
+
+function snowfall(t, density, wind, color) {
+  ctx.fillStyle = color;
+  const n = Math.floor(flakes.length * density);
+  for (let i = 0; i < n; i++) {
+    const f = flakes[i];
+    const y = ((f.y + f.spd * t) % (H + 40)) - 20;
+    let x = (f.x + sin(t * 0.9 + f.ph) * f.drift + wind * t * (0.5 + f.layer)) % (W + 40);
+    if (x < -20) x += W + 40;
+    ctx.globalAlpha = 0.45 + f.layer * 0.55;
+    ctx.beginPath(); ctx.arc(x, y, f.r, 0, 2 * PI); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Naktinė scena ----------
+function nightScene(t) {
+  let g = ctx.createLinearGradient(0, 0, 0, 1400);
+  g.addColorStop(0, "#060a24"); g.addColorStop(0.6, "#1a2558"); g.addColorStop(1, "#3c4f8f");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  for (const s of stars) star(s.x, s.y, s.r * 2.2, "#fff", 0.35 + 0.45 * (0.5 + 0.5 * sin(t * 2 + s.ph)));
+
+  // Mėnulis
+  const mg = ctx.createRadialGradient(800, 430, 60, 800, 430, 320);
+  mg.addColorStop(0, "rgba(255,248,220,.55)"); mg.addColorStop(1, "rgba(255,248,220,0)");
+  ctx.fillStyle = mg; ctx.fillRect(400, 0, 680, 800);
+  ctx.fillStyle = "#fff6d8"; ctx.beginPath(); ctx.arc(800, 430, 105, 0, 2 * PI); ctx.fill();
+  ctx.fillStyle = "rgba(220,205,170,.5)";
+  [[770, 400, 18], [830, 470, 13], [820, 395, 9]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * PI); ctx.fill(); });
+
+  // Tolimos kalvos ir eglės
+  ctx.fillStyle = "#8ea3d6";
+  ctx.beginPath(); ctx.moveTo(0, 1300);
+  for (let x = 0; x <= W; x += 20) ctx.lineTo(x, 1260 + sin(x / 170) * 40 + sin(x / 61) * 12);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+  for (const p of farPines) pine(p.x, 1275 + sin(p.x / 170) * 40, p.h, "#1d2b52", 0.8);
+
+  // Priekinis sniegas
+  g = ctx.createLinearGradient(0, 1360, 0, H);
+  g.addColorStop(0, "#c7d5f5"); g.addColorStop(1, "#e9f0ff");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(0, 1400);
+  for (let x = 0; x <= W; x += 20) ctx.lineTo(x, 1390 + sin(x / 230 + 1) * 25);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+  for (const p of nearPines) pine(p.x, 1420 + p.h * 0.05, p.h, "#14203f", 1);
+  for (const s of glints) star(s.x, s.y, 7, "#ffffff", clamp(sin(t * 3 + s.ph)) * 0.8);
+}
+
+// ---------- Ragana ----------
+function witchX(t) { return lerp(-260, 1360, t / 7); }
+const STRIDE = 2.4; // žingsniai per sekundę vienai kojai
+
+function legPose(ph) {
+  const thigh = 0.62 * sin(ph);
+  const knee = 0.12 + 1.25 * Math.pow(max(0, cos(ph)), 1.3);
+  const kx = sin(thigh) * 100, ky = cos(thigh) * 100;
+  return { kx, ky, fx: kx + sin(thigh - knee) * 100, fy: ky + cos(thigh - knee) * 100, a: thigh - knee };
+}
+
+function limb(x1, y1, x2, y2, x3, y3, w, color) {
+  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.stroke();
+}
+
+function boot(x, y, a) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-a * 0.6);
+  ctx.fillStyle = "#2b1a12";
+  ctx.beginPath();
+  ctx.moveTo(-14, -16); ctx.lineTo(14, -14); ctx.quadraticCurveTo(40, -6, 52, -22);
+  ctx.quadraticCurveTo(50, 4, 30, 8); ctx.lineTo(-16, 8); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawWitch(t) {
+  const ph = t * 2 * PI * STRIDE;
+  const legs = [legPose(ph + PI), legPose(ph)]; // [galinė, priekinė]
+  const hipY = GROUND - max(legs[0].fy, legs[1].fy) - 8;
+  const x = witchX(t);
+  const flap = t * 9;
+
+  ctx.save();
+  ctx.translate(x, hipY);
+  ctx.scale(1.15, 1.15);
+
+  // Šešėlis ant sniego (be pėdsakų)
+  ctx.fillStyle = "rgba(40,50,110,.18)";
+  ctx.beginPath(); ctx.ellipse(0, (GROUND - hipY) / 1.15, 90, 12, 0, 0, 2 * PI); ctx.fill();
+
+  const lean = 0.22;
+  // Apsiaustas
+  ctx.save(); ctx.rotate(lean);
+  ctx.fillStyle = "#24103d";
+  ctx.beginPath();
+  ctx.moveTo(-18, -150);
+  ctx.bezierCurveTo(-120, -150 + sin(flap) * 15, -190, -90 + sin(flap + 1) * 25, -230, -40 + sin(flap + 2) * 30);
+  ctx.bezierCurveTo(-170, 0 + sin(flap + 2.5) * 20, -110, 20, -30, -30);
+  ctx.fill();
+  ctx.fillStyle = "#6c2fa3";
+  ctx.beginPath();
+  ctx.moveTo(-22, -140);
+  ctx.bezierCurveTo(-100, -120 + sin(flap) * 12, -160, -70 + sin(flap + 1) * 20, -205, -38 + sin(flap + 2) * 26);
+  ctx.bezierCurveTo(-150, -20 + sin(flap + 2.5) * 16, -100, -15, -30, -50);
+  ctx.fill();
+  ctx.restore();
+
+  // Galinė koja ir ranka
+  const bl = legs[0];
+  limb(0, 0, bl.kx, bl.ky, bl.fx, bl.fy, 20, "#1a1424");
+  boot(bl.fx, bl.fy, bl.a);
+
+  ctx.save(); ctx.rotate(lean);
+  const bs = 0.9 * sin(ph);
+  limb(0, -130, sin(bs) * 62, -130 + cos(bs) * 62, sin(bs) * 62 + sin(bs + 1.3) * 55, -130 + cos(bs) * 62 + cos(bs + 1.3) * 55, 16, "#2c1446");
+
+  // Suknelė su draskytu kraštu
+  ctx.fillStyle = "#43206b";
+  ctx.beginPath();
+  ctx.moveTo(-26, -150); ctx.lineTo(26, -150); ctx.lineTo(34, -10);
+  ctx.lineTo(50, 60);
+  const hem = [[30, 78], [10, 62], [-12, 84], [-34, 64], [-58, 86], [-80, 60]];
+  hem.forEach(([hx, hy], i) => ctx.lineTo(hx + (i > 2 ? sin(flap + i) * 10 : 0), hy + sin(flap * 0.8 + i) * 4));
+  ctx.lineTo(-108 + sin(flap) * 12, 50 + sin(flap + 1) * 8);
+  ctx.lineTo(-36, -10);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#f2c14e"; ctx.fillRect(-32, -18, 64, 10); // diržas
+  ctx.restore();
+
+  // Priekinė koja
+  const fl = legs[1];
+  limb(0, 0, fl.kx, fl.ky, fl.fx, fl.fy, 20, "#221a30");
+  ctx.strokeStyle = "#7a3fb8"; ctx.lineWidth = 6;
+  [0.35, 0.65].forEach(k => {
+    const sx = lerp(fl.kx, fl.fx, k), sy = lerp(fl.ky, fl.fy, k);
+    ctx.beginPath(); ctx.moveTo(sx - 9, sy - 2); ctx.lineTo(sx + 9, sy + 2); ctx.stroke();
+  });
+  boot(fl.fx, fl.fy, fl.a);
+
+  ctx.save(); ctx.rotate(lean);
+  // Plaukai
+  ctx.fillStyle = "#e0552b";
+  ctx.beginPath();
+  ctx.moveTo(-10, -205);
+  ctx.bezierCurveTo(-70, -200 + sin(flap) * 8, -110, -150 + sin(flap + 1) * 14, -150, -130 + sin(flap + 2) * 18);
+  ctx.bezierCurveTo(-100, -125, -60, -140, -20, -150);
+  ctx.fill();
+  // Galva
+  ctx.fillStyle = "#b9dca0";
+  ctx.beginPath(); ctx.arc(10, -182, 32, 0, 2 * PI); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(36, -192); ctx.quadraticCurveTo(62, -178, 66, -168); ctx.lineTo(38, -172); ctx.fill();
+  ctx.fillStyle = "#1a1424"; ctx.beginPath(); ctx.arc(26, -190, 4, 0, 2 * PI); ctx.fill();
+  ctx.strokeStyle = "#1a1424"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(26, -164, 9, 0.2, 1.4); ctx.stroke();
+  ctx.fillStyle = "rgba(230,110,110,.45)"; ctx.beginPath(); ctx.arc(12, -170, 7, 0, 2 * PI); ctx.fill();
+  // Skrybėlė
+  ctx.save(); ctx.translate(6, -208); ctx.rotate(-0.28 + sin(flap * 0.5) * 0.04);
+  ctx.fillStyle = "#1e0f33";
+  ctx.beginPath(); ctx.ellipse(0, 0, 66, 14, 0, 0, 2 * PI); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-32, -4); ctx.lineTo(32, -4);
+  ctx.quadraticCurveTo(14, -70, 2, -118);
+  ctx.quadraticCurveTo(-20, -130 + sin(flap) * 6, -52, -112 + sin(flap) * 8);
+  ctx.quadraticCurveTo(-14, -100, -32, -4);
+  ctx.fill();
+  ctx.fillStyle = "#f2c14e"; ctx.fillRect(-31, -22, 62, 12);
+  ctx.strokeStyle = "#1e0f33"; ctx.lineWidth = 3; ctx.strokeRect(-6, -21, 12, 10);
+  ctx.restore();
+
+  // Priekinė ranka su šluota
+  const fs = 0.9 * sin(ph + PI);
+  const ex = sin(fs) * 62, ey = -130 + cos(fs) * 62;
+  const hx = ex + sin(fs + 1.5) * 55, hy = ey + cos(fs + 1.5) * 55;
+  ctx.save(); ctx.translate(hx, hy); ctx.rotate(-0.55 + fs * 0.15);
+  ctx.strokeStyle = "#7b4a26"; ctx.lineWidth = 9; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(110, 0); ctx.lineTo(-150, 0); ctx.stroke();
+  ctx.fillStyle = "#d9a441";
+  ctx.beginPath(); ctx.moveTo(-140, -8); ctx.lineTo(-230, -34); ctx.lineTo(-240, 0); ctx.lineTo(-230, 34); ctx.lineTo(-140, 8); ctx.fill();
+  ctx.strokeStyle = "#a8742a"; ctx.lineWidth = 3;
+  for (let k = -3; k <= 3; k++) { ctx.beginPath(); ctx.moveTo(-150, k * 2.5); ctx.lineTo(-235, k * 10); ctx.stroke(); }
+  ctx.strokeStyle = "#7b4a26"; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(-142, -10); ctx.lineTo(-142, 10); ctx.stroke();
+  ctx.restore();
+  limb(0, -130, ex, ey, hx, hy, 16, "#3a1a5c");
+  ctx.fillStyle = "#b9dca0"; ctx.beginPath(); ctx.arc(hx, hy, 10, 0, 2 * PI); ctx.fill();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// Stebuklingos žiežirbos ten, kur kojos paliečia sniegą – pėdsakų nelieka
+function footSparkles(t) {
+  const stepT = 1 / (2 * STRIDE);
+  for (let n = Math.floor((t - 1.2) / stepT); n <= t / stepT; n++) {
+    const tn = n * stepT + stepT * 0.5;
+    const age = t - tn;
+    if (tn < 0 || tn > 7 || age < 0 || age > 1.2) continue;
+    const SR = rng(n * 31 + 5);
+    const fx = witchX(tn) + 50;
+    for (let k = 0; k < 6; k++) {
+      const x = fx + (SR() - 0.5) * 70 + (SR() - 0.5) * 60 * age;
+      const y = GROUND - age * (40 + SR() * 90);
+      star(x, y, 10 + SR() * 10, k % 2 ? "#bfe6ff" : "#fff3b0", (1 - age / 1.2) * 0.9);
+    }
+  }
+}
+
+// ---------- „Jau greitai“ ----------
+function comingSoon(t) {
+  const a = smooth(7.2, 7.9, t) * (1 - smooth(10.8, 11.5, t));
+  if (a <= 0) return;
+  ctx.save();
+  ctx.fillStyle = `rgba(5,8,30,${0.3 * a})`; ctx.fillRect(0, 0, W, H);
+
+  const text = "Jau greitai";
+  ctx.font = "150px Pacifico";
+  ctx.textBaseline = "middle";
+  const total = ctx.measureText(text).width;
+  let x = W / 2 - total / 2;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i], w = ctx.measureText(ch).width;
+    const k = smooth(7.6 + i * 0.09, 8.1 + i * 0.09, t);
+    ctx.save();
+    ctx.globalAlpha = a * k;
+    ctx.translate(x + w / 2, 840 + (1 - k) * 60 + sin(t * 2 + i * 0.6) * 6);
+    ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
+    ctx.shadowColor = "#8fd3ff"; ctx.shadowBlur = 40;
+    const g = ctx.createLinearGradient(0, -70, 0, 70);
+    g.addColorStop(0, "#ffffff"); g.addColorStop(1, "#bfe3ff");
+    ctx.fillStyle = g;
+    ctx.fillText(ch, -w / 2, 0);
+    ctx.restore();
+    x += w;
+  }
+  // Žvaigždutės aplink užrašą
+  for (let i = 0; i < 14; i++) {
+    const ang = t * 0.7 + i * PI / 7;
+    const sx = W / 2 + cos(ang) * (380 + sin(t * 2 + i) * 30);
+    const sy = 840 + sin(ang) * 170;
+    star(sx, sy, 12 + 6 * sin(t * 4 + i), i % 2 ? "#fff3b0" : "#bfe6ff", a * smooth(8.2, 8.8, t) * (0.6 + 0.4 * sin(t * 5 + i)));
+  }
+  ctx.restore();
+}
+
+// ---------- Žiemos pradžia ----------
+function winterScene(t) {
+  const tt = t - 11; // laikas nuo scenos pradžios
+  let g = ctx.createLinearGradient(0, 0, 0, 1350);
+  g.addColorStop(0, "#7fa6dd"); g.addColorStop(0.65, "#cfdcf2"); g.addColorStop(1, "#ffd9c4");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // Žema saulė
+  const sy = 1180 - smooth(0, 6, tt) * 90;
+  const sg = ctx.createRadialGradient(300, sy, 30, 300, sy, 340);
+  sg.addColorStop(0, "rgba(255,236,200,.95)"); sg.addColorStop(0.25, "rgba(255,220,180,.5)"); sg.addColorStop(1, "rgba(255,220,180,0)");
+  ctx.fillStyle = sg; ctx.fillRect(0, sy - 340, 700, 680);
+
+  const snow = smooth(0, 5.5, tt); // sniego kiekis auga
+  // Kalvos
+  ctx.fillStyle = "#e8eef8";
+  ctx.beginPath(); ctx.moveTo(0, 1300);
+  for (let x = 0; x <= W; x += 20) ctx.lineTo(x, 1270 + sin(x / 190 + 2) * 45);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+  for (const p of farPines) pine(p.x, 1285 + sin(p.x / 190 + 2) * 45, p.h, "#2f5a4c", snow);
+
+  // Namelis
+  const hx = 640, hy = 1430;
+  ctx.fillStyle = "#8a4b2f"; ctx.fillRect(hx - 150, hy - 210, 300, 210);
+  ctx.fillStyle = "#6e3a24";
+  for (let k = 1; k < 7; k++) ctx.fillRect(hx - 150, hy - 210 + k * 30, 300, 3);
+  ctx.fillStyle = "#4a2a20"; ctx.fillRect(hx + 60, hy - 330, 46, 120); // kaminas
+  ctx.fillStyle = "#5b2a1c";
+  ctx.beginPath(); ctx.moveTo(hx - 190, hy - 200); ctx.lineTo(hx, hy - 360); ctx.lineTo(hx + 190, hy - 200); ctx.fill();
+  // Sniegas ant stogo
+  ctx.fillStyle = "#f7faff";
+  const th = 6 + 30 * snow;
+  ctx.beginPath(); ctx.moveTo(hx - 196, hy - 196); ctx.lineTo(hx, hy - 362 - th * 0.4); ctx.lineTo(hx + 196, hy - 196);
+  ctx.lineTo(hx + 196, hy - 196 + th * 0.5); ctx.lineTo(hx, hy - 360 + th); ctx.lineTo(hx - 196, hy - 196 + th * 0.5); ctx.fill();
+  ctx.fillRect(hx + 56, hy - 336 - th * 0.4, 54, th * 0.5 + 6);
+  // Langas ir durys
+  const wg = ctx.createRadialGradient(hx - 70, hy - 120, 5, hx - 70, hy - 120, 90);
+  wg.addColorStop(0, "rgba(255,210,120,.9)"); wg.addColorStop(1, "rgba(255,210,120,0)");
+  ctx.fillStyle = wg; ctx.fillRect(hx - 170, hy - 220, 200, 200);
+  ctx.fillStyle = "#ffd27a"; ctx.fillRect(hx - 110, hy - 160, 80, 80);
+  ctx.strokeStyle = "#5b2a1c"; ctx.lineWidth = 7; ctx.strokeRect(hx - 110, hy - 160, 80, 80);
+  ctx.beginPath(); ctx.moveTo(hx - 70, hy - 160); ctx.lineTo(hx - 70, hy - 80); ctx.moveTo(hx - 110, hy - 120); ctx.lineTo(hx - 30, hy - 120); ctx.stroke();
+  ctx.fillStyle = "#4a2a20"; ctx.fillRect(hx + 30, hy - 130, 70, 130);
+  // Dūmai
+  for (let i = 0; i < 7; i++) {
+    const age = ((tt * 0.35 + i / 7) % 1);
+    ctx.fillStyle = `rgba(240,240,250,${0.55 * (1 - age)})`;
+    ctx.beginPath(); ctx.arc(hx + 83 + sin(age * 5 + i) * 25 + age * 70, hy - 350 - age * 380, 22 + age * 45, 0, 2 * PI); ctx.fill();
+  }
+
+  // Priekinis sniegas
+  g = ctx.createLinearGradient(0, 1400, 0, H);
+  g.addColorStop(0, "#f2f6ff"); g.addColorStop(1, "#dce6f7");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(0, 1440);
+  for (let x = 0; x <= W; x += 20) ctx.lineTo(x, 1430 + sin(x / 210 + 0.5) * 22);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+  for (const p of nearPines) pine(p.x, 1450 + p.h * 0.06, p.h, "#244a3d", snow);
+  for (const s of glints) star(s.x, s.y + 40, 7, "#ffffff", clamp(sin(tt * 3 + s.ph)) * 0.7);
+
+  snowfall(tt + 30, 0.25 + 0.6 * smooth(0, 3, tt), 12, "#ffffff");
+
+  // Šerkšnas iš kampų
+  const fp = smooth(0.5, 5.5, tt) * 1.9;
+  ctx.strokeStyle = "rgba(255,255,255,.75)"; ctx.lineCap = "round";
+  for (const s of frost) {
+    if (fp <= s.t0) continue;
+    const k = clamp((fp - s.t0) / (s.t1 - s.t0));
+    ctx.lineWidth = s.w;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(lerp(s.x, s.x2, k), lerp(s.y, s.y2, k)); ctx.stroke();
+  }
+
+  // Užrašas
+  const ta = smooth(1.2, 2.2, tt);
+  ctx.save();
+  ctx.globalAlpha = ta;
+  ctx.font = "128px Pacifico"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(255,255,255,.95)"; ctx.shadowBlur = 30;
+  ctx.fillStyle = "#1d3a66";
+  ctx.fillText("Žiemos pradžia", W / 2, 560 - (1 - ta) * 40);
+  ctx.restore();
+}
+
+// ---------- Kadras ----------
+function draw(t) {
+  const wa = smooth(10.6, 11.6, t); // perėjimas į žiemos sceną
+  if (wa < 1) {
+    nightScene(t);
+    if (t < 7.6) { footSparkles(t); drawWitch(t); }
+    snowfall(t, 0.55 + 0.45 * smooth(6.5, 8, t), 25, "#ffffff");
+    comingSoon(t);
+  }
+  if (wa > 0) {
+    ctx.save(); ctx.globalAlpha = wa;
+    winterScene(t);
+    ctx.restore();
+    // Baltas blyksnis perėjimo metu
+    const f = 1 - abs(wa - 0.5) * 2;
+    ctx.fillStyle = `rgba(255,255,255,${f * 0.5})`; ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// Įrašymo skriptas kviečia window.renderAt(t); kitaip animacija groja ratu
+window.DURATION = DURATION;
+window.ready = document.fonts.load("150px Pacifico").then(() => document.fonts.load("128px Pacifico"));
+window.renderAt = t => draw(t);
+if (!new URLSearchParams(location.search).has("video")) {
+  window.ready.then(() => {
+    const start = performance.now();
+    (function loop(now) { draw(((now - start) / 1000) % DURATION); requestAnimationFrame(loop); })(start);
+  });
+}
+</script>
+</body>
+</html>
