@@ -144,6 +144,9 @@
     text-align: center; font-size: 12px; color: var(--muted);
   }
 
+  /* Vaizdo įrašo režimas (?video=1): be valdiklių */
+  .video .ctrl, .video .hint, .video .tap { display: none; }
+
   @media (max-width: 480px) { .reel { border-radius: 0; } }
 
   @media (prefers-reduced-motion: reduce) {
@@ -216,7 +219,7 @@ const NEWS = [
   {
     outro: true, icon: "🚀", tag: "Iki kitos savaitės",
     title: "Sek DI naujienas kartu su mumis",
-    lead: "Turite klausimų apie DI sprendimus savo verslui? Paklauskite mūsų pokalbių roboto.",
+    lead: "Sekite mūsų puslapį – kas savaitę trumpai apie svarbiausius DI pokyčius.",
     grad: "linear-gradient(135deg,#120b2e,#7b5cff,#00d4ff)", o1: "#00d4ff", o2: "#ff3d77"
   }
 ];
@@ -249,18 +252,14 @@ const slides = [...slidesEl.children];
 const bars = [...barsEl.children];
 let current = 0, elapsed = 0, last = 0, paused = false, held = false;
 
-function countUp(i) {
-  const el = slides[i].querySelector(".stat");
+// Skaičius suskaičiuojamas nuo 0 pagal skaidrės laiką (350 ms delsa, 1200 ms trukmė)
+function updateStat() {
+  const el = slides[current].querySelector(".stat");
   if (!el) return;
-  const { to, prefix = "", suffix = "", decimals = 0 } = NEWS[i].stat;
-  const start = performance.now();
-  const fmt = v => prefix + v.toFixed(decimals).replace(".", ",") + suffix;
-  (function step(t) {
-    const p = Math.min(1, (t - start - 350) / 1200);
-    if (p < 0) return requestAnimationFrame(step);
-    el.textContent = fmt(to * (1 - Math.pow(1 - p, 3)));
-    if (p < 1 && current === i) requestAnimationFrame(step);
-  })(start);
+  const { to, prefix = "", suffix = "", decimals = 0 } = NEWS[current].stat;
+  const p = Math.max(0, Math.min(1, (elapsed - 350) / 1200));
+  const v = to * (1 - Math.pow(1 - p, 3));
+  el.textContent = prefix + v.toFixed(decimals).replace(".", ",") + suffix;
 }
 
 function go(i) {
@@ -271,7 +270,15 @@ function go(i) {
     b.classList.toggle("done", k < current);
     b.firstElementChild.style.width = k < current ? "100%" : "0";
   });
-  countUp(current);
+  updateStat();
+}
+
+// Pastumia reelsą laike per dt ms
+function advance(dt) {
+  elapsed += dt;
+  if (elapsed >= DURATION) return go(current + 1);
+  bars[current].firstElementChild.style.width = Math.min(100, elapsed / DURATION * 100) + "%";
+  updateStat();
 }
 
 function setPaused(p) {
@@ -284,11 +291,7 @@ function setPaused(p) {
 function tick(t) {
   const dt = last ? t - last : 0;
   last = t;
-  if (!paused && !held && !document.hidden) {
-    elapsed += dt;
-    bars[current].firstElementChild.style.width = Math.min(100, elapsed / DURATION * 100) + "%";
-    if (elapsed >= DURATION) go(current + 1);
-  }
+  if (!paused && !held && !document.hidden) advance(dt);
   requestAnimationFrame(tick);
 }
 
@@ -312,7 +315,20 @@ document.addEventListener("keydown", e => {
 });
 
 go(0);
-requestAnimationFrame(tick);
+
+if (new URLSearchParams(location.search).has("video")) {
+  // Vaizdo įrašo režimas: laiką kadras po kadro valdo įrašymo skriptas
+  reel.classList.add("video");
+  window.renderFrame = dt => {
+    advance(dt);
+    for (const a of document.getAnimations()) {
+      a.pause();
+      a.currentTime = (a.currentTime || 0) + dt;
+    }
+  };
+} else {
+  requestAnimationFrame(tick);
+}
 </script>
 </body>
 </html>
