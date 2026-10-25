@@ -192,18 +192,21 @@ if uploaded and clicked:
         status = st.empty()
         bar = st.progress(0.0)
         try:
-            src = clips[0]["path"]
+            src, protect = clips[0]["path"], None
             if len(clips) > 1:
                 status.info(f"Sujungiu {len(clips)} video į vieną…")
-                src = video_editor.concat_clips([c["path"] for c in clips], os.path.join(tmp, "sujungta.mkv"),
-                                                fmt, progress=lambda p: bar.progress(p))
+                src, spans = video_editor.concat_clips([c["path"] for c in clips],
+                                                       os.path.join(tmp, "sujungta.mkv"), fmt,
+                                                       progress=lambda p: bar.progress(p))
+                # Įrašų be balso tylos kirpimas neliečia – jie paliekami visi.
+                protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
                 bar.progress(0.0)
             res = video_editor.auto_edit(
                 src, dst, fmt=fmt, remove_silence=remove_silence, noise_db=noise_db,
                 min_silence=min_silence, padding=padding, loudnorm=loudnorm, fades=fades,
                 denoise=denoise,
                 subtitles=subtitles, client=client, subtitle_language=subtitle_language,
-                subtitle_text=subtitle_text, subtitle_style=subtitle_style,
+                subtitle_text=subtitle_text, subtitle_style=subtitle_style, protect=protect,
                 status=lambda m: status.info(m), progress=lambda p: bar.progress(p))
         except Exception as e:
             status.error(f"Nepavyko sumontuoti: {e}")

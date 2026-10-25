@@ -71,10 +71,19 @@ def analyze_audio(path):
     lv = _frame_levels(path)
     if not len(lv):
         return None
-    noise, loud = float(np.percentile(lv, 10)), float(np.percentile(lv, 95))
+    # Skaitmeninės tylos (lygiai nulis) vietos neatspindi fono – jų nevertinam, kitaip fono ūžesys
+    # atrodytų kaip kalba.
+    real = lv[lv > -100]
+    if len(real) < max(3, 0.05 * len(lv)):
+        return {"levels": lv, "noise": -120.0, "loud": -120.0, "threshold": -100.0, "speech": False}
+    noise, loud = float(np.percentile(real, 10)), float(np.percentile(real, 95))
+    zeros = 1 - len(real) / len(lv)
+    if loud - noise < 10 and zeros >= 0.05 and loud > -50:
+        # Girdimas garsas su visiškos tylos pauzėmis (pvz. nutildytos vietos) – pauzės yra tos tylos vietos.
+        noise = -120.0
     contrast = loud - noise
     # Riba tarp triukšmo ir kalbos; kai skirtumas mažas – arti triukšmo lygio.
-    threshold = noise + (contrast * 0.35 if contrast >= 10 else 3)
+    threshold = (noise + contrast * 0.35 if contrast >= 10 else noise + 3) if noise > -120 else -100.0
     voiced = float((lv > threshold).sum() * FRAME)
     return {"levels": lv, "noise": noise, "loud": loud, "threshold": threshold,
             "speech": contrast >= 10 and loud > -65 and voiced >= 0.5}
@@ -421,7 +430,10 @@ def denoise_filter(noise=None, loud=None):
     švelniai prislopina likutį (vartai)."""
     noise = -50 if noise is None else noise
     nf = int(max(-80, min(-20, round(noise + 15))))
-    f = ["highpass=f=80", f"afftdn=nr=25:nf={nf}:tn=1"]
+    # Negirdimas (~-120 dB) fonas: senesnės ffmpeg versijos (pvz. 5.1 Streamlit Cloud) afftdn filtras
+    # visiškos tylos (lygiai nulio) vietose grąžina NaN, ir AAC koduotojas nutraukia darbą.
+    f = ["highpass=f=80", "aeval=val(ch)+0.000002*(random(0)-0.5):c=same",
+         f"afftdn=nr=25:nf={nf}:tn=1"]
     if loud is not None and loud - noise >= 10:  # vartai – tik kai kalba aiškiai garsesnė už foną
         thr = max(0.001, min(0.5, 10 ** ((noise + min(8, (loud - noise) * 0.3)) / 20)))
         f.append(f"agate=threshold={thr:.5f}:ratio=2:range=0.25:attack=10:release=250")
@@ -493,15 +505,17 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
 def concat_clips(paths, out_path, fmt="original", progress=None):
     """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
     pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
-    Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų."""
+    Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų.
+    Grąžina (kelias, [(pradžia, pabaiga)] – kiekvieno įrašo vieta sujungtame video)."""
     infos = [probe(p) for p in paths]
     ratio = FORMATS.get(fmt)
     sizes = [_out_size(i["width"], i["height"], ratio) for i in infos]
     W, H = max(sizes, key=lambda wh: wh[0] * wh[1]) if ratio else sizes[0]
     fps = infos[0]["fps"]
-    parts, total = [], 0.0
+    parts, total, spans = [], 0.0, []
     for i, (p, inf) in enumerate(zip(paths, infos)):
         d = inf["duration"]
+        spans.append((total, total + d))
         total += d
         if ratio:  # fiksuotas formatas – užpildom kadrą (kraštai apkarpomi)
             fit = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
@@ -535,19 +549,20 @@ def concat_clips(paths, out_path, fmt="original", progress=None):
             raise RuntimeError(f"Nepavyko sujungti įrašų:\n{err[-2000:]}")
     finally:
         os.unlink(script)
-    return out_path
+    return out_path, spans
 
 
 def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None, min_silence=0.5,
               padding=0.15, loudnorm=True, fades=True, denoise=True, subtitles=False, client=None,
               language=None, subtitle_language="lt", subtitle_text="", subtitle_style="modern",
-              ypos=0.67, translate_model=None, status=None, progress=None):
+              ypos=0.67, translate_model=None, protect=None, status=None, progress=None):
     """Visas automatinis montažas vienu kvietimu. Grąžina santrauką (dict).
 
     Titrai: jei įraše yra balsas – atpažįstami automatiškai (reikia OpenAI kliento);
     language – kalbama kalba (None = nustatyti automatiškai), subtitle_language – titrų
     kalba (None = kaip kalbama; kitaip išverčiama). Jei balso nėra – naudojamas
-    subtitle_text, tolygiai išdėliotas per visą video. subtitle_style: "modern" – animuoti
+    subtitle_text, tolygiai išdėliotas per visą video. protect – laiko intervalai, kurių tylos
+    kirpimas neliečia (pvz. sujungti įrašai be balso). subtitle_style: "modern" – animuoti
     titrai vaizdo viduryje, "training" – mokymų titrai juodoje juostoje po vaizdu.
     """
     say = status or (lambda msg: None)
@@ -555,9 +570,18 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
     info = probe(path)
     status_, an = audio_status(path, info)
     keep = [(0.0, info["duration"])]
-    if remove_silence and an is not None:
+    # Tylą kerpam tik kai yra balsas: video be balso (vaizdo kadrai, b-roll) paliekamas visas.
+    if remove_silence and status_ == "speech":
         say("Ieškau tylos ir pauzių…")
         keep = keep_segments(info["duration"], detect_silences(path, noise_db, min_silence, an), padding)
+        if protect:  # įrašai be balso sujungtame video – paliekami visi
+            merged = []
+            for a, b in sorted(keep + [tuple(x) for x in protect]):
+                if merged and a <= merged[-1][1] + 0.01:
+                    merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+                else:
+                    merged.append((a, b))
+            keep = merged
 
     ass_file, n_words, sub_mode = None, 0, None
     if subtitles:
@@ -594,9 +618,16 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
 
     say("Montuoju video…")
     try:
-        res = render(path, out_path, keep, info, fmt, loudnorm, fades, ass_file, progress,
-                     denoise=denoise and an is not None, analysis=an,
-                     band=bool(ass_file) and subtitle_style == "training")
+        render_args = dict(denoise=denoise and an is not None and an["loud"] > -60, analysis=an,
+                           band=bool(ass_file) and subtitle_style == "training")
+        try:
+            res = render(path, out_path, keep, info, fmt, loudnorm, fades, ass_file, progress, **render_args)
+        except RuntimeError as e:
+            if not render_args["denoise"] or "NaN" not in str(e):
+                raise
+            say("Triukšmo šalinimas nepavyko – montuoju be jo…")  # apsauga senesnėms ffmpeg versijoms
+            render_args["denoise"] = False
+            res = render(path, out_path, keep, info, fmt, loudnorm, fades, ass_file, progress, **render_args)
     finally:
         if ass_file:
             os.unlink(ass_file)
