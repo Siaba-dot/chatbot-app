@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 
 import video_editor
 
-APP_VERSION = "11"  # didinama su kiekvienu pakeitimu – matosi puslapio apačioje
+APP_VERSION = "12"  # didinama su kiekvienu pakeitimu – matosi puslapio apačioje
 
 # Filmavimas programoje: kamera + mikrofonas per naršyklę (components/recorder/index.html)
 video_recorder = components.declare_component(
@@ -49,13 +49,15 @@ def add_clip(clip_id, ext, data, name, kind):
     with st.spinner(f"Tikrinu „{name}“…"):
         try:
             duration = video_editor.probe(path)["duration"]
-            state, an = video_editor.audio_status(path)
+            image = video_editor.is_image(path)
+            state, an = ("none", None) if image else video_editor.audio_status(path)
         except Exception:
             os.unlink(path)
             skip.add(clip_id)
-            st.error(f"„{name}“ nepavyko atidaryti kaip video. Įkelkite video failą (pvz. MP4 arba MOV).")
+            st.error(f"„{name}“ nepavyko atidaryti. Įkelkite video (pvz. MP4, MOV) arba nuotrauką (JPG, PNG).")
             return
     clips.append({"id": clip_id, "path": path, "name": name, "kind": kind, "duration": duration,
+                  "image": image,
                   "audio": state, "levels": an and {k: an[k] for k in ("noise", "loud")}})
 
 
@@ -76,8 +78,9 @@ source = st.radio("Video", ["📁 Įkelti video", "🎥 Filmuoti dabar"], horizo
 if source.startswith("📁"):
     # Be failų tipų apribojimo: telefonuose (ypač iPhone) apribojimas neleidžia pasirinkti
     # video iš galerijos. Ar tai tikrai video, patikrinama po įkėlimo.
-    files = st.file_uploader("Įkelkite vieną ar kelis video", accept_multiple_files=True,
-                             help="Telefone galite pasirinkti kelis video iš galerijos iš karto.")
+    files = st.file_uploader("Įkelkite video ar nuotraukas (galima kelis)", accept_multiple_files=True,
+                             help="Telefone galite pasirinkti kelis video ar nuotraukas iš galerijos iš karto. "
+                                  "Nuotraukos rodomos po kelias sekundes.")
     current = {f.file_id for f in files}
     # Failą pašalinus iš įkėlimo lauko – pašalinam jį ir iš sąrašo.
     for i in [i for i, c in enumerate(st.session_state["clips"])
@@ -95,22 +98,28 @@ else:
                  lambda: base64.b64decode(rec["data"]), f"Įrašas {n}", "rec")
 
 clips = st.session_state["clips"]
+image_duration = video_editor.IMAGE_DURATION
+if any(c.get("image") for c in clips):
+    image_duration = st.slider("Kiek sekundžių rodyti kiekvieną nuotrauką", 1.0, 10.0,
+                               video_editor.IMAGE_DURATION, 0.5)
 if clips:
     st.markdown(f"**Video ({len(clips)}) – bus sujungti šia tvarka:**" if len(clips) > 1 else "**Video:**")
     for i, c in enumerate(clips):
-        info = ("🔈 balsas" if c["audio"] == "speech" else "🔇 be garso" if c["audio"] == "none"
-                else "🔈 balso neaptikta")
+        info = ("🖼️ nuotrauka" if c.get("image") else "🔈 balsas" if c["audio"] == "speech"
+                else "🔇 be garso" if c["audio"] == "none" else "🔈 balso neaptikta")
         # Horizontalus konteineris (ne stulpeliai) – telefone neišsidėsto į atskiras eilutes.
         row = st.container(horizontal=True, wrap=False, vertical_alignment="center", gap="small", border=True)
         name = c["name"] if len(c["name"]) <= 18 else c["name"][:8] + "…" + c["name"][-7:]
-        row.markdown(f"**{i + 1}.** {name}  \n{c['duration']:.1f} s · {info}", width="stretch")
+        dur = image_duration if c.get("image") else c["duration"]
+        row.markdown(f"**{i + 1}.** {name}  \n{dur:.1f} s · {info}", width="stretch")
         row.button("⬆️", key=f"up-{c['id']}", disabled=i == 0, on_click=move_clip, args=(i, -1),
                    help="Perkelti aukščiau")
         row.button("⬇️", key=f"down-{c['id']}", disabled=i == len(clips) - 1, on_click=move_clip,
                    args=(i, 1), help="Perkelti žemiau")
         row.button("✖️", key=f"del-{c['id']}", on_click=move_clip, args=(i, 0), help="Pašalinti")
     if len(clips) > 1:
-        st.caption(f"Bendra trukmė prieš montažą: {sum(c['duration'] for c in clips):.1f} s")
+        total = sum(image_duration if c.get("image") else c["duration"] for c in clips)
+        st.caption(f"Bendra trukmė prieš montažą: {total:.1f} s")
     st.caption("➕ Galite pridėti daugiau video – įkelti iš albumo arba nufilmuoti.")
 
 uploaded = bool(clips)
@@ -147,6 +156,8 @@ if subtitles and uploaded:
         if speech:
             st.warning("Įraše yra balsas, bet automatiniam atpažinimui trūksta OPENAI_API_KEY – "
                        "įklijuokite tekstą rankiniu būdu.")
+        elif all(c.get("image") for c in clips):
+            st.info("🖼️ Nuotraukose garso nėra – įklijuokite tekstą, kurį norite matyti titruose.")
         elif audio_state == "none":
             st.info("🔇 Įraše nėra garso – įklijuokite tekstą, kurį norite matyti titruose. "
                     "(Jei filmavote per naršyklę, patikrinkite, ar jai leista naudoti mikrofoną.)")
@@ -195,11 +206,12 @@ if uploaded and clicked:
         bar = st.progress(0.0)
         try:
             src, protect = clips[0]["path"], None
-            if len(clips) > 1:
-                status.info(f"Sujungiu {len(clips)} video į vieną…")
+            if len(clips) > 1 or clips[0].get("image"):
+                status.info(f"Sujungiu {len(clips)} video į vieną…" if len(clips) > 1 else "Ruošiu nuotrauką…")
                 src, spans = video_editor.concat_clips([c["path"] for c in clips],
                                                        os.path.join(tmp, "sujungta.mkv"), fmt,
-                                                       progress=lambda p: bar.progress(p))
+                                                       progress=lambda p: bar.progress(p),
+                                                       image_duration=image_duration)
                 # Įrašų be balso tylos kirpimas neliečia – jie paliekami visi.
                 protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
                 bar.progress(0.0)

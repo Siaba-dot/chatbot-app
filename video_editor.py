@@ -505,16 +505,36 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
     return {"duration": total, "width": ow, "height": oh}
 
 
-def concat_clips(paths, out_path, fmt="original", progress=None):
+IMAGE_DURATION = 3.0  # s – kiek rodoma viena nuotrauka
+
+
+def is_image(path):
+    """Ar failas yra nuotrauka (ne video)."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=format_name", "-of", "csv=p=0", path],
+                         capture_output=True, text=True).stdout.strip()
+    return out == "image2" or out.endswith("_pipe")
+
+
+def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION):
     """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
     pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
-    Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų.
+    Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų. Nuotraukos rodomos
+    image_duration sekundžių.
     Grąžina (kelias, [(pradžia, pabaiga)] – kiekvieno įrašo vieta sujungtame video)."""
     infos = [probe(p) for p in paths]
+    images = [is_image(p) for p in paths]
+    for inf, img in zip(infos, images):
+        if img:
+            inf.update(duration=float(image_duration), has_audio=False)
     ratio = FORMATS.get(fmt)
     sizes = [_out_size(i["width"], i["height"], ratio) for i in infos]
-    W, H = max(sizes, key=lambda wh: wh[0] * wh[1]) if ratio else sizes[0]
-    fps = infos[0]["fps"]
+    if ratio:
+        W, H = max(sizes, key=lambda wh: wh[0] * wh[1])
+    else:  # kadro forma – pagal pirmą įrašą, raiška – pagal didžiausią (iki 1920)
+        W, H = sizes[0]
+        k = min(1920, max(max(wh) for wh in sizes)) / max(W, H)
+        W, H = int(W * k) // 2 * 2, int(H * k) // 2 * 2
+    fps = next((i["fps"] for i, img in zip(infos, images) if not img), 30)
     parts, total, spans = [], 0.0, []
     for i, (p, inf) in enumerate(zip(paths, infos)):
         d = inf["duration"]
@@ -537,7 +557,9 @@ def concat_clips(paths, out_path, fmt="original", progress=None):
         f.write(graph)
         script = f.name
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1"]
-    for p in paths:
+    for p, img in zip(paths, images):
+        if img:  # nuotrauka kartojama kaip video
+            cmd += ["-loop", "1", "-framerate", str(fps), "-t", f"{image_duration:.3f}"]
         cmd += ["-i", p]
     cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
             "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
