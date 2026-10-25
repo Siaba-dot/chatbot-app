@@ -63,11 +63,16 @@ with st.expander("⚙️ Nustatymai", expanded=True):
     fades = st.checkbox("Švelni pradžia ir pabaiga (fade)", value=True)
 
     subtitles = st.checkbox("Pridėti animuotus titrus", value=True)
-    subtitle_text, language = "", "lt"
+    subtitle_text, subtitle_language = "", "lt"
     if subtitles and uploaded:
         if speech and client:
-            st.success("🎙️ Įraše aptiktas balsas – titrai bus sukurti automatiškai iš kalbos.")
-            language = st.selectbox("Kalbos kalba", ["lt", "en", "ru", "pl", "de"])
+            st.success("🎙️ Įraše aptiktas balsas – kalba bus atpažinta automatiškai.")
+            sub_choice = st.selectbox(
+                "Titrų kalba",
+                ["Lietuvių", "Kaip kalbama video (be vertimo)", "English", "Русский", "Polski", "Deutsch"],
+                help="Jei video kalbama kita kalba, titrai bus išversti.")
+            subtitle_language = {"Lietuvių": "lt", "English": "en", "Русский": "ru", "Polski": "pl",
+                                 "Deutsch": "de"}.get(sub_choice)
         else:
             if speech:
                 st.warning("Įraše yra balsas, bet automatiniam atpažinimui trūksta OPENAI_API_KEY – "
@@ -89,7 +94,7 @@ if uploaded and st.button("🚀 Sumontuoti", type="primary"):
             res = video_editor.auto_edit(
                 src, dst, fmt=fmt, remove_silence=remove_silence, noise_db=noise_db,
                 min_silence=min_silence, padding=padding, loudnorm=loudnorm, fades=fades,
-                subtitles=subtitles, client=client, language=language,
+                subtitles=subtitles, client=client, subtitle_language=subtitle_language,
                 subtitle_text=subtitle_text,
                 status=lambda m: status.info(m), progress=lambda p: bar.progress(p))
         except Exception as e:

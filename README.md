@@ -8,7 +8,8 @@ Paleidimas: `streamlit run main.py` – atsidaro video montažo programa. Pokalb
 - apkarpo į pasirinktą formatą (9:16, 1:1, 16:9 arba originalus),
 - suvienodina garsumą, prideda švelnią pradžią/pabaigą,
 - uždeda animuotus titrus (Montserrat Black, sakomas žodis geltonas):
-  - jei įraše yra **balsas** – kalba atpažįstama automatiškai (OpenAI Whisper, reikia `OPENAI_API_KEY`),
+  - jei įraše yra **balsas** – kalba atpažįstama automatiškai (OpenAI Whisper, reikia `OPENAI_API_KEY`);
+    jei kalbama kita kalba nei pasirinkta titrams (pvz. angliškai), titrai išverčiami (pvz. į lietuvių),
   - jei **balso nėra** – įklijuojate tekstą, ir jis tolygiai išdėliojamas per video.
 
 Pats montažas (kirpimas, formatas, garsas) veikia be jokių API – su ffmpeg.
