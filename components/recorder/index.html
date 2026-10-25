@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --red: #ff4b4b; --text: #31333f; --muted: #6b6f7b; --bg: #f0f2f6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Source Sans Pro", "Source Sans 3", system-ui, sans-serif; color: var(--text); }
+  .box { background: var(--bg); border-radius: 10px; padding: 12px; }
+  video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; display: none; }
+  video.mirror { transform: scaleX(-1); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  button { flex: 1 1 auto; min-height: 44px; font-size: 16px; border-radius: 8px; border: 1px solid #d0d3da;
+           background: #fff; color: var(--text); padding: 8px 12px; cursor: pointer; font-family: inherit; }
+  button.primary { background: var(--red); border-color: var(--red); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  .hidden { display: none !important; }
+  .msg { margin-top: 8px; font-size: 15px; color: var(--muted); }
+  .msg.err { color: #b42318; }
+  .meter { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; color: var(--muted); }
+  .bar { flex: 1; height: 8px; background: #dfe2e8; border-radius: 4px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: #21c354; transition: width .08s; }
+  .rec { color: var(--red); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="box">
+  <video id="live" playsinline muted autoplay></video>
+  <video id="playback" playsinline controls></video>
+  <div id="meterRow" class="meter hidden">🎙️ <div class="bar"><div id="meter"></div></div> <span id="timer"></span></div>
+  <div class="row">
+    <button id="start" class="primary">🎥 Įjungti kamerą</button>
+    <button id="flip" class="hidden">🔄 Kita kamera</button>
+    <button id="rec" class="primary hidden">⏺ Pradėti filmuoti</button>
+    <button id="stop" class="primary hidden">⏹ Baigti</button>
+    <button id="use" class="primary hidden">✅ Naudoti šį įrašą</button>
+    <button id="again" class="hidden">↩️ Filmuoti iš naujo</button>
+  </div>
+  <div id="msg" class="msg">Programa paprašys leidimo naudoti kamerą ir mikrofoną – spauskite „Leisti“.</div>
+</div>
+<script>
+const MAX_SECONDS = 300;
+const $ = id => document.getElementById(id);
+const live = $("live"), playback = $("playback");
+let stream = null, recorder = null, chunks = [], facing = "user", timerId = null, t0 = 0, blob = null, audioCtx = null;
+
+function send(type, extra) {
+  window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, extra), "*");
+}
+function resize() { send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 4}); }
+function show(ids) {
+  ["start", "flip", "rec", "stop", "use", "again"].forEach(id => $(id).classList.toggle("hidden", !ids.includes(id)));
+  resize();
+}
+function say(text, err) { const m = $("msg"); m.textContent = text; m.classList.toggle("err", !!err); resize(); }
+
+window.addEventListener("message", e => { if (e.data && e.data.type === "streamlit:render") resize(); });
+new ResizeObserver(resize).observe(document.body);
+send("streamlit:componentReady", {apiVersion: 1});
+
+function stopStream() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+}
+
+function startMeter(s) {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const an = audioCtx.createAnalyser(); an.fftSize = 512;
+    audioCtx.createMediaStreamSource(s).connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    (function tick() {
+      if (!audioCtx) return;
+      an.getByteTimeDomainData(buf);
+      let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+      $("meter").style.width = Math.min(100, peak / 128 * 250) + "%";
+      requestAnimationFrame(tick);
+    })();
+  } catch (e) { /* garso juostelė neprivaloma */ }
+}
+
+async function openCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+    say("Ši naršyklė neleidžia filmuoti programoje. Atidarykite nuorodą naujausioje Chrome arba Safari " +
+        "(ne per Messenger ar Facebook) arba nufilmuokite video telefono kamera ir įkelkite jį.", true);
+    return;
+  }
+  stopStream();
+  say("Laukiu leidimo naudoti kamerą ir mikrofoną…");
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {facingMode: facing, width: {ideal: 1280}, height: {ideal: 720}},
+      audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}
+    });
+  } catch (e) {
+    const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+    say(denied
+      ? "Kamera ar mikrofonas neleisti. Telefono nustatymuose įjunkite naršyklei (Chrome / Safari) " +
+        "kamerą ir mikrofoną, tada perkraukite puslapį ir bandykite dar kartą."
+      : "Nepavyko įjungti kameros: " + (e && e.message || e), true);
+    show(["start"]);
+    return;
+  }
+  if (!stream.getAudioTracks().length) say("⚠️ Mikrofonas nerastas – video bus be garso.", true);
+  else say("Kamera įjungta. Pakalbėkite – žalia juostelė turi judėti. Tada spauskite „Pradėti filmuoti“.");
+  live.srcObject = stream; live.classList.toggle("mirror", facing === "user");
+  live.style.display = "block"; playback.style.display = "none";
+  $("meterRow").classList.remove("hidden"); $("timer").textContent = "";
+  startMeter(stream);
+  show(["rec", "flip"]);
+}
+
+function pickMime() {
+  const types = ["video/mp4;codecs=avc1,mp4a", "video/mp4", "video/webm;codecs=vp9,opus",
+                 "video/webm;codecs=vp8,opus", "video/webm"];
+  return types.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
+}
+
+function startRecording() {
+  chunks = [];
+  const mime = pickMime();
+  try {
+    recorder = new MediaRecorder(stream, Object.assign({videoBitsPerSecond: 2500000}, mime ? {mimeType: mime} : {}));
+  } catch (e) { say("Nepavyko pradėti filmuoti: " + e.message, true); return; }
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = finishRecording;
+  recorder.start(1000);
+  t0 = Date.now();
+  timerId = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    $("timer").innerHTML = '<span class="rec">● ' + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + "</span>";
+    if (s >= MAX_SECONDS) recorder.stop();
+  }, 250);
+  say("Filmuojama… (iki 5 min.)");
+  show(["stop"]);
+}
+
+function finishRecording() {
+  clearInterval(timerId);
+  blob = new Blob(chunks, {type: recorder.mimeType || chunks[0]?.type || "video/webm"});
+  stopStream();
+  live.style.display = "none"; $("meterRow").classList.add("hidden");
+  playback.src = URL.createObjectURL(blob); playback.style.display = "block";
+  say("Peržiūrėkite įrašą. Jei tinka – spauskite „Naudoti šį įrašą“.");
+  show(["use", "again"]);
+}
+
+function useRecording() {
+  $("use").disabled = true;
+  say("Siunčiu įrašą programai…");
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = String(reader.result);  // data:video/webm;codecs=vp8,opus;base64,....
+    const data = url.slice(url.indexOf("base64,") + 7);
+    send("streamlit:setComponentValue", {dataType: "json",
+      value: {id: Date.now(), mime: blob.type, data}});
+    $("use").disabled = false;
+    say("✅ Įrašas perduotas. Žemiau pasirinkite nustatymus ir spauskite „Sumontuoti“.");
+    show(["again"]);
+  };
+  reader.readAsDataURL(blob);
+}
+
+$("start").onclick = openCamera;
+$("again").onclick = openCamera;
+$("flip").onclick = () => { facing = facing === "user" ? "environment" : "user"; openCamera(); };
+$("rec").onclick = startRecording;
+$("stop").onclick = () => recorder && recorder.state !== "inactive" && recorder.stop();
+$("use").onclick = useRecording;
+show(["start"]);
+</script>
+</body>
+</html>

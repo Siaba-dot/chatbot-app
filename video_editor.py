@@ -40,8 +40,14 @@ def probe(path):
     num, den = (v.get("avg_frame_rate") or "30/1").split("/")
     fps = int(num) / int(den) if int(den) else 30
     fps = min(60, max(15, round(fps))) if fps else 30
+    dur = j["format"].get("duration")
+    if dur in (None, "N/A"):  # pvz. naršyklės WebM įrašai – trukmę sužinom perskaitę failą
+        err = subprocess.run(["ffmpeg", "-hide_banner", "-i", path, "-f", "null", "-"],
+                             capture_output=True, text=True).stderr
+        t = re.findall(r"time=(\d+):(\d+):([\d.]+)", err)
+        dur = int(t[-1][0]) * 3600 + int(t[-1][1]) * 60 + float(t[-1][2]) if t else 0
     return {"width": w, "height": h, "fps": fps,
-            "duration": float(j["format"]["duration"]),
+            "duration": float(dur),
             "has_audio": any(s["codec_type"] == "audio" for s in j["streams"])}
 
 
