@@ -8,6 +8,8 @@ import streamlit.components.v1 as components
 
 import video_editor
 
+APP_VERSION = "11"  # didinama su kiekvienu pakeitimu – matosi puslapio apačioje
+
 # Filmavimas programoje: kamera + mikrofonas per naršyklę (components/recorder/index.html)
 video_recorder = components.declare_component(
     "video_recorder", path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "recorder"))
@@ -234,3 +236,5 @@ if "result" in st.session_state:
     st.video(st.session_state["result"])
     st.download_button("⬇️ Atsisiųsti video", st.session_state["result"],
                        file_name=st.session_state["name"], mime="video/mp4")
+
+st.caption(f"Programos versija: {APP_VERSION}")

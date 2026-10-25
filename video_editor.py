@@ -430,10 +430,7 @@ def denoise_filter(noise=None, loud=None):
     švelniai prislopina likutį (vartai)."""
     noise = -50 if noise is None else noise
     nf = int(max(-80, min(-20, round(noise + 15))))
-    # Negirdimas (~-120 dB) fonas: senesnės ffmpeg versijos (pvz. 5.1 Streamlit Cloud) afftdn filtras
-    # visiškos tylos (lygiai nulio) vietose grąžina NaN, ir AAC koduotojas nutraukia darbą.
-    f = ["highpass=f=80", "aeval=val(ch)+0.000002*(random(0)-0.5):c=same",
-         f"afftdn=nr=25:nf={nf}:tn=1"]
+    f = ["highpass=f=80", f"afftdn=nr=25:nf={nf}:tn=1"]
     if loud is not None and loud - noise >= 10:  # vartai – tik kai kalba aiškiai garsesnė už foną
         thr = max(0.001, min(0.5, 10 ** ((noise + min(8, (loud - noise) * 0.3)) / 20)))
         f.append(f"agate=threshold={thr:.5f}:ratio=2:range=0.25:attack=10:release=250")
@@ -469,12 +466,18 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
     graph = "[0:v]" + ",".join(v) + "[v]"
 
     if info["has_audio"]:
-        a = denoise_filter(analysis and analysis["noise"], analysis and analysis["loud"]) if denoise else []
+        # Pirmiausia aiškus formatas (48 kHz, stereo) – senesnės ffmpeg versijos kitaip nesusitaria dėl
+        # kanalų išdėstymo. Tada negirdimas (~-120 dB) fonas: senesnėse versijose (pvz. 5.1 Streamlit
+        # Cloud) afftdn / loudnorm visiškos tylos (lygiai nulio) vietose grąžina NaN, ir AAC nutraukia darbą.
+        a = ["aresample=48000", "aformat=sample_fmts=fltp:channel_layouts=stereo",
+             "aeval=val(ch)+0.000002*(random(0)-0.5):c=stereo"]
+        if denoise:
+            a += denoise_filter(analysis and analysis["noise"], analysis and analysis["loud"])
         if cut:
             a += [f"aselect='{sel}'", "asetpts=N/SR/TB"]
         if loudnorm:
             a.append("loudnorm=I=-16:TP=-1.5:LRA=11")
-        a.append("aresample=48000")
+        a += ["aresample=48000", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
         if fades and total > 2:
             a += ["afade=t=in:st=0:d=0.3", f"afade=t=out:st={total - 0.5:.3f}:d=0.5"]
         graph += ";[0:a:0]" + ",".join(a) + "[a]"
@@ -618,16 +621,20 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
 
     say("Montuoju video…")
     try:
-        render_args = dict(denoise=denoise and an is not None and an["loud"] > -60, analysis=an,
-                           band=bool(ass_file) and subtitle_style == "training")
-        try:
-            res = render(path, out_path, keep, info, fmt, loudnorm, fades, ass_file, progress, **render_args)
-        except RuntimeError as e:
-            if not render_args["denoise"] or "NaN" not in str(e):
-                raise
-            say("Triukšmo šalinimas nepavyko – montuoju be jo…")  # apsauga senesnėms ffmpeg versijoms
-            render_args["denoise"] = False
-            res = render(path, out_path, keep, info, fmt, loudnorm, fades, ass_file, progress, **render_args)
+        band = bool(ass_file) and subtitle_style == "training"
+        # Bandymai nuo pilno garso apdorojimo iki paprasčiausio: senesnės ffmpeg versijos kartais
+        # garso filtruose grąžina NaN – tada montuojam be jų, kad video vis tiek būtų sukurtas.
+        attempts = [(denoise and an is not None and an["loud"] > -60, loudnorm, fades),
+                    (False, False, fades), (False, False, False)]
+        for n, (dn, ln, fd) in enumerate(attempts):
+            try:
+                res = render(path, out_path, keep, info, fmt, ln, fd, ass_file, progress,
+                             denoise=dn, analysis=an, band=band)
+                break
+            except RuntimeError as e:
+                if "NaN" not in str(e) or n == len(attempts) - 1:
+                    raise
+                say("Garso apdorojimas nepavyko – montuoju paprasčiau…")
     finally:
         if ass_file:
             os.unlink(ass_file)
