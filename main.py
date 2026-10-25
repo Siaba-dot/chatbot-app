@@ -93,9 +93,11 @@ with st.expander("⚙️ Papildomi nustatymai"):
     fades = st.checkbox("Švelni pradžia ir pabaiga (fade)", value=True)
 
 
+clicked = st.button("🚀 Sumontuoti", type="primary", width="stretch", disabled=not uploaded)
 if not uploaded:
-    st.caption("👆 Įkelkite video, tada paspauskite „Sumontuoti“.")
-if uploaded and st.button("🚀 Sumontuoti", type="primary", width="stretch"):
+    st.caption("👆 Pirmiausia viršuje paspauskite „Upload“ ir pasirinkite video. Jei atidarėte "
+               "per Messenger ar Facebook ir įkelti nepavyksta – atidarykite nuorodą Safari arba Chrome.")
+if uploaded and clicked:
     with tempfile.TemporaryDirectory() as tmp:
         dst = os.path.join(tmp, "sumontuota.mp4")
 
