@@ -3,8 +3,9 @@
 Paleidimas: `streamlit run main.py` – atsidaro video montažo programa. Pokalbių robotas – šoniniame meniu (**Chatbot**, jam reikia `OPENAI_API_KEY`).
 
 ## 🎬 Video montažas
-Įkeliate video arba nufilmuojate jį tiesiai programoje („🎥 Filmuoti dabar“ – programa paprašo leidimo
+Įkeliate vieną ar kelis video arba nufilmuojate juos tiesiai programoje („🎥 Filmuoti dabar“ – programa paprašo leidimo
 naudoti kamerą ir mikrofoną, rodo garso lygio juostelę), o programa pati:
+- sujungia kelis video į vieną (tvarką galima keisti, skirtingo dydžio / orientacijos įrašai suvienodinami),
 - iškerpa tylą ir pauzes (jump-cut),
 - apkarpo į pasirinktą formatą (9:16, 1:1, 16:9 arba originalus),
 - pašalina foninį triukšmą (ūžesį, šnypštimą, vėją), suvienodina garsumą, prideda švelnią pradžią/pabaigą,

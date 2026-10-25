@@ -34,7 +34,7 @@
     <button id="flip" class="hidden">🔄 Kita kamera</button>
     <button id="rec" class="primary hidden">⏺ Pradėti filmuoti</button>
     <button id="stop" class="primary hidden">⏹ Baigti</button>
-    <button id="use" class="primary hidden">✅ Naudoti šį įrašą</button>
+    <button id="use" class="primary hidden">✅ Pridėti šį įrašą</button>
     <button id="again" class="hidden">↩️ Filmuoti iš naujo</button>
   </div>
   <div id="msg" class="msg">Programa paprašys leidimo naudoti kamerą ir mikrofoną – spauskite „Leisti“.</div>
@@ -143,7 +143,8 @@ function finishRecording() {
   stopStream();
   live.style.display = "none"; $("meterRow").classList.add("hidden");
   playback.src = URL.createObjectURL(blob); playback.style.display = "block";
-  say("Peržiūrėkite įrašą. Jei tinka – spauskite „Naudoti šį įrašą“.");
+  say("Peržiūrėkite įrašą. Jei tinka – spauskite „Pridėti šį įrašą“.");
+  $("again").textContent = "↩️ Filmuoti iš naujo";
   show(["use", "again"]);
 }
 
@@ -157,7 +158,8 @@ function useRecording() {
     send("streamlit:setComponentValue", {dataType: "json",
       value: {id: Date.now(), mime: blob.type, data}});
     $("use").disabled = false;
-    say("✅ Įrašas perduotas. Žemiau pasirinkite nustatymus ir spauskite „Sumontuoti“.");
+    say("✅ Įrašas pridėtas. Galite nufilmuoti dar vieną arba žemiau spausti „Sumontuoti“.");
+    $("again").textContent = "🎥 Filmuoti kitą įrašą";
     show(["again"]);
   };
   reader.readAsDataURL(blob);
