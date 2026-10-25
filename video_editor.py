@@ -343,7 +343,8 @@ def training_band(width, height):
 
 
 def group_lines(words, max_chars=80, max_dur=6.0, max_gap=0.8):
-    """Mokymų titrams: ilgesnės frazės (iki 2 eilučių), skaidoma ties sakinių pabaiga ir pauzėmis."""
+    """Mokymų titrams: ilgesnės frazės (iki 2 eilučių). Eilutė visada baigiasi sakinio pabaigoje,
+    ilgi sakiniai skaidomi ties kableliu, o jei jo nėra – ties ilgio riba."""
     out, cur = [], []
     for w in words:
         length = len(" ".join(x[0] for x in cur + [w]))
@@ -351,7 +352,8 @@ def group_lines(words, max_chars=80, max_dur=6.0, max_gap=0.8):
             out.append(cur)
             cur = []
         cur.append(w)
-        if re.search(r"[.!?…]$", w[0]) and len(" ".join(x[0] for x in cur)) >= 25:
+        text = " ".join(x[0] for x in cur)
+        if re.search(r"[.!?…]$", w[0]) or (re.search(r"[,;:–]$", w[0]) and len(text) >= 40):
             out.append(cur)
             cur = []
     if cur:
