@@ -83,17 +83,77 @@ def has_speech(path, info=None, noise_db=-35, min_speech=1.0):
 
 # ---------- Titrai ----------
 
-def transcribe(path, client, language="lt"):
-    """Atpažįsta kalbą per OpenAI Whisper. Grąžina [(žodis, pradžia, pabaiga)]."""
+LANGUAGES = {"lt": "Lithuanian", "en": "English", "ru": "Russian", "pl": "Polish",
+             "de": "German", "lv": "Latvian", "uk": "Ukrainian", "fr": "French", "es": "Spanish"}
+TRANSLATE_MODELS = ("gpt-4.1-mini", "gpt-4o-mini")
+
+
+def transcribe(path, client, language=None):
+    """Atpažįsta kalbą per OpenAI Whisper (kalba nustatoma automatiškai, jei nenurodyta).
+
+    Grąžina (žodžiai [(žodis, pradžia, pabaiga)], sakiniai [(tekstas, pradžia, pabaiga)],
+    atpažinta kalba – pvz. "english").
+    """
     with tempfile.TemporaryDirectory() as tmp:
         audio = os.path.join(tmp, "audio.mp3")
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vn", "-ac", "1",
                         "-ar", "16000", "-b:a", "48k", audio], check=True)
+        kw = {"language": language} if language else {}
         with open(audio, "rb") as f:
             res = client.audio.transcriptions.create(
-                model="whisper-1", file=f, language=language or None,
-                response_format="verbose_json", timestamp_granularities=["word"])
-    return [(w.word.strip(), float(w.start), float(w.end)) for w in (res.words or []) if w.word.strip()]
+                model="whisper-1", file=f, response_format="verbose_json",
+                timestamp_granularities=["word", "segment"], **kw)
+    words = [(w.word.strip(), float(w.start), float(w.end)) for w in (res.words or []) if w.word.strip()]
+    segments = [(sg.text.strip(), float(sg.start), float(sg.end))
+                for sg in (res.segments or []) if sg.text.strip()]
+    return words, segments, (getattr(res, "language", "") or "").lower()
+
+
+def same_language(code, detected):
+    detected = (detected or "").lower()
+    return detected in (code, LANGUAGES.get(code, "").lower())
+
+
+def translate_lines(client, lines, target, model=None):
+    """Išverčia titrų eilutes į kalbą `target` (kodas, pvz. "lt"), išlaikant eilučių skaičių."""
+    lang = LANGUAGES.get(target, target)
+    prompt = (f"Translate these video subtitle lines into {lang}. Use natural, grammatically correct "
+              f"{lang} with correct diacritics, short enough for subtitles. Use the surrounding lines "
+              "as context, but keep exactly one translated line per input line, in the same order. "
+              'Reply only with JSON: {"translations": ["...", ...]}')
+    models = ([model] if model else []) + [m for m in TRANSLATE_MODELS if m != model]
+    out = []
+    for i in range(0, len(lines), 40):
+        batch = lines[i:i + 40]
+        last_err = None
+        for m in models:
+            try:
+                r = client.chat.completions.create(
+                    model=m, temperature=0.2, response_format={"type": "json_object"},
+                    messages=[{"role": "system", "content": prompt},
+                              {"role": "user", "content": json.dumps(batch, ensure_ascii=False)}])
+                tr = json.loads(r.choices[0].message.content).get("translations", [])
+                break
+            except Exception as e:  # modelis nepasiekiamas – bandom kitą
+                last_err = e
+        else:
+            raise RuntimeError(f"Nepavyko išversti titrų: {last_err}")
+        if len(tr) != len(batch):  # retas atvejis – verčiam po vieną eilutę
+            tr = [translate_lines(client, [line], target, m)[0] for line in batch] if len(batch) > 1 \
+                else [" ".join(map(str, tr))]
+        out += [str(t) for t in tr]
+    return out
+
+
+def translated_words(segments, translations, words):
+    """Išdėlioja išverstus sakinius per tą laiką, kai originale buvo kalbama."""
+    out = []
+    for (_, a, b), text in zip(segments, translations):
+        inside = [w for w in words if a <= (w[1] + w[2]) / 2 <= b]
+        if inside:
+            a, b = inside[0][1], inside[-1][2]
+        out += align_text(text, [(a, max(b, a + 0.3))])
+    return out
 
 
 def remap_words(words, keep):
@@ -299,11 +359,14 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
 
 def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=-35, min_silence=0.5,
               padding=0.15, loudnorm=True, fades=True, subtitles=False, client=None,
-              language="lt", subtitle_text="", ypos=0.67, status=None, progress=None):
+              language=None, subtitle_language="lt", subtitle_text="", ypos=0.67,
+              translate_model=None, status=None, progress=None):
     """Visas automatinis montažas vienu kvietimu. Grąžina santrauką (dict).
 
     Titrai: jei įraše yra balsas – atpažįstami automatiškai (reikia OpenAI kliento);
-    jei balso nėra – naudojamas subtitle_text, tolygiai išdėliotas per visą video.
+    language – kalbama kalba (None = nustatyti automatiškai), subtitle_language – titrų
+    kalba (None = kaip kalbama; kitaip išverčiama). Jei balso nėra – naudojamas
+    subtitle_text, tolygiai išdėliotas per visą video.
     """
     say = status or (lambda msg: None)
     say("Analizuoju video…")
@@ -319,8 +382,15 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=-35,
         speech = has_speech(path, info, noise_db)
         if speech and client is not None:
             say("Atpažįstu balsą titrams…")
-            words = remap_words(transcribe(path, client, language), keep)
+            words, segments, detected = transcribe(path, client, language)
             sub_mode = "voice"
+            if subtitle_language and segments and not same_language(subtitle_language, detected):
+                say("Verčiu titrus…")
+                tr = translate_lines(client, [t for t, _, _ in segments], subtitle_language,
+                                     translate_model)
+                words = translated_words(segments, tr, words)
+                sub_mode = "translated"
+            words = remap_words(words, keep)
         elif subtitle_text.strip():
             say("Dėlioju titrus…")
             segs = [(0.0, info["duration"])]
@@ -361,7 +431,8 @@ if __name__ == "__main__":
     ap.add_argument("--subtitles", action="store_true",
                     help="Titrai: balsas atpažįstamas per OpenAI (reikia OPENAI_API_KEY)")
     ap.add_argument("--text", metavar="FILE", help="Tekstas titrams, jei įraše nėra balso")
-    ap.add_argument("--language", default="lt")
+    ap.add_argument("--language", default=None, help="Kalbama kalba (numatytai – automatiškai)")
+    ap.add_argument("--subtitle-language", default="lt", help="Titrų kalba ('orig' – kaip kalbama)")
     a = ap.parse_args()
     text = open(a.text, encoding="utf-8").read() if a.text else ""
     cl = None
@@ -370,5 +441,6 @@ if __name__ == "__main__":
         cl = openai.OpenAI()
     r = auto_edit(a.input, a.output, a.format, not a.keep_silence, a.noise_db, a.min_silence,
                   a.padding, not a.no_loudnorm, not a.no_fades, a.subtitles or bool(text), cl,
-                  a.language, text, status=print)
+                  a.language, None if a.subtitle_language == "orig" else a.subtitle_language,
+                  text, status=print)
     print(f"Gatava: {r['original_duration']:.1f}s -> {r['duration']:.1f}s, kirpimų: {r['cuts']}")

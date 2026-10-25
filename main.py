@@ -28,27 +28,57 @@ def saved_upload(uploaded):
         old = st.session_state.get("upload_path")
         if old and os.path.exists(old):
             os.unlink(old)
-        fd, path = tempfile.mkstemp(suffix=os.path.splitext(uploaded.name)[1].lower())
+        fd, path = tempfile.mkstemp(suffix=os.path.splitext(uploaded.name)[1].lower() or ".mp4")
         with os.fdopen(fd, "wb") as f:
             f.write(uploaded.getbuffer())
         with st.spinner("Tikrinu įrašą…"):
-            st.session_state["upload_speech"] = video_editor.has_speech(path)
-        st.session_state.update(upload_id=uploaded.file_id, upload_path=path)
+            try:
+                video_editor.probe(path)
+                speech = video_editor.has_speech(path)
+            except Exception:
+                speech = None  # ne video failas
+        st.session_state.update(upload_id=uploaded.file_id, upload_path=path, upload_speech=speech)
     return st.session_state["upload_path"], st.session_state["upload_speech"]
 
 
-uploaded = st.file_uploader("Įkelkite video", type=["mp4", "mov", "m4v", "avi", "mkv", "webm"])
+# Be failų tipų apribojimo: telefonuose (ypač iPhone) apribojimas neleidžia pasirinkti
+# video iš galerijos. Ar tai tikrai video, patikrinama po įkėlimo.
+uploaded = st.file_uploader("Įkelkite video", help="Telefone galite pasirinkti video iš galerijos.")
 src, speech = saved_upload(uploaded) if uploaded else (None, False)
+if uploaded and speech is None:
+    st.error("Šio failo nepavyko atidaryti kaip video. Įkelkite video failą (pvz. MP4 arba MOV).")
+    uploaded = None
 client = openai_client()
 
-with st.expander("⚙️ Nustatymai", expanded=True):
-    fmt_label = st.radio(
-        "Formatas",
-        ["Originalus", "Vertikalus 9:16 (TikTok, Reels, Shorts)", "Kvadratas 1:1", "Horizontalus 16:9"],
-        horizontal=False)
-    fmt = {"Originalus": "original", "Kvadratas 1:1": "1:1",
-           "Horizontalus 16:9": "16:9"}.get(fmt_label, "9:16")
+fmt_label = st.radio(
+    "Formatas",
+    ["Originalus", "Vertikalus 9:16 (TikTok, Reels, Shorts)", "Kvadratas 1:1", "Horizontalus 16:9"])
+fmt = {"Originalus": "original", "Kvadratas 1:1": "1:1",
+       "Horizontalus 16:9": "16:9"}.get(fmt_label, "9:16")
 
+subtitles = st.checkbox("Pridėti animuotus titrus", value=True)
+subtitle_text, subtitle_language = "", "lt"
+if subtitles and uploaded:
+    if speech and client:
+        st.success("🎙️ Įraše aptiktas balsas – kalba bus atpažinta automatiškai.")
+        sub_choice = st.selectbox(
+            "Titrų kalba",
+            ["Lietuvių", "Kaip kalbama video (be vertimo)", "English", "Русский", "Polski", "Deutsch"],
+            help="Jei video kalbama kita kalba, titrai bus išversti.")
+        subtitle_language = {"Lietuvių": "lt", "English": "en", "Русский": "ru", "Polski": "pl",
+                             "Deutsch": "de"}.get(sub_choice)
+    else:
+        if speech:
+            st.warning("Įraše yra balsas, bet automatiniam atpažinimui trūksta OPENAI_API_KEY – "
+                       "įklijuokite tekstą rankiniu būdu.")
+        else:
+            st.info("🔇 Įraše balso nėra – įklijuokite tekstą, kurį norite matyti titruose.")
+        subtitle_text = st.text_area(
+            "Titrų tekstas",
+            placeholder="Pvz.: Naujas sezonas jau prasidėjo! Užsuk ir išbandyk.",
+            help="Tekstas bus suskirstytas į trumpas frazes ir tolygiai išdėliotas per video.")
+
+with st.expander("⚙️ Papildomi nustatymai"):
     remove_silence = st.checkbox("Iškirpti tylą ir pauzes", value=True)
     col1, col2 = st.columns(2)
     min_silence = col1.slider("Trumpiausia iškerpama pauzė (s)", 0.2, 2.0, 0.5, 0.1,
@@ -62,24 +92,10 @@ with st.expander("⚙️ Nustatymai", expanded=True):
     loudnorm = st.checkbox("Suvienodinti garsumą", value=True)
     fades = st.checkbox("Švelni pradžia ir pabaiga (fade)", value=True)
 
-    subtitles = st.checkbox("Pridėti animuotus titrus", value=True)
-    subtitle_text, language = "", "lt"
-    if subtitles and uploaded:
-        if speech and client:
-            st.success("🎙️ Įraše aptiktas balsas – titrai bus sukurti automatiškai iš kalbos.")
-            language = st.selectbox("Kalbos kalba", ["lt", "en", "ru", "pl", "de"])
-        else:
-            if speech:
-                st.warning("Įraše yra balsas, bet automatiniam atpažinimui trūksta OPENAI_API_KEY – "
-                           "įklijuokite tekstą rankiniu būdu.")
-            else:
-                st.info("🔇 Įraše balso nėra – įklijuokite tekstą, kurį norite matyti titruose.")
-            subtitle_text = st.text_area(
-                "Titrų tekstas",
-                placeholder="Pvz.: Naujas sezonas jau prasidėjo! Užsuk ir išbandyk.",
-                help="Tekstas bus suskirstytas į trumpas frazes ir tolygiai išdėliotas per video.")
 
-if uploaded and st.button("🚀 Sumontuoti", type="primary"):
+if not uploaded:
+    st.caption("👆 Įkelkite video, tada paspauskite „Sumontuoti“.")
+if uploaded and st.button("🚀 Sumontuoti", type="primary", width="stretch"):
     with tempfile.TemporaryDirectory() as tmp:
         dst = os.path.join(tmp, "sumontuota.mp4")
 
@@ -89,7 +105,7 @@ if uploaded and st.button("🚀 Sumontuoti", type="primary"):
             res = video_editor.auto_edit(
                 src, dst, fmt=fmt, remove_silence=remove_silence, noise_db=noise_db,
                 min_silence=min_silence, padding=padding, loudnorm=loudnorm, fades=fades,
-                subtitles=subtitles, client=client, language=language,
+                subtitles=subtitles, client=client, subtitle_language=subtitle_language,
                 subtitle_text=subtitle_text,
                 status=lambda m: status.info(m), progress=lambda p: bar.progress(p))
         except Exception as e:
