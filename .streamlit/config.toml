@@ -1,0 +1,7 @@
+[server]
+# Telefonuose (ypač iPhone Safari) Streamlit Cloud blokuoja įkėlimą dėl XSRF slapukų
+# – be šio nustatymo video įkėlimas telefone tyliai nepavyksta.
+enableXsrfProtection = false
+enableCORS = false
+# Telefonu filmuoti video būna dideli (MB)
+maxUploadSize = 400
