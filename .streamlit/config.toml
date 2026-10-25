@@ -5,3 +5,6 @@ enableXsrfProtection = false
 enableCORS = false
 # Telefonu filmuoti video būna dideli (MB)
 maxUploadSize = 400
+
+[browser]
+gatherUsageStats = false

@@ -1,9 +1,16 @@
+import base64
 import os
+import subprocess
 import tempfile
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import video_editor
+
+# Filmavimas programoje: kamera + mikrofonas per naršyklę (components/recorder/index.html)
+video_recorder = components.declare_component(
+    "video_recorder", path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "recorder"))
 
 st.set_page_config(page_title="Video montažas", page_icon="🎬")
 st.title("🎬 Automatinis video montažas")
@@ -22,29 +29,46 @@ def openai_client():
     return openai.OpenAI(api_key=key)
 
 
-def saved_upload(uploaded):
-    """Įkeltą failą išsaugo laikinai vieną kartą ir patikrina, ar jame yra balsas."""
-    if st.session_state.get("upload_id") != uploaded.file_id:
+def saved_source(source_id, ext, data):
+    """Video (įkeltą ar nufilmuotą) išsaugo laikinai vieną kartą ir patikrina, ar jame yra balsas."""
+    if st.session_state.get("upload_id") != source_id:
         old = st.session_state.get("upload_path")
         if old and os.path.exists(old):
             os.unlink(old)
-        fd, path = tempfile.mkstemp(suffix=os.path.splitext(uploaded.name)[1].lower() or ".mp4")
+        fd, path = tempfile.mkstemp(suffix=ext)
         with os.fdopen(fd, "wb") as f:
-            f.write(uploaded.getbuffer())
+            f.write(data())
+        if source_id.startswith("rec-"):
+            # Naršyklės įrašuose (ypač WebM) dažnai trūksta trukmės – perpakuojam į MKV be perkodavimo.
+            mkv = path + ".mkv"
+            if subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-c", "copy", mkv]).returncode == 0:
+                os.unlink(path)
+                path = mkv
         with st.spinner("Tikrinu įrašą…"):
             try:
                 state, an = video_editor.audio_status(path)
                 audio = (state, an and {k: an[k] for k in ("noise", "loud")})
             except Exception:
                 audio = None  # ne video failas
-        st.session_state.update(upload_id=uploaded.file_id, upload_path=path, upload_audio=audio)
+        st.session_state.update(upload_id=source_id, upload_path=path, upload_audio=audio)
     return st.session_state["upload_path"], st.session_state["upload_audio"]
 
 
-# Be failų tipų apribojimo: telefonuose (ypač iPhone) apribojimas neleidžia pasirinkti
-# video iš galerijos. Ar tai tikrai video, patikrinama po įkėlimo.
-uploaded = st.file_uploader("Įkelkite video", help="Telefone galite pasirinkti video iš galerijos.")
-src, audio = saved_upload(uploaded) if uploaded else (None, ("none", None))
+source = st.radio("Video", ["📁 Įkelti video", "🎥 Filmuoti dabar"], horizontal=True,
+                  label_visibility="collapsed")
+uploaded = None
+if source.startswith("📁"):
+    # Be failų tipų apribojimo: telefonuose (ypač iPhone) apribojimas neleidžia pasirinkti
+    # video iš galerijos. Ar tai tikrai video, patikrinama po įkėlimo.
+    file = st.file_uploader("Įkelkite video", help="Telefone galite pasirinkti video iš galerijos.")
+    if file:
+        uploaded = (file.file_id, os.path.splitext(file.name)[1].lower() or ".mp4", file.getvalue, file.name)
+else:
+    rec = video_recorder(key="recorder", default=None)
+    if rec and rec.get("data"):
+        ext = ".mp4" if "mp4" in (rec.get("mime") or "") else ".webm"
+        uploaded = (f"rec-{rec['id']}", ext, lambda: base64.b64decode(rec["data"]), "irasas")
+src, audio = saved_source(*uploaded[:3]) if uploaded else (None, ("none", None))
 if uploaded and audio is None:
     st.error("Šio failo nepavyko atidaryti kaip video. Įkelkite video failą (pvz. MP4 arba MOV).")
     uploaded, audio = None, ("none", None)
@@ -120,8 +144,8 @@ with st.expander("⚙️ Papildomi nustatymai"):
 
 clicked = st.button("🚀 Sumontuoti", type="primary", width="stretch", disabled=not uploaded)
 if not uploaded:
-    st.caption("👆 Pirmiausia viršuje paspauskite „Upload“ ir pasirinkite video. Jei atidarėte "
-               "per Messenger ar Facebook ir įkelti nepavyksta – atidarykite nuorodą Safari arba Chrome.")
+    st.caption("👆 Pirmiausia viršuje įkelkite video („Upload“) arba nufilmuokite jį („Filmuoti dabar“). "
+               "Jei atidarėte per Messenger ar Facebook ir nepavyksta – atidarykite nuorodą Safari arba Chrome.")
 if uploaded and clicked:
     with tempfile.TemporaryDirectory() as tmp:
         dst = os.path.join(tmp, "sumontuota.mp4")
@@ -149,7 +173,7 @@ if uploaded and clicked:
         with open(dst, "rb") as f:
             st.session_state["result"] = f.read()
         st.session_state["summary"] = res
-        st.session_state["name"] = os.path.splitext(uploaded.name)[0] + "_sumontuota.mp4"
+        st.session_state["name"] = os.path.splitext(uploaded[3])[0] + "_sumontuota.mp4"
 
 if "result" in st.session_state:
     res = st.session_state["summary"]
