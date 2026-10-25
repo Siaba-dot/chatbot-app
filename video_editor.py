@@ -1,4 +1,4 @@
-"""Automatinis video montažas: iškerpa tylą/pauzes, sutvarko formatą, garsą
+"""Automatinis video montažas: iškerpa tylą/pauzes, pašalina foninį triukšmą, sutvarko formatą, garsą
 ir (pasirinktinai) uždeda modernius animuotus titrus.
 Montažas daromas vietoje su ffmpeg; balso atpažinimui titrams naudojamas OpenAI Whisper.
 
@@ -13,8 +13,12 @@ import re
 import subprocess
 import tempfile
 
+import numpy as np
+
 FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 FONT_NAME = "Montserrat Black"
+TRAINING_FONT = "Montserrat SemiBold"
+SUBTITLE_STYLES = ("modern", "training")
 
 FORMATS = {"original": None, "9:16": 9 / 16, "1:1": 1.0, "16:9": 16 / 9}
 
@@ -41,14 +45,50 @@ def probe(path):
             "has_audio": any(s["codec_type"] == "audio" for s in j["streams"])}
 
 
-def detect_silences(path, noise_db=-35, min_silence=0.5):
-    err = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-i", path, "-map", "0:a:0",
-         "-af", f"silencedetect=n={noise_db}dB:d={min_silence}", "-f", "null", "-"],
-        capture_output=True, text=True).stderr
-    starts = [float(x) for x in re.findall(r"silence_start: (-?[\d.]+)", err)]
-    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", err)]
-    return [(max(0.0, s), ends[i] if i < len(ends) else None) for i, s in enumerate(starts)]
+FRAME = 0.03  # s – garso analizės langas
+
+
+def _frame_levels(path):
+    """Garsumas (dB) kas FRAME sekundžių. Tuščias masyvas, jei garso nėra arba jo nepavyko perskaityti."""
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", "0:a:0", "-ac", "1", "-ar", "16000",
+                          "-f", "s16le", "-"], capture_output=True).stdout
+    x = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768
+    n = int(16000 * FRAME)
+    if len(x) < n:
+        return np.array([])
+    x = x[:len(x) // n * n].reshape(-1, n)
+    return 20 * np.log10(np.sqrt((x ** 2).mean(axis=1)) + 1e-6)
+
+
+def analyze_audio(path):
+    """Išmatuoja foninio triukšmo ir kalbos lygį. Grąžina dict arba None, jei garso nėra."""
+    lv = _frame_levels(path)
+    if not len(lv):
+        return None
+    noise, loud = float(np.percentile(lv, 10)), float(np.percentile(lv, 95))
+    contrast = loud - noise
+    # Riba tarp triukšmo ir kalbos; kai skirtumas mažas – arti triukšmo lygio.
+    threshold = noise + (contrast * 0.35 if contrast >= 10 else 3)
+    voiced = float((lv > threshold).sum() * FRAME)
+    return {"levels": lv, "noise": noise, "loud": loud, "threshold": threshold,
+            "speech": contrast >= 10 and loud > -65 and voiced >= 0.5}
+
+
+def detect_silences(path, noise_db=None, min_silence=0.5, analysis=None):
+    """Tylos intervalai [(pradžia, pabaiga)]. noise_db=None – riba parenkama pagal įrašą."""
+    an = analysis or analyze_audio(path)
+    if an is None:
+        return []
+    quiet = an["levels"] <= (an["threshold"] if noise_db is None else noise_db)
+    out, start = [], None
+    for i, q in enumerate(np.append(quiet, False)):
+        if q and start is None:
+            start = i
+        elif not q and start is not None:
+            if (i - start) * FRAME >= min_silence:
+                out.append((start * FRAME, i * FRAME))
+            start = None
+    return out
 
 
 def keep_segments(duration, silences, padding=0.15, min_keep=0.2):
@@ -71,14 +111,18 @@ def keep_segments(duration, silences, padding=0.15, min_keep=0.2):
     return [(a, b) for a, b in merged if b - a >= min_keep] or [(0.0, duration)]
 
 
-def has_speech(path, info=None, noise_db=-35, min_speech=1.0):
-    """Ar įraše yra balsas (garsas, kurio bendra trukmė virš tylos ribos ≥ min_speech s)."""
+def audio_status(path, info=None, analysis=None):
+    """'none' – nėra garso, 'silent' – garsas yra, bet balso neaptikta, 'speech' – yra balsas.
+    Grąžina (būsena, analizė)."""
     info = info or probe(path)
-    if not info["has_audio"]:
-        return False
-    silences = detect_silences(path, noise_db, 0.3)
-    silent = sum((info["duration"] if e is None else e) - s for s, e in silences)
-    return info["duration"] - silent >= min_speech
+    an = analysis or (analyze_audio(path) if info["has_audio"] else None)
+    if an is None:
+        return "none", None
+    return ("speech" if an["speech"] else "silent"), an
+
+
+def has_speech(path, info=None):
+    return audio_status(path, info)[0] == "speech"
 
 
 # ---------- Titrai ----------
@@ -286,6 +330,57 @@ def build_ass(words, width, height, ypos=0.67):
     return "\n".join(lines) + "\n"
 
 
+def training_band(width, height):
+    """Mokymų titrų juostos po vaizdu dydis: (šrifto dydis, juostos aukštis) px."""
+    fsize = max(20, round(min(width, height) * 0.06))
+    return fsize, int(fsize * 3.6) // 2 * 2  # 2 eilutės + paraštės
+
+
+def group_lines(words, max_chars=80, max_dur=6.0, max_gap=0.8):
+    """Mokymų titrams: ilgesnės frazės (iki 2 eilučių), skaidoma ties sakinių pabaiga ir pauzėmis."""
+    out, cur = [], []
+    for w in words:
+        length = len(" ".join(x[0] for x in cur + [w]))
+        if cur and (length > max_chars or w[2] - cur[0][1] > max_dur or w[1] - cur[-1][2] > max_gap):
+            out.append(cur)
+            cur = []
+        cur.append(w)
+        if re.search(r"[.!?…]$", w[0]) and len(" ".join(x[0] for x in cur)) >= 25:
+            out.append(cur)
+            cur = []
+    if cur:
+        out.append(cur)
+    return out
+
+
+def build_ass_training(words, width, height, band):
+    """Mokymų titrai: įprastas šriftas, be animacijos, juodoje juostoje po vaizdu (vaizdo neuždengia)."""
+    fsize, _ = training_band(width, height - band)
+    margin = round(width * 0.04)
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
+        "WrapStyle: 0", "ScaledBorderAndShadow: yes", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
+        "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Default,{TRAINING_FONT},{fsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
+        f"0,0,0,0,100,100,0,0,1,0,0,5,{margin},{margin},0,1",
+        "", "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    pos = f"{{\\an5\\pos({width // 2},{height - band // 2})}}"
+    groups = group_lines(words)
+    for gi, g in enumerate(groups):
+        a = g[0][1]
+        b = max(g[-1][2] + 0.5, a + 1.0)
+        if gi + 1 < len(groups):
+            b = min(b, groups[gi + 1][0][1])
+        text = _ass_escape(" ".join(w[0] for w in g))
+        lines.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,{pos}{text}")
+    return "\n".join(lines) + "\n"
+
+
 # ---------- Montažas ----------
 
 def _out_size(w, h, ratio, max_side=1920):
@@ -298,15 +393,38 @@ def _out_size(w, h, ratio, max_side=1920):
     return int(w * k) // 2 * 2, int(h * k) // 2 * 2
 
 
+def frame_size(w, h, fmt="original", band=False):
+    """Galutinis kadro dydis ir mokymų titrų juostos aukštis: (plotis, aukštis, juosta).
+    Fiksuotame formate juosta įsiterpia į kadrą (vaizdas sumažinamas), originaliame – pridedama apačioje."""
+    ow, oh = _out_size(w, h, FORMATS.get(fmt))
+    if not band:
+        return ow, oh, 0
+    b = training_band(ow, oh)[1]
+    return (ow, oh, b) if FORMATS.get(fmt) else (ow, oh + b, b)
+
+
 def _filter_path(p):
     return p.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
 
+def denoise_filter(noise=None, loud=None):
+    """Foninio triukšmo šalinimas pagal išmatuotą fono lygį: nukerpa žemą ūžesį (vėjas, eismas),
+    FFT slopinimu sumažina pastovų foną (šnypštimas, ventiliacija), o tarpuose tarp žodžių
+    švelniai prislopina likutį (vartai)."""
+    noise = -50 if noise is None else noise
+    nf = int(max(-80, min(-20, round(noise + 15))))
+    f = ["highpass=f=80", f"afftdn=nr=25:nf={nf}:tn=1"]
+    if loud is not None and loud - noise >= 10:  # vartai – tik kai kalba aiškiai garsesnė už foną
+        thr = max(0.001, min(0.5, 10 ** ((noise + min(8, (loud - noise) * 0.3)) / 20)))
+        f.append(f"agate=threshold={thr:.5f}:ratio=2:range=0.25:attack=10:release=250")
+    return f
+
+
 def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True,
-           ass_file=None, progress=None):
+           ass_file=None, progress=None, denoise=False, analysis=None, band=False):
     w, h = info["width"], info["height"]
     ratio = FORMATS.get(fmt)
-    ow, oh = _out_size(w, h, ratio)
+    ow, oh, bh = frame_size(w, h, fmt, band)
     total = sum(b - a for a, b in keep)
     cut = not (len(keep) == 1 and keep[0][0] <= 0.01 and keep[0][1] >= info["duration"] - 0.01)
     sel = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in keep)
@@ -316,7 +434,14 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
         v += [f"select='{sel}'", "setpts=N/FRAME_RATE/TB"]
     if ratio:
         v.append(f"crop='min(iw,ih*{ratio:.6f})':'min(ih,iw/{ratio:.6f})'")
-    v += [f"scale={ow}:{oh}", "setsar=1"]
+    if bh and ratio:  # vaizdas sumažinamas, kad po juo tilptų titrų juosta
+        v += [f"scale={ow}:{oh - bh}:force_original_aspect_ratio=decrease:force_divisible_by=2",
+              f"pad={ow}:{oh}:(ow-iw)/2:({oh - bh}-ih)/2:black"]
+    elif bh:  # originalus formatas – juosta pridedama apačioje
+        v += [f"scale={ow}:{oh - bh}", f"pad={ow}:{oh}:0:0:black"]
+    else:
+        v.append(f"scale={ow}:{oh}")
+    v.append("setsar=1")
     if fades and total > 2:
         v += ["fade=t=in:st=0:d=0.4", f"fade=t=out:st={total - 0.5:.3f}:d=0.5"]
     if ass_file:
@@ -324,7 +449,7 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
     graph = "[0:v]" + ",".join(v) + "[v]"
 
     if info["has_audio"]:
-        a = []
+        a = denoise_filter(analysis and analysis["noise"], analysis and analysis["loud"]) if denoise else []
         if cut:
             a += [f"aselect='{sel}'", "asetpts=N/SR/TB"]
         if loudnorm:
@@ -357,30 +482,35 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
     return {"duration": total, "width": ow, "height": oh}
 
 
-def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=-35, min_silence=0.5,
-              padding=0.15, loudnorm=True, fades=True, subtitles=False, client=None,
-              language=None, subtitle_language="lt", subtitle_text="", ypos=0.67,
-              translate_model=None, status=None, progress=None):
+def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None, min_silence=0.5,
+              padding=0.15, loudnorm=True, fades=True, denoise=True, subtitles=False, client=None,
+              language=None, subtitle_language="lt", subtitle_text="", subtitle_style="modern",
+              ypos=0.67, translate_model=None, status=None, progress=None):
     """Visas automatinis montažas vienu kvietimu. Grąžina santrauką (dict).
 
     Titrai: jei įraše yra balsas – atpažįstami automatiškai (reikia OpenAI kliento);
     language – kalbama kalba (None = nustatyti automatiškai), subtitle_language – titrų
     kalba (None = kaip kalbama; kitaip išverčiama). Jei balso nėra – naudojamas
-    subtitle_text, tolygiai išdėliotas per visą video.
+    subtitle_text, tolygiai išdėliotas per visą video. subtitle_style: "modern" – animuoti
+    titrai vaizdo viduryje, "training" – mokymų titrai juodoje juostoje po vaizdu.
     """
     say = status or (lambda msg: None)
     say("Analizuoju video…")
     info = probe(path)
+    status_, an = audio_status(path, info)
     keep = [(0.0, info["duration"])]
-    if remove_silence and info["has_audio"]:
+    if remove_silence and an is not None:
         say("Ieškau tylos ir pauzių…")
-        keep = keep_segments(info["duration"], detect_silences(path, noise_db, min_silence), padding)
+        keep = keep_segments(info["duration"], detect_silences(path, noise_db, min_silence, an), padding)
 
     ass_file, n_words, sub_mode = None, 0, None
     if subtitles:
         words = []
-        speech = has_speech(path, info, noise_db)
-        if speech and client is not None:
+        speech = status_ == "speech"
+        # Jei girdimas garsas yra, bet balso neaptikome ir teksto neįvesta – vis tiek bandom atpažinti
+        # (visiškos tylos Whisper'iui nesiunčiam – jis tada „prigalvoja“ teksto).
+        audible = an is not None and an["loud"] > -60
+        if client is not None and audible and (speech or not subtitle_text.strip()):
             say("Atpažįstu balsą titrams…")
             words, segments, detected = transcribe(path, client, language)
             sub_mode = "voice"
@@ -395,19 +525,22 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=-35,
             say("Dėlioju titrus…")
             segs = [(0.0, info["duration"])]
             if speech:  # balsas yra, bet atpažinti negalima – derinam prie kalbos intervalų
-                segs = keep_segments(info["duration"], detect_silences(path, noise_db, 0.25), 0.0, 0.05)
+                segs = keep_segments(info["duration"], detect_silences(path, noise_db, 0.25, an), 0.0, 0.05)
             words = align_text(subtitle_text, remap_segments(segs, keep))
             sub_mode = "text"
         n_words = len(words)
         if words:
-            w, h = _out_size(info["width"], info["height"], FORMATS.get(fmt))
+            training = subtitle_style == "training"
+            w, h, bh = frame_size(info["width"], info["height"], fmt, training)
             with tempfile.NamedTemporaryFile("w", suffix=".ass", delete=False, encoding="utf-8") as f:
-                f.write(build_ass(words, w, h, ypos))
+                f.write(build_ass_training(words, w, h, bh) if training else build_ass(words, w, h, ypos))
                 ass_file = f.name
 
     say("Montuoju video…")
     try:
-        res = render(path, out_path, keep, info, fmt, loudnorm, fades, ass_file, progress)
+        res = render(path, out_path, keep, info, fmt, loudnorm, fades, ass_file, progress,
+                     denoise=denoise and an is not None, analysis=an,
+                     band=bool(ass_file) and subtitle_style == "training")
     finally:
         if ass_file:
             os.unlink(ass_file)
@@ -423,7 +556,8 @@ if __name__ == "__main__":
     ap.add_argument("output")
     ap.add_argument("--format", default="original", choices=list(FORMATS))
     ap.add_argument("--keep-silence", action="store_true", help="Neiškirpti tylos")
-    ap.add_argument("--noise-db", type=float, default=-35)
+    ap.add_argument("--noise-db", type=float, default=None, help="Tylos riba (numatytai – automatiškai)")
+    ap.add_argument("--no-denoise", action="store_true", help="Nešalinti foninio triukšmo")
     ap.add_argument("--min-silence", type=float, default=0.5)
     ap.add_argument("--padding", type=float, default=0.15)
     ap.add_argument("--no-loudnorm", action="store_true")
@@ -431,6 +565,8 @@ if __name__ == "__main__":
     ap.add_argument("--subtitles", action="store_true",
                     help="Titrai: balsas atpažįstamas per OpenAI (reikia OPENAI_API_KEY)")
     ap.add_argument("--text", metavar="FILE", help="Tekstas titrams, jei įraše nėra balso")
+    ap.add_argument("--style", default="modern", choices=SUBTITLE_STYLES,
+                    help="Titrų stilius: modern – animuoti, training – mokymų (po vaizdu)")
     ap.add_argument("--language", default=None, help="Kalbama kalba (numatytai – automatiškai)")
     ap.add_argument("--subtitle-language", default="lt", help="Titrų kalba ('orig' – kaip kalbama)")
     a = ap.parse_args()
@@ -440,7 +576,8 @@ if __name__ == "__main__":
         import openai
         cl = openai.OpenAI()
     r = auto_edit(a.input, a.output, a.format, not a.keep_silence, a.noise_db, a.min_silence,
-                  a.padding, not a.no_loudnorm, not a.no_fades, a.subtitles or bool(text), cl,
+                  a.padding, not a.no_loudnorm, not a.no_fades, not a.no_denoise,
+                  a.subtitles or bool(text), cl,
                   a.language, None if a.subtitle_language == "orig" else a.subtitle_language,
-                  text, status=print)
+                  text, a.style, status=print)
     print(f"Gatava: {r['original_duration']:.1f}s -> {r['duration']:.1f}s, kirpimų: {r['cuts']}")
