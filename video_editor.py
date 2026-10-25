@@ -1,11 +1,11 @@
 """Automatinis video montažas: iškerpa tylą/pauzes, sutvarko formatą, garsą
 ir (pasirinktinai) uždeda modernius animuotus titrus.
-Viskas veikia vietoje su ffmpeg – be API ir be interneto.
+Montažas daromas vietoje su ffmpeg; balso atpažinimui titrams naudojamas OpenAI Whisper.
 
 Naudojama iš Streamlit puslapio (pages/1_Video_montazas.py), bet galima
 paleisti ir iš komandinės eilutės:
 
-  python3 video_editor.py IN.mp4 OUT.mp4 --format 9:16 --subtitles tekstas.txt
+  python3 video_editor.py IN.mp4 OUT.mp4 --format 9:16 --subtitles [--text tekstas.txt]
 """
 import json
 import os
@@ -71,7 +71,45 @@ def keep_segments(duration, silences, padding=0.15, min_keep=0.2):
     return [(a, b) for a, b in merged if b - a >= min_keep] or [(0.0, duration)]
 
 
+def has_speech(path, info=None, noise_db=-35, min_speech=1.0):
+    """Ar įraše yra balsas (garsas, kurio bendra trukmė virš tylos ribos ≥ min_speech s)."""
+    info = info or probe(path)
+    if not info["has_audio"]:
+        return False
+    silences = detect_silences(path, noise_db, 0.3)
+    silent = sum((info["duration"] if e is None else e) - s for s, e in silences)
+    return info["duration"] - silent >= min_speech
+
+
 # ---------- Titrai ----------
+
+def transcribe(path, client, language="lt"):
+    """Atpažįsta kalbą per OpenAI Whisper. Grąžina [(žodis, pradžia, pabaiga)]."""
+    with tempfile.TemporaryDirectory() as tmp:
+        audio = os.path.join(tmp, "audio.mp3")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vn", "-ac", "1",
+                        "-ar", "16000", "-b:a", "48k", audio], check=True)
+        with open(audio, "rb") as f:
+            res = client.audio.transcriptions.create(
+                model="whisper-1", file=f, language=language or None,
+                response_format="verbose_json", timestamp_granularities=["word"])
+    return [(w.word.strip(), float(w.start), float(w.end)) for w in (res.words or []) if w.word.strip()]
+
+
+def remap_words(words, keep):
+    """Perkelia žodžių laikus į sumontuoto video laiko ašį; iškirptose vietose esantys žodžiai išmetami."""
+    out, offsets, acc = [], [], 0.0
+    for a, b in keep:
+        offsets.append(acc)
+        acc += b - a
+    for w, s, e in words:
+        mid = (s + e) / 2
+        for (a, b), off in zip(keep, offsets):
+            if a <= mid <= b:
+                out.append((w, off + max(s, a) - a, off + min(e, b) - a))
+                break
+    return out
+
 
 def _syllables(word):
     return max(1, len(re.findall(r"[aeiouyąęėįųū]+", word.lower())))
@@ -90,11 +128,8 @@ def remap_segments(segs, keep):
 
 
 def align_text(text, speech):
-    """Išdėlioja įvesto teksto žodžius per kalbos intervalus pagal skiemenų skaičių.
-
-    Veikia be jokio kalbos atpažinimo modelio ar interneto: laikai apytiksliai,
-    bet pauzės tarp sakinių sutampa su tikromis kalbos pauzėmis.
-    """
+    """Išdėlioja įvesto teksto žodžius per nurodytus intervalus pagal skiemenų skaičių
+    (naudojama, kai įraše nėra balso – tada intervalas yra visas video)."""
     words = text.split()
     if not words or not speech:
         return []
@@ -263,9 +298,13 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
 
 
 def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=-35, min_silence=0.5,
-              padding=0.15, loudnorm=True, fades=True, subtitle_text="", ypos=0.67,
-              status=None, progress=None):
-    """Visas automatinis montažas vienu kvietimu. Grąžina santrauką (dict)."""
+              padding=0.15, loudnorm=True, fades=True, subtitles=False, client=None,
+              language="lt", subtitle_text="", ypos=0.67, status=None, progress=None):
+    """Visas automatinis montažas vienu kvietimu. Grąžina santrauką (dict).
+
+    Titrai: jei įraše yra balsas – atpažįstami automatiškai (reikia OpenAI kliento);
+    jei balso nėra – naudojamas subtitle_text, tolygiai išdėliotas per visą video.
+    """
     say = status or (lambda msg: None)
     say("Analizuoju video…")
     info = probe(path)
@@ -274,14 +313,21 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=-35,
         say("Ieškau tylos ir pauzių…")
         keep = keep_segments(info["duration"], detect_silences(path, noise_db, min_silence), padding)
 
-    ass_file, n_words = None, 0
-    if subtitle_text.strip():
-        say("Sulyginu titrus su kalba…")
-        if info["has_audio"]:
-            speech = keep_segments(info["duration"], detect_silences(path, noise_db, 0.25), 0.0, 0.05)
-        else:
-            speech = [(0.0, info["duration"])]
-        words = align_text(subtitle_text, remap_segments(speech, keep))
+    ass_file, n_words, sub_mode = None, 0, None
+    if subtitles:
+        words = []
+        speech = has_speech(path, info, noise_db)
+        if speech and client is not None:
+            say("Atpažįstu balsą titrams…")
+            words = remap_words(transcribe(path, client, language), keep)
+            sub_mode = "voice"
+        elif subtitle_text.strip():
+            say("Dėlioju titrus…")
+            segs = [(0.0, info["duration"])]
+            if speech:  # balsas yra, bet atpažinti negalima – derinam prie kalbos intervalų
+                segs = keep_segments(info["duration"], detect_silences(path, noise_db, 0.25), 0.0, 0.05)
+            words = align_text(subtitle_text, remap_segments(segs, keep))
+            sub_mode = "text"
         n_words = len(words)
         if words:
             w, h = _out_size(info["width"], info["height"], FORMATS.get(fmt))
@@ -296,7 +342,7 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=-35,
         if ass_file:
             os.unlink(ass_file)
     res.update(original_duration=info["duration"], cuts=len(keep) - 1, words=n_words,
-               segments=keep)
+               subtitle_mode=sub_mode, segments=keep)
     return res
 
 
@@ -312,9 +358,17 @@ if __name__ == "__main__":
     ap.add_argument("--padding", type=float, default=0.15)
     ap.add_argument("--no-loudnorm", action="store_true")
     ap.add_argument("--no-fades", action="store_true")
-    ap.add_argument("--subtitles", metavar="TEXT_FILE", help="Tekstas titrams (ką sakoma video)")
+    ap.add_argument("--subtitles", action="store_true",
+                    help="Titrai: balsas atpažįstamas per OpenAI (reikia OPENAI_API_KEY)")
+    ap.add_argument("--text", metavar="FILE", help="Tekstas titrams, jei įraše nėra balso")
+    ap.add_argument("--language", default="lt")
     a = ap.parse_args()
-    text = open(a.subtitles, encoding="utf-8").read() if a.subtitles else ""
+    text = open(a.text, encoding="utf-8").read() if a.text else ""
+    cl = None
+    if a.subtitles and os.environ.get("OPENAI_API_KEY"):
+        import openai
+        cl = openai.OpenAI()
     r = auto_edit(a.input, a.output, a.format, not a.keep_silence, a.noise_db, a.min_silence,
-                  a.padding, not a.no_loudnorm, not a.no_fades, text, status=print)
+                  a.padding, not a.no_loudnorm, not a.no_fades, a.subtitles or bool(text), cl,
+                  a.language, text, status=print)
     print(f"Gatava: {r['original_duration']:.1f}s -> {r['duration']:.1f}s, kirpimų: {r['cuts']}")
