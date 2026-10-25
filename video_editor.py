@@ -488,6 +488,54 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
     return {"duration": total, "width": ow, "height": oh}
 
 
+def concat_clips(paths, out_path, fmt="original", progress=None):
+    """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
+    pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
+    Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų."""
+    infos = [probe(p) for p in paths]
+    ratio = FORMATS.get(fmt)
+    sizes = [_out_size(i["width"], i["height"], ratio) for i in infos]
+    W, H = max(sizes, key=lambda wh: wh[0] * wh[1]) if ratio else sizes[0]
+    fps = infos[0]["fps"]
+    parts, total = [], 0.0
+    for i, (p, inf) in enumerate(zip(paths, infos)):
+        d = inf["duration"]
+        total += d
+        if ratio:  # fiksuotas formatas – užpildom kadrą (kraštai apkarpomi)
+            fit = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
+        else:  # originalus – kitokios orientacijos įrašai įtalpinami su juodais kraštais
+            fit = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black"
+        parts.append(f"[{i}:v]{fit},setsar=1,fps={fps},format=yuv420p,trim=duration={d:.3f},"
+                     f"setpts=PTS-STARTPTS[v{i}]")
+        if inf["has_audio"] and len(_frame_levels(p)):
+            parts.append(f"[{i}:a:0]aresample=48000,aformat=channel_layouts=stereo,apad,"
+                         f"atrim=duration={d:.3f},asetpts=PTS-STARTPTS[a{i}]")
+        else:
+            parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={d:.3f}[a{i}]")
+    graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(paths))) + \
+        f"concat=n={len(paths)}:v=1:a=1[v][a]"
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write(graph)
+        script = f.name
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1"]
+    for p in paths:
+        cmd += ["-i", p]
+    cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
+            "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for line in proc.stdout:
+            m = re.match(r"out_time_us=(\d+)", line)
+            if m and progress and total > 0:
+                progress(min(1.0, int(m.group(1)) / 1e6 / total))
+        err = proc.stderr.read()
+        if proc.wait() != 0:
+            raise RuntimeError(f"Nepavyko sujungti įrašų:\n{err[-2000:]}")
+    finally:
+        os.unlink(script)
+    return out_path
+
+
 def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None, min_silence=0.5,
               padding=0.15, loudnorm=True, fades=True, denoise=True, subtitles=False, client=None,
               language=None, subtitle_language="lt", subtitle_text="", subtitle_style="modern",
