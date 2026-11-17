@@ -1,9 +1,13 @@
 import datetime
 import html
 import os
+import sys
 import tempfile
 
 import streamlit as st
+
+# Kad puslapis veiktų ir paleistas kaip atskira programa (pagrindinis failas – šis puslapis)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import clips_ui
 import reels_studio
