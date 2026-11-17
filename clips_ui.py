@@ -127,7 +127,14 @@ def configured_key():
 
 def openai_client():
     """OpenAI klientas: raktas iš Secrets / aplinkos arba įvestas programoje (laikomas tik šioje sesijoje)."""
-    key = configured_key() or st.session_state.get("openai_key", "").strip()
+    import accounts
+    if accounts.enabled():
+        # Svetainė su klientais: naudojamas tik savininko raktas ir tik Premium / administratoriui.
+        if not accounts.ai_allowed():
+            return None
+        key = configured_key()
+    else:
+        key = configured_key() or st.session_state.get("openai_key", "").strip()
     if not key:
         return None
     import openai
