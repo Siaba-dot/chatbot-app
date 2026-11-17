@@ -8,3 +8,11 @@ maxUploadSize = 400
 
 [browser]
 gatherUsageStats = false
+
+[theme]
+# Prabangi tamsi tema su auksu (Reels studija ir montažas)
+base = "dark"
+primaryColor = "#D4AF37"
+backgroundColor = "#0B0B0C"
+secondaryBackgroundColor = "#17161A"
+textColor = "#EDE6D6"
