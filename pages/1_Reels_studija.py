@@ -10,6 +10,7 @@ import streamlit as st
 # Kad puslapis veiktų ir paleistas kaip atskira programa (pagrindinis failas – šis puslapis)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import accounts
 import clips_ui
 import reels_studio
 import video_editor
@@ -46,17 +47,19 @@ st.markdown("""
 .lux-step .d { color: #8F8778; font-size: .85rem; margin-left: auto; }
 div[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--line) !important;
   background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.01)); border-radius: 14px; }
-.stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"] {
+.stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"], .stFormSubmitButton > button {
   background: linear-gradient(100deg, #B8912E, #F3DE9C 45%, #D4AF37 70%, #B8912E);
   color: #0B0B0C; border: 0; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   box-shadow: 0 8px 30px rgba(212,175,55,.18); }
-.stButton > button[kind="primary"]:hover { filter: brightness(1.07); color: #0B0B0C; }
+.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button:hover { filter: brightness(1.07); color: #0B0B0C; }
 .stButton > button[kind="secondary"], .stDownloadButton > button[kind="secondary"] {
   border-color: var(--line); }
 [data-testid="stMetricValue"] { font-family: 'Playfair Display', serif; color: var(--gold-2); }
 .lux-caption { white-space: pre-wrap; border-left: 2px solid var(--gold); padding: .2rem 0 .2rem 1rem;
   color: #EDE6D6; }
 .lux-tags { color: var(--gold-2); font-size: .92rem; margin-top: .6rem; }
+.lux-premium { border: 1px solid var(--line); border-radius: 12px; padding: .7rem .9rem; margin: .3rem 0 .6rem;
+  background: linear-gradient(100deg, rgba(212,175,55,.10), rgba(212,175,55,.02)); color: #E9DFC6; font-size: .92rem; }
 .lux-foot { text-align: center; color: #5E584D; font-size: .75rem; letter-spacing: .3em; margin-top: 2rem; }
 [class*="st-key-reels_fgrid"] button, [class*="st-key-reels_egrid"] button {
   min-height: 1.9rem; padding: .15rem .3rem; border-radius: 8px; }
@@ -79,6 +82,10 @@ st.markdown("""
   <div class="lux-rule"></div>
 </div>
 """, unsafe_allow_html=True)
+
+
+user = accounts.require_login()
+plan = user["plan"]
 
 
 def step(n, title, desc=""):
@@ -208,34 +215,54 @@ with st.container(border=True):
     subtitles = st.toggle("Animuoti titrai", value=True,
                           help="Sakomas žodis paryškinamas akcento spalva.")
 
-    # Balso atpažinimas (OpenAI Whisper): raktas iš Secrets arba įvedamas čia.
-    has_secret = bool(clips_ui.configured_key())
-    if not has_secret:
-        with st.expander("🎙️ Balso atpažinimas – įveskite OpenAI raktą",
-                         expanded=not st.session_state.get("openai_key")):
-            st.text_input("OpenAI API raktas", type="password", key="openai_key", placeholder="sk-…",
-                          help="Raktas naudojamas tik šioje naršyklės sesijoje ir niekur nesaugomas. "
-                               "Kad nereikėtų įvesti kaskart – įrašykite jį Streamlit Cloud: "
-                               "⋮ → Settings → Secrets: OPENAI_API_KEY = \"sk-…\"")
-            st.caption("Raktą gausite platform.openai.com → API keys. Minutė atpažinimo kainuoja ~0,006 $.")
-    client = clips_ui.openai_client()
-    typed = st.session_state.get("openai_key", "").strip()
-    if client is not None and not has_secret and st.session_state.get(P + "checked_key") != typed:
-        try:
-            client.models.list()
-            st.session_state[P + "key_ok"] = True
-        except Exception as e:
-            auth = "401" in str(e) or "api key" in str(e).lower() or type(e).__name__ == "AuthenticationError"
-            # Tik tikrai neteisingas raktas atmetamas; ryšio sutrikimai – ne rakto kaltė.
-            st.session_state[P + "key_ok"] = "neteisingas raktas – patikrinkite, ar nukopijavote visą." \
-                if auth else True
-        st.session_state[P + "checked_key"] = typed
-    key_ok = has_secret or st.session_state.get(P + "key_ok") is True
-    if client is not None and not key_ok:
-        st.error(f"OpenAI raktas netinka: {st.session_state.get(P + 'key_ok')}")
+    # Balso atpažinimas (OpenAI Whisper)
+    speech_minutes = sum(c["duration"] for c in clips if not c.get("image")) / 60
+    if plan == "open":  # prisijungimas išjungtas – raktas iš Secrets arba įvedamas čia
+        has_secret = bool(clips_ui.configured_key())
+        if not has_secret:
+            with st.expander("🎙️ Balso atpažinimas – įveskite OpenAI raktą",
+                             expanded=not st.session_state.get("openai_key")):
+                st.text_input("OpenAI API raktas", type="password", key="openai_key", placeholder="sk-…",
+                              help="Raktas naudojamas tik šioje naršyklės sesijoje ir niekur nesaugomas. "
+                                   "Kad nereikėtų įvesti kaskart – įrašykite jį Streamlit Cloud: "
+                                   "⋮ → Settings → Secrets: OPENAI_API_KEY = \"sk-…\"")
+                st.caption("Raktą gausite platform.openai.com → API keys. Minutė atpažinimo kainuoja ~0,006 $.")
+        client = clips_ui.openai_client()
+        typed = st.session_state.get("openai_key", "").strip()
+        if client is not None and not has_secret and st.session_state.get(P + "checked_key") != typed:
+            try:
+                client.models.list()
+                st.session_state[P + "key_ok"] = True
+            except Exception as e:
+                auth = "401" in str(e) or "api key" in str(e).lower() or type(e).__name__ == "AuthenticationError"
+                # Tik tikrai neteisingas raktas atmetamas; ryšio sutrikimai – ne rakto kaltė.
+                st.session_state[P + "key_ok"] = "neteisingas raktas – patikrinkite, ar nukopijavote visą." \
+                    if auth else True
+            st.session_state[P + "checked_key"] = typed
+        key_ok = has_secret or st.session_state.get(P + "key_ok") is True
+        if client is not None and not key_ok:
+            st.error(f"OpenAI raktas netinka: {st.session_state.get(P + 'key_ok')}")
+            client = None
+        elif client is not None:
+            st.success("🎙️ Balso atpažinimas įjungtas – titrai bus sukurti automatiškai iš kalbos.")
+    elif plan == "basic":
         client = None
-    elif client is not None:
-        st.success("🎙️ Balso atpažinimas įjungtas – titrai bus sukurti automatiškai iš kalbos.")
+        st.markdown(
+            '<div class="lux-premium">🔒 <b>Premium</b> – automatiniai titrai iš kalbos, titrų vertimas, '
+            'aprašymas ir grotažymės.' + (f' Norite Premium? Susisiekite: {html.escape(accounts.contact())}'
+                                          if accounts.contact() else '') + '</div>', unsafe_allow_html=True)
+    else:  # premium / admin – savininko raktas iš Secrets
+        client = clips_ui.openai_client()
+        left = accounts.remaining_minutes()
+        if client is None:
+            st.warning("Balso atpažinimas laikinai neveikia – administratorius dar neįrašė OpenAI rakto.")
+        elif left is not None and left < max(0.05, speech_minutes):
+            client = None
+            st.warning(f"Šio mėnesio balso atpažinimo minutės baigėsi (liko {left:.1f} min., "
+                       f"šiam video reikia {speech_minutes:.1f} min.). Titrus galite įrašyti tekstu.")
+        else:
+            st.success("🎙️ Premium: titrai bus sukurti automatiškai iš kalbos."
+                       + (f" Liko {left:.0f} min. šį mėnesį." if left is not None else ""))
 
     subtitle_text, subtitle_language = "", "lt"
     if subtitles and clips:
@@ -252,7 +279,8 @@ with st.container(border=True):
                                 "atpažinti. Jei ne – įrašykite tekstą.")
         else:
             subtitle_text = st.text_area("Titrų tekstas", placeholder="Tekstas bus tolygiai išdėliotas per video.",
-                                         help="Be OpenAI rakto kalba neatpažįstama – titrams įrašykite tekstą.")
+                                         help="Įrašykite tekstą – programa suskaidys jį į frazes ir išdėlios "
+                                              "per video.")
 
 # ---------- IV. Garsas ----------
 with st.container(border=True):
@@ -293,7 +321,8 @@ with st.container(border=True):
     topic = st.text_input("Tema / produktas (aprašymui)", placeholder="Pvz.: rudens stiliaus patarimai",
                           disabled=client is None,
                           help="Padeda dirbtiniam intelektui parašyti aprašymą ir grotažymes."
-                          if client else "Aprašymui reikia OPENAI_API_KEY.")
+                          if client else "Aprašymas ir grotažymės – Premium plane." if plan == "basic"
+                          else "Aprašymui reikia OpenAI rakto.")
 
 
 def source_for_cover():
@@ -352,6 +381,8 @@ if create and clips:
                 subtitles=subtitles, client=client, subtitle_language=subtitle_language,
                 subtitle_text=subtitle_text, subtitle_style="modern", protect=protect, highlight=highlight,
                 status=say, progress=lambda p: bar.progress(0.25 + p * 0.45))
+            if res.get("subtitle_mode") in ("voice", "translated"):
+                accounts.add_minutes(res["original_duration"] / 60)
             music = library[music_choice]["path"] if music_choice in library else None
             if music_file:
                 music = os.path.join(tmp, "music" + (os.path.splitext(music_file.name)[1] or ".mp3"))
@@ -415,7 +446,14 @@ if result:
             st.caption("☝️ Nukopijuokite mygtuku dešiniajame kampe.")
             if cap.get("hooks"):
                 st.markdown("**Kabliukų idėjos kitam kartui:** " + " · ".join(f"„{h}“" for h in cap["hooks"]))
-        elif client is None:
-            st.caption("Aprašymui ir grotažymėms sugeneruoti reikia OPENAI_API_KEY.")
+        elif client is None and plan != "basic":
+            st.caption("Aprašymui ir grotažymėms sugeneruoti reikia OpenAI rakto.")
+
+if plan == "admin":
+    with st.expander("👑 Administravimas – klientai ir naudojimas šį mėnesį"):
+        st.dataframe(accounts.usage_table(), hide_index=True, width="stretch")
+        st.caption("Klientai pridedami ir šalinami Streamlit Secrets (⋮ → Settings → Secrets). "
+                   "Minučių apskaita išsivalo, kai programa perkraunama ar atnaujinama – "
+                   "OpenAI svetainėje nustatykite ir išlaidų ribą.")
 
 st.markdown('<div class="lux-foot">REELS STUDIJA</div>', unsafe_allow_html=True)

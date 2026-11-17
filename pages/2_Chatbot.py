@@ -1,8 +1,17 @@
+import os
+import sys
+
 import streamlit as st
 import openai
 
 # Puslapio nustatymai
 st.set_page_config(page_title="Chatbot", page_icon="🤖")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import accounts  # noqa: E402
+
+if accounts.require_login()["plan"] not in ("admin", "open"):
+    st.info("Pokalbių robotas skirtas tik administratoriui.")
+    st.stop()
 st.title("🤖 Chatbot")
 
 # OpenAI klientas su slapta API rakto iškvietimu (be rakto puslapis tiesiog praneša)

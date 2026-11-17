@@ -38,3 +38,33 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
   Streamlit Secrets arba įvedamas pačioje studijoje (laikomas tik naršyklės sesijoje).
 
 Be naršyklės: `python3 reels_studio.py SUMONTUOTA.mp4 REELS.mp4 --hook "..." --cta "..." --music daina.mp3 --cover virselis.jpg`.
+
+## 🔐 Klientai ir planai (svetainei)
+Kai Streamlit Secrets (⋮ → Settings → Secrets) aprašomi klientai, studija atsidaro tik prisijungus:
+
+```toml
+OPENAI_API_KEY = "sk-..."      # jūsų raktas – naudojamas tik Premium klientams
+contact = "info@jusu.lt"       # rodoma Pagrindinio plano klientams
+
+[users.admin]
+password = "labai-slaptas"
+plan = "admin"                 # mato visų klientų naudojimą
+
+[users.salonas]
+password = "slaptazodis1"
+plan = "premium"               # + automatiniai titrai iš kalbos, vertimas, aprašymai
+minutes = 60                   # balso atpažinimo minučių per mėnesį
+name = "Grožio salonas"
+
+[users.kirpykla]
+password = "slaptazodis2"
+plan = "basic"                 # viskas, išskyrus balso atpažinimą ir aprašymus
+name = "Kirpykla"
+```
+
+- **Pagrindinis** – montažas, garsas, šablonai, filtrai, efektai, muzika, viršelis, titrai iš įvesto teksto.
+- **Premium** – plius automatiniai titrai iš kalbos, vertimas, aprašymas su grotažymėmis (iki `minutes` per mėnesį).
+- Klientą išjungti: ištrinkite jo bloką arba įrašykite `active = false`.
+- Minučių apskaita laikoma serveryje (`.data/usage.json`) ir išsivalo, kai programa perkraunama – OpenAI
+  svetainėje papildomai nustatykite išlaidų ribą.
+- Be `[users]` programa atvira visiems, kaip anksčiau.

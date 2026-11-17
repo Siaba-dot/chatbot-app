@@ -3,12 +3,14 @@ import tempfile
 
 import streamlit as st
 
+import accounts
 import clips_ui
 import video_editor
 
 APP_VERSION = "13"  # didinama su kiekvienu pakeitimu – matosi puslapio apačioje
 
 st.set_page_config(page_title="Video montažas", page_icon="🎬")
+accounts.require_login()
 st.title("🎬 Automatinis video montažas")
 st.write("Įkelkite video – programa pati iškirps pauzes ir tylą, pašalins foninį triukšmą, "
          "sutvarkys formatą, garsą ir (jei norite) uždės titrus.")
@@ -121,6 +123,8 @@ if uploaded and clicked:
             st.stop()
 
         bar.progress(1.0)
+        if res.get("subtitle_mode") in ("voice", "translated"):
+            accounts.add_minutes(res["original_duration"] / 60)
         if subtitles and not res["words"]:
             status.warning("✅ Video sumontuotas, bet titrų nepavyko sukurti "
                            "(neatpažinta kalba arba neįvestas tekstas).")
