@@ -44,10 +44,87 @@ COLOR_FILTERS = {
     "Auksinė valanda": ["colorbalance=rs=0.05:gs=0.01:bs=-0.06:rh=0.06:bh=-0.05",
                         "eq=contrast=1.08:saturation=1.08:gamma=0.98", "vignette=PI/6"],
     "Kino": ["eq=contrast=1.12:saturation=0.85:gamma=0.97", "vignette=PI/5"],
+    "Teal & Orange": ["colorbalance=rs=-0.08:bs=0.10:rh=0.10:gh=0.03:bh=-0.08",
+                      "eq=saturation=1.15:contrast=1.08"],
+    "Noir auksas": ["hue=s=0", "eq=contrast=1.2:gamma=0.95", "colorbalance=rm=0.16:gm=0.08:bm=-0.10:rh=0.10:bh=-0.06"],
     "Ryškios": ["eq=saturation=1.3:contrast=1.06"],
+    "Vintažas": ["curves=preset=vintage", "eq=saturation=0.9"],
+    "Pastelinės": ["eq=saturation=0.72:brightness=0.04:contrast=0.9", "colorbalance=rh=0.03:bh=0.04"],
+    "Sepija": ["colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131", "eq=contrast=1.05"],
     "Šaltos": ["colorbalance=rs=-0.06:bs=0.08", "eq=saturation=1.05"],
     "Nespalvotos": ["hue=s=0", "eq=contrast=1.1"],
 }
+
+# Efektai (galima derinti kelis). Taikomi po spalvų filtro, prieš tekstus.
+EFFECTS = {
+    "Lėtas priartėjimas": "Vaizdas per visą video lėtai artėja – gyvumas net statiškam kadrui.",
+    "Švytėjimas": "Švelnus šviesų švytėjimas – svajinga, prabangi nuotaika.",
+    "Kino juostos": "Juodos juostos viršuje ir apačioje – kino vaizdas.",
+    "Kino grūdeliai": "Lengvas juostos grūdėtumas – analoginis jausmas.",
+    "Vinjetė": "Patamsinti kraštai – akys krypsta į centrą.",
+    "Ryškumas": "Aiškesnės detalės ir faktūros.",
+    "Šviesos blyksnis": "Video prasideda baltu blyksniu.",
+}
+
+
+def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, duration=10.0, still=False,
+               pre=(), post=()):
+    """Filtrų grandinė nuo `inp` iki `out` etikečių: spalvų filtras + efektai.
+    still=True – vienam kadrui (miniatiūroms ir viršeliui): judesio efektai parodomi statiškai."""
+    effects = set(effects or ())
+    a = list(pre) + list(COLOR_FILTERS.get(color, []))
+    if "Lėtas priartėjimas" in effects:
+        if still:
+            a += ["crop=iw*0.88:ih*0.88", f"scale={W}:{H}"]
+        else:
+            d = max(1.0, duration)
+            a += [f"scale=w='trunc({W}*(1+0.10*t/{d:.3f})/2)*2':h='trunc({H}*(1+0.10*t/{d:.3f})/2)*2':eval=frame",
+                  f"crop={W}:{H}"]
+    b = []
+    if "Ryškumas" in effects:
+        b.append("unsharp=5:5:0.8:5:5:0")
+    if "Vinjetė" in effects:
+        b.append("vignette=PI/4.2")
+    if "Kino grūdeliai" in effects:
+        b.append("noise=alls=11:allf=u" if still else "noise=alls=11:allf=t+u")
+    if "Kino juostos" in effects:
+        b += ["drawbox=x=0:y=0:w=iw:h=ih*0.085:color=black:t=fill",
+              "drawbox=x=0:y=ih*0.915:w=iw:h=ih*0.085:color=black:t=fill"]
+    if "Šviesos blyksnis" in effects:
+        b.append("lutrgb=r='val+(255-val)*0.55':g='val+(255-val)*0.55':b='val+(255-val)*0.55'" if still
+                 else "fade=t=in:st=0:d=0.7:color=white")
+    b += list(post)
+    if "Švytėjimas" in effects:
+        sigma = max(4, round(W / 45))
+        tail = ("," + ",".join(b)) if b else ""
+        return (f"{inp}{','.join(a + ['format=gbrp', 'split'])}[gA][gB];"
+                f"[gB]gblur=sigma={sigma},curves=all='0/0 0.5/0.35 1/1'[gC];"
+                f"[gA][gC]blend=all_mode=screen:all_opacity=0.45,format=yuv420p{tail}{out}")
+    return f"{inp}{','.join(a + b) or 'null'}{out}"
+
+
+def thumbnail(frame, out_path, color="Natūralios", effects=(), width=180, height=320):
+    """Mažas peržiūros paveikslėlis filtrų / efektų langeliui."""
+    g = look_graph("[0:v]", "[out]", color, effects, width, height, still=True,
+                   pre=[f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}",
+                        "setsar=1"])
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", frame, "-filter_complex", g, "-map", "[out]",
+                        "-frames:v", "1", "-q:v", "4", out_path], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr[-800:])
+    return out_path
+
+
+def grab_frame(path, out_path, at=1.0, width=360, height=640):
+    """Vienas kadras (9:16) – pagrindas miniatiūroms."""
+    seek = [] if video_editor.is_image(path) else ["-ss", f"{max(0.0, at):.3f}"]
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *seek, "-i", path, "-vf",
+                        f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
+                        "-frames:v", "1", "-q:v", "3", out_path], capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(out_path):
+        raise RuntimeError(r.stderr[-800:] or "Kadro paimti nepavyko")
+    return out_path
+
 
 MUSIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "music")
 # Studijos muzikos biblioteka (sukurta tools/make_music.py – be autorių teisių apribojimų)
@@ -194,7 +271,7 @@ def _run(cmd, total, progress, what):
 
 def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5, handle="",
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
-           color="Auksinė valanda", progress_bar="Viršuje", progress=None):
+           color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=()):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}."""
     info = video_editor.probe(path)
     W, H, fps = info["width"], info["height"], info["fps"]
@@ -211,14 +288,11 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, handle, accent,
                                       template=template))
 
-        v = []
-        if abs(speed - 1) > 0.001:
-            v.append(f"setpts=PTS/{speed:.4f}")
-        v += COLOR_FILTERS.get(color, [])
-        v.append(f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'")
+        pre = [f"setpts=PTS/{speed:.4f}"] if abs(speed - 1) > 0.001 else []
+        post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
         if trimmed:
-            v.append(f"fade=t=out:st={duration - 0.5:.3f}:d=0.5")
-        graph = ["[0:v]" + ",".join(v) + "[base]"]
+            post.append(f"fade=t=out:st={duration - 0.5:.3f}:d=0.5")
+        graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
         vout = "[base]"
         if progress_bar in ("Viršuje", "Apačioje"):
             bh = max(6, round(H * 0.006)) // 2 * 2
@@ -273,23 +347,26 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
 
 
 def make_cover(path, out_path, at=0.5, hook="", accent="Auksas", template="Prabangus auksas",
-               handle="", width=1080, height=1920):
-    """Viršelis (JPG 1080×1920): kadras iš video (arba nuotrauka) su kabliuko tekstu per vidurį."""
+               handle="", width=1080, height=1920, color=None, effects=()):
+    """Viršelis (JPG 1080×1920): kadras iš video (arba nuotrauka) su filtru, efektais ir kabliuku per vidurį."""
+    if color is None:
+        color = TEMPLATES.get(template, {}).get("color", "Natūralios")
     tmp = tempfile.mkdtemp()
     try:
-        vf = [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}",
-              "setsar=1"]
+        # setpts: kadras „po“ teksto animacijų (kabliukas iššoka per pirmas dalis sekundės)
+        pre = ["setpts=PTS-STARTPTS+5/TB", f"scale={width}:{height}:force_original_aspect_ratio=increase",
+               f"crop={width}:{height}", "setsar=1"]
+        post = []
         if hook.strip() or handle.strip():
             ass = os.path.join(tmp, "cover.ass")
             with open(ass, "w", encoding="utf-8") as f:
                 f.write(build_overlay_ass(width, height, 10, hook, 10, handle=handle, accent=accent,
                                           hook_ypos=0.42, template=template))
-            vf.insert(2, ",".join(COLOR_FILTERS.get(TEMPLATES.get(template, {}).get("color"), []) or ["null"]))
-            vf.append(f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'")
-        # Kabliukas „iššoka“ per pirmas 0.3 s – kadras imamas jau po animacijos.
+            post.append(f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'")
+        g = look_graph("[0:v]", "[out]", color, [e for e in effects if e != "Šviesos blyksnis"], width, height,
+                       still=True, pre=pre, post=post)
         seek = [] if video_editor.is_image(path) else ["-ss", f"{max(0.0, at):.3f}"]
-        vf.insert(0, "setpts=PTS-STARTPTS+5/TB")  # po visų animacijų
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", *seek, "-i", path, "-vf", ",".join(vf),
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", *seek, "-i", path, "-filter_complex", g, "-map", "[out]",
                "-frames:v", "1", "-q:v", "2", out_path]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
@@ -346,11 +423,14 @@ if __name__ == "__main__":
     ap.add_argument("--max-length", type=float)
     ap.add_argument("--speed", type=float, default=1.0)
     ap.add_argument("--color", default="Auksinė valanda", choices=list(COLOR_FILTERS))
+    ap.add_argument("--effect", action="append", default=[], choices=list(EFFECTS))
     ap.add_argument("--progress-bar", default="Viršuje", choices=["Viršuje", "Apačioje", "Nėra"])
     ap.add_argument("--cover", metavar="JPG", help="Papildomai sukurti viršelį")
     a = ap.parse_args()
     r = finish(a.input, a.output, a.hook, a.hook_duration, a.cta, 2.5, a.handle, a.accent, a.template, a.music,
-               a.music_volume, not a.no_ducking, a.max_length, a.speed, a.color, a.progress_bar)
+               a.music_volume, not a.no_ducking, a.max_length, a.speed, a.color, a.progress_bar,
+               effects=a.effect)
     if a.cover:
-        make_cover(a.input, a.cover, 0.5, a.hook, a.accent, a.template, a.handle)
+        make_cover(a.input, a.cover, 0.5, a.hook, a.accent, a.template, a.handle, color=a.color,
+                   effects=a.effect)
     print(f"Gatava: {r['duration']:.1f} s, {r['width']}x{r['height']}")
