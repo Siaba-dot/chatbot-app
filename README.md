@@ -26,10 +26,12 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **šablonai**: „Prabangus auksas“ ir „Elegantiškas minimalizmas“ (Playfair Display šriftas, plona auksinė linija,
   švelnus ryškėjimas), „Ryškus (TikTok stilius)“ (didelės raidės spalvotoje dėžutėje);
 - **kabliukas** – antraštė pirmoms sekundėms, **kvietimas veikti** pabaigoje, **@paskyra** viršuje;
-- **foninė muzika**, kuri automatiškai patyli, kai kalbama;
+- **foninės muzikos biblioteka** (6 kūriniai be autorių teisių apribojimų: Prabangus pianinas, Lounge, Kinematografiška,
+  Energinga, Lo-fi, Romantiška – `music/`, sukurta `tools/make_music.py`) arba sava muzika; ji automatiškai patyli, kai kalbama;
 - **spalvų korekcija** (Auksinė valanda, Kino, Ryškios, Šaltos, Nespalvotos), akcento spalva (ir titrų paryškinimui);
 - **trukmės riba** (15 / 30 / 60 / 90 s), **greitis**, **progreso juostelė**;
 - **viršelis** (JPG 1080×1920) su peržiūra prieš kuriant;
-- **aprašymas, grotažymės ir kabliukų idėjos** (reikia `OPENAI_API_KEY`).
+- **balso atpažinimas titrams** ir **aprašymas, grotažymės, kabliukų idėjos** – reikia OpenAI rakto: `OPENAI_API_KEY`
+  Streamlit Secrets arba įvedamas pačioje studijoje (laikomas tik naršyklės sesijoje).
 
 Be naršyklės: `python3 reels_studio.py SUMONTUOTA.mp4 REELS.mp4 --hook "..." --cta "..." --music daina.mp3 --cover virselis.jpg`.
