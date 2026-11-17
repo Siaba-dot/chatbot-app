@@ -298,9 +298,9 @@ def _ass_escape(s):
     return s.replace("\\", "").replace("{", "(").replace("}", ")")
 
 
-def build_ass(words, width, height, ypos=0.67):
+def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF"):
     """Modernūs titrai: Montserrat Black, DIDŽIOSIOS, balta su juodu kontūru,
-    sakomas žodis geltonas, frazė 'iššoka' ir išnyksta."""
+    sakomas žodis geltonas (highlight – ASS BGR spalva), frazė 'iššoka' ir išnyksta."""
     fsize = round(width * 0.085)
     outline = max(3, round(fsize / 12))
     margin = round(width * 0.065)
@@ -333,7 +333,7 @@ def build_ass(words, width, height, ypos=0.67):
                 if j < i:
                     parts.append("{\\1c&HFFFFFF&\\1a&H00&}" + t)
                 elif j == i:
-                    parts.append("{\\1c&H0AD6FF&\\1a&H00&}" + t)
+                    parts.append(f"{{\\1c&H{highlight}&\\1a&H00&}}" + t)
                 else:
                     parts.append("{\\1c&HFFFFFF&\\1a&H70&}" + t)
             fx = pos
@@ -580,7 +580,8 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
 def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None, min_silence=0.5,
               padding=0.15, loudnorm=True, fades=True, denoise=True, subtitles=False, client=None,
               language=None, subtitle_language="lt", subtitle_text="", subtitle_style="modern",
-              ypos=0.67, translate_model=None, protect=None, status=None, progress=None):
+              ypos=0.67, translate_model=None, protect=None, status=None, progress=None,
+              highlight="0AD6FF"):
     """Visas automatinis montažas vienu kvietimu. Grąžina santrauką (dict).
 
     Titrai: jei įraše yra balsas – atpažįstami automatiškai (reikia OpenAI kliento);
@@ -608,7 +609,7 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
                     merged.append((a, b))
             keep = merged
 
-    ass_file, n_words, sub_mode = None, 0, None
+    ass_file, n_words, sub_mode, words = None, 0, None, []
     if subtitles:
         words = []
         speech = status_ == "speech"
@@ -638,7 +639,7 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
             training = subtitle_style == "training"
             w, h, bh = frame_size(info["width"], info["height"], fmt, training)
             with tempfile.NamedTemporaryFile("w", suffix=".ass", delete=False, encoding="utf-8") as f:
-                f.write(build_ass_training(words, w, h, bh) if training else build_ass(words, w, h, ypos))
+                f.write(build_ass_training(words, w, h, bh) if training else build_ass(words, w, h, ypos, highlight))
                 ass_file = f.name
 
     say("Montuoju video…")
@@ -661,7 +662,7 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
         if ass_file:
             os.unlink(ass_file)
     res.update(original_duration=info["duration"], cuts=len(keep) - 1, words=n_words,
-               subtitle_mode=sub_mode, segments=keep)
+               subtitle_mode=sub_mode, segments=keep, text=" ".join(w[0] for w in words))
     return res
 
 

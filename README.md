@@ -1,6 +1,6 @@
 # Chatbot + automatinis video montažas
 
-Paleidimas: `streamlit run main.py` – atsidaro video montažo programa. Pokalbių robotas – šoniniame meniu (**Chatbot**, jam reikia `OPENAI_API_KEY`).
+Paleidimas: `streamlit run main.py` – atsidaro video montažo programa. Šoniniame meniu – **Reels studija** ir pokalbių robotas (**Chatbot**, jam reikia `OPENAI_API_KEY`).
 
 ## 🎬 Video montažas
 Įkeliate vieną ar kelis video ar nuotraukas (nuotraukos rodomos po kelias sekundes) arba nufilmuojate juos tiesiai programoje („🎥 Filmuoti dabar“ – programa paprašo leidimo
@@ -19,3 +19,17 @@ Pats montažas (kirpimas, formatas, garsas) veikia be jokių API – su ffmpeg.
 
 Reikalinga `ffmpeg` (Streamlit Cloud ją įdiegia iš `packages.txt`).
 Galima naudoti ir be naršyklės: `python3 video_editor.py IN.mp4 OUT.mp4 --format 9:16 --subtitles [--text tekstas.txt]`.
+
+## ✨ Reels studija
+Prabangi (tamsi su auksu) studija Instagram Reels / TikTok / Shorts vaizdo įrašams – šoniniame meniu **Reels studija**.
+Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, titrai), plius:
+- **šablonai**: „Prabangus auksas“ ir „Elegantiškas minimalizmas“ (Playfair Display šriftas, plona auksinė linija,
+  švelnus ryškėjimas), „Ryškus (TikTok stilius)“ (didelės raidės spalvotoje dėžutėje);
+- **kabliukas** – antraštė pirmoms sekundėms, **kvietimas veikti** pabaigoje, **@paskyra** viršuje;
+- **foninė muzika**, kuri automatiškai patyli, kai kalbama;
+- **spalvų korekcija** (Auksinė valanda, Kino, Ryškios, Šaltos, Nespalvotos), akcento spalva (ir titrų paryškinimui);
+- **trukmės riba** (15 / 30 / 60 / 90 s), **greitis**, **progreso juostelė**;
+- **viršelis** (JPG 1080×1920) su peržiūra prieš kuriant;
+- **aprašymas, grotažymės ir kabliukų idėjos** (reikia `OPENAI_API_KEY`).
+
+Be naršyklės: `python3 reels_studio.py SUMONTUOTA.mp4 REELS.mp4 --hook "..." --cta "..." --music daina.mp3 --cover virselis.jpg`.

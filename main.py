@@ -1,18 +1,12 @@
-import base64
 import os
-import subprocess
 import tempfile
 
 import streamlit as st
-import streamlit.components.v1 as components
 
+import clips_ui
 import video_editor
 
-APP_VERSION = "12"  # didinama su kiekvienu pakeitimu – matosi puslapio apačioje
-
-# Filmavimas programoje: kamera + mikrofonas per naršyklę (components/recorder/index.html)
-video_recorder = components.declare_component(
-    "video_recorder", path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "recorder"))
+APP_VERSION = "13"  # didinama su kiekvienu pakeitimu – matosi puslapio apačioje
 
 st.set_page_config(page_title="Video montažas", page_icon="🎬")
 st.title("🎬 Automatinis video montažas")
@@ -20,113 +14,13 @@ st.write("Įkelkite video – programa pati iškirps pauzes ir tylą, pašalins 
          "sutvarkys formatą, garsą ir (jei norite) uždės titrus.")
 
 
-def openai_client():
-    try:
-        key = st.secrets["OPENAI_API_KEY"]
-    except Exception:
-        key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        return None
-    import openai
-    return openai.OpenAI(api_key=key)
-
-
-def add_clip(clip_id, ext, data, name, kind):
-    """Prideda video (įkeltą ar nufilmuotą) į sąrašą: išsaugo laikinai ir patikrina garsą."""
-    clips = st.session_state.setdefault("clips", [])
-    skip = st.session_state.setdefault("skip_clips", set())  # netinkami arba ranka pašalinti
-    if clip_id in skip or any(c["id"] == clip_id for c in clips):
-        return
-    fd, path = tempfile.mkstemp(suffix=ext)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data())
-    if kind == "rec":
-        # Naršyklės įrašuose (ypač WebM) dažnai trūksta trukmės – perpakuojam į MKV be perkodavimo.
-        mkv = path + ".mkv"
-        if subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-c", "copy", mkv]).returncode == 0:
-            os.unlink(path)
-            path = mkv
-    with st.spinner(f"Tikrinu „{name}“…"):
-        try:
-            duration = video_editor.probe(path)["duration"]
-            image = video_editor.is_image(path)
-            state, an = ("none", None) if image else video_editor.audio_status(path)
-        except Exception:
-            os.unlink(path)
-            skip.add(clip_id)
-            st.error(f"„{name}“ nepavyko atidaryti. Įkelkite video (pvz. MP4, MOV) arba nuotrauką (JPG, PNG).")
-            return
-    clips.append({"id": clip_id, "path": path, "name": name, "kind": kind, "duration": duration,
-                  "image": image,
-                  "audio": state, "levels": an and {k: an[k] for k in ("noise", "loud")}})
-
-
-def move_clip(i, step):
-    clips = st.session_state["clips"]
-    if step == 0:
-        c = clips.pop(i)
-        st.session_state.setdefault("skip_clips", set()).add(c["id"])  # kad nebūtų pridėtas iš naujo
-        if os.path.exists(c["path"]):
-            os.unlink(c["path"])
-    else:
-        clips[i], clips[i + step] = clips[i + step], clips[i]
-
-
-st.session_state.setdefault("clips", [])
-source = st.radio("Video", ["📁 Įkelti video", "🎥 Filmuoti dabar"], horizontal=True,
-                  label_visibility="collapsed")
-if source.startswith("📁"):
-    # Be failų tipų apribojimo: telefonuose (ypač iPhone) apribojimas neleidžia pasirinkti
-    # video iš galerijos. Ar tai tikrai video, patikrinama po įkėlimo.
-    files = st.file_uploader("Įkelkite video ar nuotraukas (galima kelis)", accept_multiple_files=True,
-                             help="Telefone galite pasirinkti kelis video ar nuotraukas iš galerijos iš karto. "
-                                  "Nuotraukos rodomos po kelias sekundes.")
-    current = {f.file_id for f in files}
-    # Failą pašalinus iš įkėlimo lauko – pašalinam jį ir iš sąrašo.
-    for i in [i for i, c in enumerate(st.session_state["clips"])
-              if c["kind"] == "upload" and c["id"] in st.session_state.get("uploader_ids", set()) - current][::-1]:
-        move_clip(i, 0)
-    st.session_state["uploader_ids"] = current
-    for f in files:
-        add_clip(f.file_id, os.path.splitext(f.name)[1].lower() or ".mp4", f.getvalue, f.name, "upload")
-else:
-    st.session_state["uploader_ids"] = set()  # įkėlimo laukas paslėptas – jo būsena išsivalo
-    rec = video_recorder(key="recorder", default=None)
-    if rec and rec.get("data"):
-        n = sum(c["kind"] == "rec" for c in st.session_state["clips"]) + 1
-        add_clip(f"rec-{rec['id']}", ".mp4" if "mp4" in (rec.get("mime") or "") else ".webm",
-                 lambda: base64.b64decode(rec["data"]), f"Įrašas {n}", "rec")
-
-clips = st.session_state["clips"]
-image_duration = video_editor.IMAGE_DURATION
-if any(c.get("image") for c in clips):
-    image_duration = st.slider("Kiek sekundžių rodyti kiekvieną nuotrauką", 1.0, 10.0,
-                               video_editor.IMAGE_DURATION, 0.5)
-if clips:
-    st.markdown(f"**Video ({len(clips)}) – bus sujungti šia tvarka:**" if len(clips) > 1 else "**Video:**")
-    for i, c in enumerate(clips):
-        info = ("🖼️ nuotrauka" if c.get("image") else "🔈 balsas" if c["audio"] == "speech"
-                else "🔇 be garso" if c["audio"] == "none" else "🔈 balso neaptikta")
-        # Horizontalus konteineris (ne stulpeliai) – telefone neišsidėsto į atskiras eilutes.
-        row = st.container(horizontal=True, wrap=False, vertical_alignment="center", gap="small", border=True)
-        name = c["name"] if len(c["name"]) <= 18 else c["name"][:8] + "…" + c["name"][-7:]
-        dur = image_duration if c.get("image") else c["duration"]
-        row.markdown(f"**{i + 1}.** {name}  \n{dur:.1f} s · {info}", width="stretch")
-        row.button("⬆️", key=f"up-{c['id']}", disabled=i == 0, on_click=move_clip, args=(i, -1),
-                   help="Perkelti aukščiau")
-        row.button("⬇️", key=f"down-{c['id']}", disabled=i == len(clips) - 1, on_click=move_clip,
-                   args=(i, 1), help="Perkelti žemiau")
-        row.button("✖️", key=f"del-{c['id']}", on_click=move_clip, args=(i, 0), help="Pašalinti")
-    if len(clips) > 1:
-        total = sum(image_duration if c.get("image") else c["duration"] for c in clips)
-        st.caption(f"Bendra trukmė prieš montažą: {total:.1f} s")
-    st.caption("➕ Galite pridėti daugiau video – įkelti iš albumo arba nufilmuoti.")
+clips, image_duration = clips_ui.clip_picker()
 
 uploaded = bool(clips)
 states = {c["audio"] for c in clips}
 audio_state = "speech" if "speech" in states else "silent" if "silent" in states else "none"
 speech = audio_state == "speech"
-client = openai_client()
+client = clips_ui.openai_client()
 
 fmt_label = st.radio(
     "Formatas",
