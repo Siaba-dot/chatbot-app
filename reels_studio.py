@@ -53,6 +53,16 @@ TEMPLATES = {
 
 COLOR_FILTERS = {
     "Natūralios": [],
+    # Firminiai studijos filtrai
+    "Paryžiaus rytas": ["curves=r='0/0.10 0.5/0.58 1/1':g='0/0.07 0.5/0.52 1/0.96':b='0/0.11 0.5/0.52 1/0.95'",
+                        "eq=saturation=0.8:contrast=0.92:brightness=0.02",
+                        "colorbalance=rh=0.07:gh=0.0:bh=0.05:rm=0.03:bm=0.02"],
+    "Milano naktis": ["curves=all='0/0 0.25/0.17 0.75/0.83 1/1'",
+                      "colorbalance=rs=-0.07:bs=0.08:rh=0.08:gh=0.02:bh=-0.06", "eq=saturation=0.88:gamma=0.95",
+                      "vignette=PI/4.5"],
+    "Baltijos auksas": ["colorbalance=rs=0.09:gs=0.04:bs=-0.12:rm=0.10:gm=0.04:bm=-0.12:rh=0.07:gh=0.02:bh=-0.10",
+                        "curves=all='0/0.03 0.5/0.55 1/0.98'", "eq=saturation=1.18:contrast=1.06",
+                        "vignette=PI/6"],
     "Auksinė valanda": ["colorbalance=rs=0.05:gs=0.01:bs=-0.06:rh=0.06:bh=-0.05",
                         "eq=contrast=1.08:saturation=1.08:gamma=0.98", "vignette=PI/6"],
     "Kino": ["eq=contrast=1.12:saturation=0.85:gamma=0.97", "vignette=PI/5"],
@@ -78,6 +88,7 @@ EFFECTS = {
     "Šviesos blyksnis": "Video prasideda baltu blyksniu.",
     "Aukso blizgesys": "Firminis: per auksinį ar sidabrinį tekstą periodiškai perbėga šviesos blyksnis.",
     "Auksinės dulkės": "Firminis: vaizde švelniai plaukioja ir mirga auksinės kibirkštėlės.",
+    "Auksinis rėmelis": "Firminis: plona dviguba metalinė linija aplink kadrą su deimantėliais (aukso ar sidabro).",
 }
 TEXT_EFFECTS = ("Aukso blizgesys",)  # matosi tik ant teksto – peržiūra rodoma su pavyzdiniu tekstu
 
@@ -120,16 +131,26 @@ def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, durati
     return f"{inp}{','.join(a + b) or 'null'}{out}"
 
 
-def thumbnail(frame, out_path, color="Natūralios", effects=(), width=180, height=320):
+def still_extras(inp, out, width, height, effects, tmp, accent="Aukso gradientas", fps=25):
+    """Dulkės ir rėmelis vienam kadrui (miniatiūroms, viršeliui, peržiūroms)."""
+    chains, cur = [], inp
+    if "Auksinės dulkės" in (effects or ()):
+        chains += dust_chains(cur, "[sx1]", width, height, fps, tmp, still=True)
+        cur = "[sx1]"
+    if "Auksinis rėmelis" in (effects or ()):
+        chains += frame_chains(cur, "[sx2]", width, height, fps, tmp, accent)
+        cur = "[sx2]"
+    chains.append(f"{cur}null{out}")
+    return chains
+
+
+def thumbnail(frame, out_path, color="Natūralios", effects=(), width=180, height=320, accent="Aukso gradientas"):
     """Mažas peržiūros paveikslėlis filtrų / efektų langeliui."""
     pre = [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}", "setsar=1"]
     tmp = tempfile.mkdtemp()
     try:
-        if "Auksinės dulkės" in (effects or ()):
-            g = ";".join([look_graph("[0:v]", "[lk]", color, effects, width, height, still=True, pre=pre)]
-                         + dust_chains("[lk]", "[out]", width, height, 25, tmp, still=True))
-        else:
-            g = look_graph("[0:v]", "[out]", color, effects, width, height, still=True, pre=pre)
+        g = ";".join([look_graph("[0:v]", "[lk]", color, effects, width, height, still=True, pre=pre)]
+                     + still_extras("[lk]", "[out]", width, height, effects, tmp, accent))
         r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", frame, "-filter_complex", g, "-map",
                             "[out]", "-frames:v", "1", "-q:v", "4", out_path], capture_output=True, text=True)
         if r.returncode != 0:
@@ -164,7 +185,6 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
             post.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
         pre = [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}", "setsar=1"]
         shine = "Aukso blizgesys" in (effects or ())
-        dust = "Auksinės dulkės" in (effects or ())
         if (accent in GRADIENTS or shine) and post:
             masks = []
             if look:
@@ -182,8 +202,7 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
         else:
             g = look_graph("[0:v]", "[sel]", color, effects, width, height, still=True, pre=pre,
                            post=post + ["select='gte(t,1.0)'"])
-        g += ";" + (";".join(dust_chains("[sel]", "[out]", width, height, 10, tmp, still=True)) if dust
-                    else "[sel]null[out]")
+        g += ";" + ";".join(still_extras("[sel]", "[out]", width, height, effects, tmp, accent, 10))
         r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-framerate", "10", "-t", "1.3",
                             "-i", frame, "-filter_complex", g, "-map", "[out]", "-frames:v", "1", "-q:v", "4",
                             out_path], capture_output=True, text=True)
@@ -228,6 +247,9 @@ def music_library():
             out[title] = {"path": path, "desc": desc}
     return out
 
+
+SIGNATURE_FILTERS = ("Paryžiaus rytas", "Milano naktis", "Baltijos auksas")
+SIGNATURE_EFFECTS = ("Aukso blizgesys", "Auksinės dulkės", "Auksinis rėmelis")
 
 LENGTHS = {"Be ribos": None, "15 s": 15, "30 s": 30, "60 s": 60, "90 s": 90}
 
@@ -424,6 +446,51 @@ def dust_media(path, width=540, height=960, fps=30, seconds=4.0, still=False, se
     return path
 
 
+def frame_image(path, width, height, accent="Aukso gradientas"):
+    """Auksinis (ar sidabrinis) rėmelis: dviguba linija suapvalintais kampais ir deimantėliai viršuje bei
+    apačioje (RGBA PNG)."""
+    import numpy as np
+    stops = GRADIENTS.get(accent) or (GRADIENTS["Sidabro gradientas"] if "idabr" in accent
+                                      else GRADIENTS["Aukso gradientas"])
+    pos = np.array([p for p, _ in stops])
+    cols = np.array([_hex(c) for _, c in stops], dtype=float)
+    y, x = np.mgrid[0:height, 0:width].astype(float)
+    alpha = np.zeros((height, width))
+
+    def rounded(m, r, thick):
+        cx, cy = width / 2, height / 2
+        hx, hy = width / 2 - m, height / 2 - m
+        qx, qy = np.abs(x - cx) - (hx - r), np.abs(y - cy) - (hy - r)
+        d = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
+        return np.clip(thick / 2 + 0.5 - np.abs(d), 0, 1)
+
+    m = width * 0.035
+    alpha = np.maximum(alpha, rounded(m, width * 0.03, max(2.0, width * 0.0042)))
+    alpha = np.maximum(alpha, rounded(m + width * 0.014, width * 0.02, max(1.0, width * 0.0018)) * 0.9)
+    # deimantėliai viršuje ir apačioje (linija aplink juos „pertraukiama“)
+    sz = width * 0.016
+    for cy in (m, height - m):
+        dd = np.abs(x - width / 2) + np.abs(y - cy)
+        alpha = np.where(dd < sz * 1.9, 0, alpha)
+        alpha = np.maximum(alpha, np.clip(sz - dd + 0.5, 0, 1))
+        alpha = np.maximum(alpha, np.clip(1.2 - np.abs(dd - sz * 1.45), 0, 1) * 0.8)
+    period = width * 0.6
+    d = ((x + 0.6 * y) % period) / period
+    t = 1 - np.abs(2 * d - 1)
+    rgb = np.stack([np.interp(t, pos, cols[:, k]) for k in range(3)], axis=-1)
+    rgba = np.concatenate([rgb, alpha[..., None] * 255], axis=-1).clip(0, 255).astype(np.uint8)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
+                    f"{width}x{height}", "-i", "-", "-frames:v", "1", path], input=rgba.tobytes(), check=True)
+    return path
+
+
+def frame_chains(inp, out, width, height, fps, tmp, accent="Aukso gradientas"):
+    """Uždeda auksinį rėmelį (inp -> out)."""
+    p = frame_image(os.path.join(tmp, "frame.png"), width, height, accent)
+    return [f"movie='{_filter_path(p)}',loop=loop=-1:size=1:start=0,format=rgba[frm]",
+            f"{inp}[frm]overlay=shortest=1:format=auto{out}"]
+
+
 def dust_chains(inp, out, width, height, fps, tmp, still=False):
     """Uždeda auksines dulkes ant vaizdo (inp -> out)."""
     p = dust_media(os.path.join(tmp, "dust.png" if still else "dust.mov"), fps=fps, still=still)
@@ -549,6 +616,9 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if "Auksinės dulkės" in (effects or ()):
             graph += dust_chains(vout, "[dusty]", W, H, fps, tmp)
             vout = "[dusty]"
+        if "Auksinis rėmelis" in (effects or ()):
+            graph += frame_chains(vout, "[framed]", W, H, fps, tmp, accent)
+            vout = "[framed]"
         if trimmed:
             graph.append(f"{vout}fade=t=out:st={duration - 0.5:.3f}:d=0.5[faded]")
             vout = "[faded]"
@@ -639,8 +709,7 @@ def make_cover(path, out_path, at=0.5, hook="", accent="Auksas", template="Praba
                              mask_pre=["setpts=PTS+5/TB"], shine=shine, still=True))
         else:
             g = look_graph("[0:v]", "[cv]", color, fx, width, height, still=True, pre=pre, post=post)
-        g += ";" + (";".join(dust_chains("[cv]", "[out]", width, height, 25, tmp, still=True))
-                    if "Auksinės dulkės" in fx else "[cv]null[out]")
+        g += ";" + ";".join(still_extras("[cv]", "[out]", width, height, fx, tmp, accent))
         seek = [] if video_editor.is_image(path) else ["-ss", f"{max(0.0, at):.3f}"]
         cmd = ["ffmpeg", "-y", "-loglevel", "error", *seek, "-i", path, "-filter_complex", g, "-map", "[out]",
                "-frames:v", "1", "-q:v", "2", out_path]

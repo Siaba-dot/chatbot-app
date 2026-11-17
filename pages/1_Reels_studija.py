@@ -156,12 +156,12 @@ def sample_frame():
 
 
 @st.cache_data(max_entries=400, show_spinner=False)
-def thumb(base, color, effects):
+def thumb(base, color, effects, accent="Aukso gradientas"):
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "b.jpg")
         with open(src, "wb") as f:
             f.write(base)
-        out = reels_studio.thumbnail(src, os.path.join(tmp, "t.jpg"), color, effects)
+        out = reels_studio.thumbnail(src, os.path.join(tmp, "t.jpg"), color, effects, accent=accent)
         with open(out, "rb") as f:
             return f.read()
 
@@ -210,15 +210,17 @@ with st.container(border=True):
                  help="Gradientai – metalinis auksas ar sidabras kabliukui, kvietimui ir paryškintam titrų žodžiui.")
     accent = st.session_state[P + "accent"]
 
-    st.markdown("**Filtrai**", unsafe_allow_html=True)
+    st.markdown("**Filtrai** · <small>✦ – firminiai studijos</small>", unsafe_allow_html=True)
     color = st.session_state[P + "color"]
     grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "fgrid")
     for i, name in enumerate(reels_studio.COLOR_FILTERS):
         sel = name == color
         tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_f{i}")
         tile.image(thumb(base, name, ()), width="stretch")
-        tile.button(name, key=f"{P}fbtn{i}", type="primary" if sel else "secondary", width="stretch",
-                    on_click=pick_color, args=(name,))
+        sig = name in reels_studio.SIGNATURE_FILTERS
+        tile.button(("✦ " if sig else "") + name, key=f"{P}fbtn{i}", type="primary" if sel else "secondary",
+                    width="stretch", on_click=pick_color, args=(name,),
+                    help="Firminis studijos filtras" if sig else None)
 
     effects = st.session_state[P + "effects"]
     st.markdown("**Efektai** · <small>galima rinktis kelis</small>", unsafe_allow_html=True)
@@ -227,9 +229,10 @@ with st.container(border=True):
         sel = name in effects
         tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_e{i}")
         img = (style_tile(base, template, accent, color, sample_hook, None, (name,))
-               if name in reels_studio.TEXT_EFFECTS else thumb(base, color, (name,)))
+               if name in reels_studio.TEXT_EFFECTS else thumb(base, color, (name,), accent))
         tile.image(img, width="stretch")
-        tile.button(("✓ " if sel else "") + name, key=f"{P}ebtn{i}", type="primary" if sel else "secondary",
+        mark = "✓ " if sel else "✦ " if name in reels_studio.SIGNATURE_EFFECTS else ""
+        tile.button(mark + name, key=f"{P}ebtn{i}", type="primary" if sel else "secondary",
                     width="stretch", help=desc, on_click=toggle_effect, args=(name,))
     if effects:
         st.caption("Pasirinkta: " + " · ".join(effects))
