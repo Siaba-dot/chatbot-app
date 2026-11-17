@@ -1,6 +1,7 @@
 import datetime
 import html
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -57,6 +58,15 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--line) !imp
   color: #EDE6D6; }
 .lux-tags { color: var(--gold-2); font-size: .92rem; margin-top: .6rem; }
 .lux-foot { text-align: center; color: #5E584D; font-size: .75rem; letter-spacing: .3em; margin-top: 2rem; }
+[class*="st-key-reels_fgrid"] button, [class*="st-key-reels_egrid"] button {
+  min-height: 1.9rem; padding: .15rem .3rem; border-radius: 8px; }
+[class*="st-key-reels_tile"] button *, [class*="st-key-reels_tsel"] button * {
+  font-size: .74rem !important; line-height: 1.15; letter-spacing: 0; text-transform: none; }
+[class*="st-key-reels_tsel"] button, [class*="st-key-reels_tsel"] button * { color: #0B0B0C !important; }
+[class*="st-key-reels_tile"] img, [class*="st-key-reels_tsel"] img {
+  border-radius: 10px 10px 0 0; transition: transform .15s; }
+[class*="st-key-reels_tile"] img { opacity: .82; }
+[class*="st-key-reels_tsel"] img { outline: 2px solid var(--gold); outline-offset: -2px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -82,6 +92,52 @@ def apply_template():
     st.session_state[P + "color"] = t["color"]
 
 
+def pick_color(name):
+    st.session_state[P + "color"] = name
+
+
+def toggle_effect(name):
+    fx = st.session_state.setdefault(P + "effects", [])
+    if name in fx:
+        fx.remove(name)
+    else:
+        fx.append(name)
+
+
+@st.cache_data(max_entries=16, show_spinner=False)
+def base_frame(path, at):
+    """Kadras iš video – pagrindas filtrų ir efektų miniatiūroms."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = reels_studio.grab_frame(path, os.path.join(tmp, "base.jpg"), at)
+        with open(out, "rb") as f:
+            return f.read()
+
+
+@st.cache_data(show_spinner=False)
+def sample_frame():
+    """Pavyzdinis kadras, kol neįkeltas video: šiltas dangus, jūra ir smėlis."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "sample.jpg")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                        "gradients=s=360x640:c0=0xE8A060:c1=0x2F6F7F:c2=0xF4D9B0:n=3:x0=0:y0=0:x1=360:y1=640:d=1",
+                        "-vf", "drawbox=x=110:y=260:w=140:h=200:color=0x3A2A20:t=fill,"
+                               "drawbox=x=150:y=200:w=60:h=60:color=0xF1C9A0:t=fill",
+                        "-frames:v", "1", out], check=True)
+        with open(out, "rb") as f:
+            return f.read()
+
+
+@st.cache_data(max_entries=400, show_spinner=False)
+def thumb(base, color, effects):
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "b.jpg")
+        with open(src, "wb") as f:
+            f.write(base)
+        out = reels_studio.thumbnail(src, os.path.join(tmp, "t.jpg"), color, effects)
+        with open(out, "rb") as f:
+            return f.read()
+
+
 st.session_state.setdefault(P + "template", "Prabangus auksas")
 if P + "accent" not in st.session_state:
     apply_template()
@@ -102,9 +158,41 @@ with st.container(border=True):
                         captions=["Serifinis šriftas, auksas, šilta kino spalva",
                                   "Šampano tonai, ramus kino vaizdas",
                                   "Didelės raidės dėžutėje, sodrios spalvos"])
-    c1, c2 = st.columns(2)
-    accent = c1.selectbox("Akcento spalva", list(reels_studio.ACCENTS), key=P + "accent")
-    color = c2.selectbox("Spalvų korekcija", list(reels_studio.COLOR_FILTERS), key=P + "color")
+    accent = st.selectbox("Akcento spalva", list(reels_studio.ACCENTS), key=P + "accent")
+
+    st.session_state.setdefault(P + "effects", [])
+    base = None
+    if clips:
+        c0 = clips[0]
+        try:
+            base = base_frame(c0["path"], 0.0 if c0.get("image") else min(1.0, c0["duration"] / 2))
+        except Exception:
+            base = None
+    if base is None:
+        base = sample_frame()
+
+    st.markdown("**Filtrai**" + ("" if clips else " · <small>įkėlus video čia matysite savo kadrą</small>"),
+                unsafe_allow_html=True)
+    color = st.session_state[P + "color"]
+    grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "fgrid")
+    for i, name in enumerate(reels_studio.COLOR_FILTERS):
+        sel = name == color
+        tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_f{i}")
+        tile.image(thumb(base, name, ()), width="stretch")
+        tile.button(name, key=f"{P}fbtn{i}", type="primary" if sel else "secondary", width="stretch",
+                    on_click=pick_color, args=(name,))
+
+    effects = st.session_state[P + "effects"]
+    st.markdown("**Efektai** · <small>galima rinktis kelis</small>", unsafe_allow_html=True)
+    grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "egrid")
+    for i, (name, desc) in enumerate(reels_studio.EFFECTS.items()):
+        sel = name in effects
+        tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_e{i}")
+        tile.image(thumb(base, color, (name,)), width="stretch")
+        tile.button(("✓ " if sel else "") + name, key=f"{P}ebtn{i}", type="primary" if sel else "secondary",
+                    width="stretch", help=desc, on_click=toggle_effect, args=(name,))
+    if effects:
+        st.caption("Pasirinkta: " + " · ".join(effects))
 
 # ---------- III. Tekstai ----------
 with st.container(border=True):
@@ -234,7 +322,8 @@ if preview and clips:
         path, at = source_for_cover()
         out = os.path.join(tmp, "cover.jpg")
         try:
-            reels_studio.make_cover(path, out, at, hook, accent, template, handle, 540, 960)
+            reels_studio.make_cover(path, out, at, hook, accent, template, handle, 540, 960, color=color,
+                                    effects=effects)
             with open(out, "rb") as f:
                 st.session_state[P + "preview"] = f.read()
         except Exception as e:
@@ -273,11 +362,11 @@ if create and clips:
             fin = reels_studio.finish(
                 edited, final, hook, hook_duration, cta, 2.5, handle, accent, template, music, music_volume,
                 ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
-                progress=lambda p: bar.progress(0.7 + p * 0.27))
+                progress=lambda p: bar.progress(0.7 + p * 0.27), effects=effects)
             say("Kuriu viršelį…")
             path, at = source_for_cover()
             cover = os.path.join(tmp, "cover.jpg")
-            reels_studio.make_cover(path, cover, at, hook, accent, template, handle)
+            reels_studio.make_cover(path, cover, at, hook, accent, template, handle, color=color, effects=effects)
             caption = None
             if client:
                 say("Rašau aprašymą ir grotažymes…")

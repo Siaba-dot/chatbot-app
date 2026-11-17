@@ -28,7 +28,10 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **kabliukas** – antraštė pirmoms sekundėms, **kvietimas veikti** pabaigoje, **@paskyra** viršuje;
 - **foninės muzikos biblioteka** (6 kūriniai be autorių teisių apribojimų: Prabangus pianinas, Lounge, Kinematografiška,
   Energinga, Lo-fi, Romantiška – `music/`, sukurta `tools/make_music.py`) arba sava muzika; ji automatiškai patyli, kai kalbama;
-- **spalvų korekcija** (Auksinė valanda, Kino, Ryškios, Šaltos, Nespalvotos), akcento spalva (ir titrų paryškinimui);
+- **filtrai langeliuose** – kiekvienas parodomas ant jūsų video kadro (Auksinė valanda, Kino, Teal & Orange, Noir auksas,
+  Ryškios, Vintažas, Pastelinės, Sepija, Šaltos, Nespalvotos); akcento spalva (ir titrų paryškinimui);
+- **efektai langeliuose** (galima derinti): Lėtas priartėjimas, Švytėjimas, Kino juostos, Kino grūdeliai, Vinjetė,
+  Ryškumas, Šviesos blyksnis;
 - **trukmės riba** (15 / 30 / 60 / 90 s), **greitis**, **progreso juostelė**;
 - **viršelis** (JPG 1080×1920) su peržiūra prieš kuriant;
 - **balso atpažinimas titrams** ir **aprašymas, grotažymės, kabliukų idėjos** – reikia OpenAI rakto: `OPENAI_API_KEY`
