@@ -79,6 +79,26 @@ def clip_length(c, image_duration):
     return sum(b - a for a, b in segs) if segs else c["duration"]
 
 
+@st.cache_data(max_entries=300, show_spinner=False)
+def _frame_at(path, t):
+    """Mažas kadras (JPG) iš video ties t sekunde – apkarpymo vietoms parodyti."""
+    r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, t):.2f}", "-i", path, "-frames:v", "1",
+                        "-vf", "scale=180:-2", "-q:v", "5", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
+                       capture_output=True)
+    return r.stdout or None
+
+
+def _frames_strip(c, points):
+    """Kadrų juostelė: [(užrašas, laikas)] – kiekvienas kadras su užrašu po juo."""
+    strip = st.container(horizontal=True, wrap=True, gap="small")
+    for label, t in points:
+        img = _frame_at(c["path"], round(min(t, c["duration"] - 0.05), 1))
+        tile = strip.container(width=84, gap=None)
+        if img:
+            tile.image(img, width="stretch")
+        tile.caption(f"{label}  \n{t:.1f} s")
+
+
 def _trim_controls(prefix, c, box):
     d = round(c["duration"], 1)
     if d < 1.0:
@@ -96,7 +116,17 @@ def _trim_controls(prefix, c, box):
             c["cut"] = (float(x[0]), float(x[1])) if x[1] - x[0] >= 0.1 else None
         else:
             c["cut"] = None
+        a, b = c["trim"]
+        points = [("Pradžia", a)]
+        if c["cut"]:
+            points += [("✂️ Išmetama nuo", c["cut"][0]), ("✂️ Išmetama iki", c["cut"][1])]
+        points.append(("Pabaiga", max(a, b - 0.1)))
+        _frames_strip(c, points)
         st.caption(f"Liks {clip_length(c, 0):.1f} s iš {c['duration']:.1f} s.")
+        if not c["path"].endswith(".mkv"):  # naršyklės įrašų (MKV) telefonai negroja
+            st.video(c["path"], start_time=a, end_time=b, width=240)
+            st.caption("▶ Grojama palikta dalis." + (" Išmetama vidurio dalis čia nepraleidžiama – ją matysite "
+                                                    "greitoje peržiūroje." if c["cut"] else ""))
 
 
 def clip_picker(prefix="", trim=False):

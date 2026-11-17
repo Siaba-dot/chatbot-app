@@ -34,6 +34,7 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
   Ryškumas, Šviesos blyksnis;
 - **trukmės riba** (15 / 30 / 60 / 90 s), **greitis**, **progreso juostelė**;
 - **įrašų apkarpymas** – kiekvienam video „✂️ Apkarpyti“: palikti nuo–iki ir (pasirinktinai) išmesti dalį iš vidurio;
+  ties kiekviena riba rodomas kadras, o grotuvas iškart groja paliktą dalį;
 - **titrų taisymas** – „Paruošti titrus ir peržiūrą“ parodo titrus lentelėje, klaidas galima pataisyti prieš kuriant
   (balso atpažinimas vyksta tik kartą – taisymas ir peržiūra nieko nekainuoja);
 - **greita peržiūra** – visas Reels mažesne kokybe per kelias sekundes, prieš kuriant galutinį video;
