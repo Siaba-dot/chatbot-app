@@ -68,3 +68,14 @@ name = "Kirpykla"
 - Minučių apskaita laikoma serveryje (`.data/usage.json`) ir išsivalo, kai programa perkraunama – OpenAI
   svetainėje papildomai nustatykite išlaidų ribą.
 - Be `[users]` programa atvira visiems, kaip anksčiau.
+- Prisijungimo puslapyje rodoma **planų lentelė** su kainomis ir mygtuku „Susisiekti“ (pagal `contact` – el. paštas,
+  telefonas arba nuoroda). Kainos keičiamos Secrets:
+
+```toml
+[pricing]
+basic = "9 €/mėn."
+premium = "19 €/mėn."
+premium_minutes = 60
+note = "7 dienos nemokamai · mokant už metus – 2 mėnesiai dovanų"
+show = true    # false – lentelės nerodyti
+```

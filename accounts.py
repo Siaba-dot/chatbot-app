@@ -20,11 +20,19 @@ Klientai aprašomi Streamlit Secrets (⋮ → Settings → Secrets), pvz.:
     plan = "basic"                     # viskas, išskyrus balso atpažinimą ir aprašymus
     name = "Kirpykla"
 
+    [pricing]                          # planų lentelė prisijungimo puslapyje (neprivaloma)
+    basic = "9 €/mėn."
+    premium = "19 €/mėn."
+    premium_minutes = 60
+    note = "7 dienos nemokamai · mokant už metus – 2 mėnesiai dovanų"
+    show = true                        # false – lentelės nerodyti
+
 Jei [users] neaprašyta – programa atvira visiems, kaip anksčiau.
 Kliento išjungimas: ištrinkite jo bloką arba įrašykite active = false.
 """
 import datetime
 import hmac
+import html
 import json
 import os
 import threading
@@ -122,9 +130,97 @@ def require_login():
                 st.rerun()
             time.sleep(1.0)  # lėtina slaptažodžių spėliojimą
             st.error("Neteisingas vardas arba slaptažodis.")
-        if contact():
-            st.caption(f"Neturite prieigos? Susisiekite: {contact()}")
+    if pricing().get("show", True) is not False:
+        st.markdown(plans_html(), unsafe_allow_html=True)
     st.stop()
+
+
+def pricing():
+    try:
+        return dict(st.secrets.get("pricing") or {})
+    except Exception:
+        return {}
+
+
+def _contact_link(subject):
+    c = (contact() or "").strip()
+    if not c:
+        return ""
+    if "@" in c and " " not in c:
+        href = f"mailto:{c}?subject={subject.replace(' ', '%20')}"
+    elif c.startswith(("http://", "https://")):
+        href = c
+    elif c.replace("+", "").replace(" ", "").isdigit():
+        href = "tel:" + c.replace(" ", "")
+    else:
+        return f'<div class="pl-contact">{html.escape(c)}</div>'
+    return f'<a class="pl-btn" href="{html.escape(href)}" target="_blank">Susisiekti</a>'
+
+
+BASIC_FEATURES = [
+    "Automatinis montažas: pauzių kirpimas, 9:16, keli įrašai",
+    "Triukšmo valymas ir vienodas garsumas",
+    "3 prabangūs šablonai, kabliukas, kvietimas veikti",
+    "11 filtrų ir 7 efektai su peržiūra",
+    "Muzikos biblioteka be autorių teisių",
+    "Viršelis ir titrai iš įvesto teksto",
+]
+PREMIUM_FEATURES = [
+    "Viskas, kas Pagrindiniame plane",
+    "Automatiniai titrai iš kalbos",
+    "Titrų vertimas (EN, RU, PL, DE…)",
+    "Aprašymas, grotažymės ir kabliukų idėjos",
+]
+
+
+def plans_html():
+    """Planų palyginimo lentelė (kainos – iš Secrets [pricing])."""
+    pr = pricing()
+    basic = html.escape(str(pr.get("basic", "9 €/mėn.")))
+    premium = html.escape(str(pr.get("premium", "19 €/mėn.")))
+    minutes = pr.get("premium_minutes", DEFAULT_MINUTES)
+    note = html.escape(str(pr.get("note", "7 dienos nemokamai · mokant už metus – 2 mėnesiai dovanų")))
+    prem = PREMIUM_FEATURES + [f"{minutes} min. balso atpažinimo per mėnesį"]
+
+    def card(name, price, feats, cls, subject):
+        items = "".join(f"<li>{html.escape(f)}</li>" for f in feats)
+        badge = '<span class="pl-badge">Populiariausias</span>' if cls == "pl-prem" else ""
+        return (f'<div class="pl-card {cls}">{badge}<div class="pl-name">{name}</div>'
+                f'<div class="pl-price">{price}</div><ul>{items}</ul>{_contact_link(subject)}</div>')
+
+    return f"""
+<style>
+.pl-wrap {{ margin: 2.2rem 0 .5rem; }}
+.pl-title {{ text-align: center; font-family: 'Playfair Display', Georgia, serif; font-size: 1.7rem; color: #F4EEDF; }}
+.pl-note {{ text-align: center; color: #B8AF9C; font-size: .9rem; margin: .3rem 0 1.2rem; }}
+.pl-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }}
+.pl-card {{ display: flex; flex-direction: column; position: relative; border: 1px solid rgba(212,175,55,.22); border-radius: 16px; padding: 1.3rem 1.2rem;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01)); }}
+.pl-prem {{ border-color: rgba(212,175,55,.75); box-shadow: 0 10px 40px rgba(212,175,55,.12);
+  background: linear-gradient(180deg, rgba(212,175,55,.12), rgba(212,175,55,.02)); }}
+.pl-badge {{ position: absolute; top: -.7rem; right: 1rem; background: linear-gradient(100deg, #B8912E, #F3DE9C, #D4AF37);
+  color: #0B0B0C; font-size: .68rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  padding: .2rem .6rem; border-radius: 999px; }}
+.pl-name {{ letter-spacing: .3em; text-transform: uppercase; font-size: .75rem; color: #D4AF37; font-weight: 600; }}
+.pl-price {{ font-family: 'Playfair Display', Georgia, serif; font-size: 2rem; color: #F3DE9C; margin: .3rem 0 .7rem; }}
+.pl-card ul {{ list-style: none; padding: 0; margin: 0 0 1rem; flex: 1; }}
+.pl-card li {{ color: #E4DCC8; font-size: .9rem; padding: .28rem 0 .28rem 1.4rem; position: relative; }}
+.pl-card li::before {{ content: "✦"; position: absolute; left: 0; color: #D4AF37; font-size: .8rem; top: .35rem; }}
+.pl-btn {{ display: block; text-align: center; padding: .55rem; border-radius: 10px; text-decoration: none !important;
+  border: 1px solid rgba(212,175,55,.5); color: #F3DE9C !important; font-weight: 500; }}
+.pl-prem .pl-btn {{ background: linear-gradient(100deg, #B8912E, #F3DE9C 45%, #D4AF37 70%, #B8912E); color: #0B0B0C !important;
+  border: 0; font-weight: 600; }}
+.pl-contact {{ text-align: center; color: #B8AF9C; font-size: .85rem; }}
+</style>
+<div class="pl-wrap">
+  <div class="pl-title">Planai</div>
+  <div class="pl-note">{note}</div>
+  <div class="pl-grid">
+    {card("Pagrindinis", basic, BASIC_FEATURES, "pl-basic", "Reels studija - Pagrindinis planas")}
+    {card("Premium", premium, prem, "pl-prem", "Reels studija - Premium planas")}
+  </div>
+</div>
+"""
 
 
 # ---------- Balso atpažinimo minučių apskaita ----------
