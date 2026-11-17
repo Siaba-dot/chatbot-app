@@ -152,7 +152,7 @@ if P + "accent" not in st.session_state:
 # ---------- I. Medžiaga ----------
 with st.container(border=True):
     step("I", "Medžiaga", "video, nuotraukos arba filmavimas")
-    clips, image_duration = clips_ui.clip_picker(P)
+    clips, image_duration = clips_ui.clip_picker(P, trim=True)
 
 states = {c["audio"] for c in clips}
 speech = "speech" in states
@@ -216,7 +216,7 @@ with st.container(border=True):
                           help="Sakomas žodis paryškinamas akcento spalva.")
 
     # Balso atpažinimas (OpenAI Whisper)
-    speech_minutes = sum(c["duration"] for c in clips if not c.get("image")) / 60
+    speech_minutes = sum(clips_ui.clip_length(c, image_duration) for c in clips if not c.get("image")) / 60
     if plan == "open":  # prisijungimas išjungtas – raktas iš Secrets arba įvedamas čia
         has_secret = bool(clips_ui.configured_key())
         if not has_secret:
@@ -315,7 +315,7 @@ with st.container(border=True):
                              format_func=lambda x: f"{x:g}×")
     c1, c2 = st.columns(2)
     progress_bar = c1.radio("Progreso juostelė", ["Viršuje", "Apačioje", "Nėra"], horizontal=True)
-    total = float(sum(image_duration if c.get("image") else c["duration"] for c in clips))
+    total = float(sum(clips_ui.clip_length(c, image_duration) for c in clips))
     cover_at = c2.slider("Viršelio kadras (s)", 0.0, max(0.1, round(total, 1)), min(1.0, round(total, 1)), 0.1,
                          disabled=not clips)
     topic = st.text_input("Tema / produktas (aprašymui)", placeholder="Pvz.: rudens stiliaus patarimai",
@@ -326,19 +326,138 @@ with st.container(border=True):
 
 
 def source_for_cover():
-    """Pirmas įrašas arba sujungtas video – kadras viršeliui."""
-    if len(clips) == 1:
-        return clips[0]["path"], cover_at
+    """Kuris įrašas ir kuri jo vieta atitinka viršelio kadrą (atsižvelgiant į apkarpymą)."""
     t = 0.0
     for c in clips:
-        d = image_duration if c.get("image") else c["duration"]
-        if cover_at < t + d:
-            return c["path"], cover_at - t
-        t += d
+        segs = clips_ui.clip_segments(c) or [(0.0, image_duration if c.get("image") else c["duration"])]
+        for a, b in segs:
+            if cover_at < t + (b - a):
+                return c["path"], 0.0 if c.get("image") else a + (cover_at - t)
+            t += b - a
     return clips[-1]["path"], 0.0
 
 
 highlight = reels_studio._ass_color(reels_studio.ACCENTS[accent][0])[4:]  # BBGGRR
+work = st.session_state.setdefault(P + "work", tempfile.mkdtemp(prefix="reels_"))
+os.makedirs(work, exist_ok=True)
+signature = (tuple((c["id"], tuple(clips_ui.clip_segments(c) or ())) for c in clips), image_duration,
+             remove_silence, subtitles, client is not None, subtitle_language, subtitle_text.strip())
+prep = st.session_state.get(P + "prep")
+ready = bool(prep) and prep["sig"] == signature and os.path.exists(prep["src"])
+
+
+def prepare(say, progress):
+    """Sujungia / apkarpo medžiagą, suranda pauzes ir paruošia titrus (be galutinio montažo)."""
+    old = st.session_state.get(P + "prep")
+    src, protect = clips[0]["path"], None
+    segments = [clips_ui.clip_segments(c) for c in clips]
+    if len(clips) > 1 or clips[0].get("image") or segments[0]:
+        say(f"Sujungiu {len(clips)} įrašus…" if len(clips) > 1 else "Ruošiu medžiagą…")
+        src = os.path.join(work, f"joined_{datetime.datetime.now().strftime('%H%M%S%f')}.mkv")
+        src, spans = video_editor.concat_clips([c["path"] for c in clips], src, "9:16",
+                                               progress=lambda p: progress(p * 0.5), image_duration=image_duration,
+                                               segments=segments)
+        protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
+    analysis = video_editor.analyze(src, remove_silence=remove_silence, subtitles=subtitles, client=client,
+                                    subtitle_language=subtitle_language, subtitle_text=subtitle_text,
+                                    protect=protect, status=say)
+    if analysis["subtitle_mode"] in ("voice", "translated"):
+        accounts.add_minutes(analysis["info"]["duration"] / 60)
+    if old and old["src"] != src and old["src"].startswith(work) and os.path.exists(old["src"]):
+        os.unlink(old["src"])
+    st.session_state.pop(P + "quick_video", None)
+    n = (old or {}).get("n", 0) + 1
+    st.session_state[P + "prep"] = {"sig": signature, "src": src, "analysis": analysis, "n": n,
+                                    "lines": video_editor.edit_lines(analysis["words"])}
+    return st.session_state[P + "prep"]
+
+
+def music_path(tmp):
+    if music_file:
+        path = os.path.join(tmp, "music" + (os.path.splitext(music_file.name)[1] or ".mp3"))
+        with open(path, "wb") as f:
+            f.write(music_file.getvalue())
+        return path
+    return library[music_choice]["path"] if music_choice in library else None
+
+
+def build(prep, words, tmp, out, quick, progress):
+    """Montažas + Reels apdaila. quick – greita peržiūra (maža raiška, greitas kodavimas)."""
+    edited = os.path.join(tmp, "edited.mp4")
+    res = video_editor.render_edit(
+        prep["src"], edited, prep["analysis"], words, fmt="9:16", denoise=denoise and not quick,
+        loudnorm=not quick, subtitle_style="modern", highlight=highlight,
+        progress=lambda p: progress(p * 0.6), max_side=640 if quick else 1920,
+        preset="ultrafast" if quick else "veryfast", crf=30 if quick else 20)
+    fin = reels_studio.finish(
+        edited, out, hook, hook_duration, cta, 2.5, handle, accent, template, music_path(tmp), music_volume,
+        ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
+        progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick)
+    return res, fin
+
+
+# ---------- VI. Titrai ir peržiūra ----------
+words = None
+with st.container(border=True):
+    step("VI", "Titrai ir peržiūra", "pataisykite prieš kuriant")
+    if not clips:
+        st.caption("Įkėlus medžiagą čia galėsite paruošti titrus, juos pataisyti ir greitai peržiūrėti video.")
+    elif not ready:
+        st.caption("Studija iškirps pauzes" + (" ir parodys titrus – galėsite pataisyti klaidas" if subtitles else "")
+                   + ". Tada – greita peržiūra ir galutinis video.")
+        if prep:
+            st.info("Pakeitėte medžiagą ar titrų nustatymus – paruoškite iš naujo.")
+        if st.button("🎙️  Paruošti titrus ir peržiūrą" if subtitles else "Paruošti peržiūrą", width="stretch",
+                     key=P + "prepare"):
+            box = st.status("Ruošiama…", expanded=True)
+            pbar = st.progress(0.0)
+            try:
+                prepare(box.write, lambda p: pbar.progress(min(1.0, p)))
+            except Exception as e:
+                box.update(label="Nepavyko paruošti", state="error")
+                st.error(str(e))
+                st.stop()
+            st.rerun()
+    else:
+        a = prep["analysis"]
+        lines = prep["lines"]
+        if subtitles and lines:
+            import pandas as pd
+            st.markdown("**Titrai** · <small>spustelėkite tekstą ir pataisykite; ištrintas tekstas – eilutė "
+                        "nerodoma</small>", unsafe_allow_html=True)
+            df = pd.DataFrame([{"Nuo": round(x, 1), "Iki": round(y, 1), "Tekstas": t} for x, y, t in lines])
+            edited = st.data_editor(
+                df, key=f"{P}lines_{prep['n']}", hide_index=True, width="stretch", num_rows="fixed",
+                disabled=["Nuo", "Iki"],
+                column_config={"Nuo": st.column_config.NumberColumn("Nuo (s)", format="%.1f", width="small"),
+                               "Iki": st.column_config.NumberColumn("Iki (s)", format="%.1f", width="small"),
+                               "Tekstas": st.column_config.TextColumn("Tekstas", width="large")})
+            new_lines = [(x, y, str(t) if t is not None else "")
+                         for (x, y, _), t in zip(lines, edited["Tekstas"].tolist())]
+            words = video_editor.apply_line_edits(a["words"], new_lines)
+            changed = sum(1 for (_, _, t0), (_, _, t1) in zip(lines, new_lines) if t0 != t1)
+            if changed:
+                st.caption(f"✏️ Pataisyta eilučių: {changed}")
+        elif subtitles:
+            st.caption("Titrų nėra – kalbos neatpažinta ir teksto neįrašyta.")
+        cut = a["info"]["duration"] - sum(y - x for x, y in a["keep"])
+        st.caption(f"Medžiaga: {a['info']['duration']:.1f} s · iškirpta pauzių: {cut:.1f} s · "
+                   f"kirpimų: {len(a['keep']) - 1}")
+        if st.button("▶  Greita peržiūra", width="stretch", key=P + "quick"):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = os.path.join(tmp, "preview.mp4")
+                pbar = st.progress(0.0, text="Kuriama peržiūra…")
+                try:
+                    build(prep, words, tmp, out, True, lambda p: pbar.progress(min(1.0, p), text="Kuriama peržiūra…"))
+                    with open(out, "rb") as f:
+                        st.session_state[P + "quick_video"] = f.read()
+                except Exception as e:
+                    st.error(str(e))
+                pbar.empty()
+        if st.session_state.get(P + "quick_video"):
+            _, mid, _ = st.columns([1, 1.4, 1])
+            mid.video(st.session_state[P + "quick_video"])
+            mid.caption("Peržiūra mažesne kokybe, garsas neapdorotas. Galutinis video bus pilnos kokybės.")
 
 c1, c2 = st.columns([1, 2])
 preview = c1.button("👁  Viršelio peržiūra", width="stretch", disabled=not clips)
@@ -368,32 +487,11 @@ if create and clips:
         bar = st.progress(0.0)
         say = status.write
         try:
-            src, protect = clips[0]["path"], None
-            if len(clips) > 1 or clips[0].get("image"):
-                say(f"Sujungiu {len(clips)} įrašus…" if len(clips) > 1 else "Ruošiu nuotrauką…")
-                src, spans = video_editor.concat_clips([c["path"] for c in clips], os.path.join(tmp, "joined.mkv"),
-                                                       "9:16", progress=lambda p: bar.progress(p * 0.25),
-                                                       image_duration=image_duration)
-                protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
-            edited = os.path.join(tmp, "edited.mp4")
-            res = video_editor.auto_edit(
-                src, edited, fmt="9:16", remove_silence=remove_silence, denoise=denoise,
-                subtitles=subtitles, client=client, subtitle_language=subtitle_language,
-                subtitle_text=subtitle_text, subtitle_style="modern", protect=protect, highlight=highlight,
-                status=say, progress=lambda p: bar.progress(0.25 + p * 0.45))
-            if res.get("subtitle_mode") in ("voice", "translated"):
-                accounts.add_minutes(res["original_duration"] / 60)
-            music = library[music_choice]["path"] if music_choice in library else None
-            if music_file:
-                music = os.path.join(tmp, "music" + (os.path.splitext(music_file.name)[1] or ".mp3"))
-                with open(music, "wb") as f:
-                    f.write(music_file.getvalue())
-            say("Uždedu kabliuką, spalvas, muziką ir apdailą…")
+            if not ready:
+                prep = prepare(say, lambda p: bar.progress(min(1.0, p) * 0.3))
             final = os.path.join(tmp, "reels.mp4")
-            fin = reels_studio.finish(
-                edited, final, hook, hook_duration, cta, 2.5, handle, accent, template, music, music_volume,
-                ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
-                progress=lambda p: bar.progress(0.7 + p * 0.27), effects=effects)
+            say("Montuoju ir uždedu apdailą…")
+            res, fin = build(prep, words, tmp, final, False, lambda p: bar.progress(0.3 + min(1.0, p) * 0.65))
             say("Kuriu viršelį…")
             path, at = source_for_cover()
             cover = os.path.join(tmp, "cover.jpg")

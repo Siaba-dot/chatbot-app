@@ -33,6 +33,10 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **efektai langeliuose** (galima derinti): Lėtas priartėjimas, Švytėjimas, Kino juostos, Kino grūdeliai, Vinjetė,
   Ryškumas, Šviesos blyksnis;
 - **trukmės riba** (15 / 30 / 60 / 90 s), **greitis**, **progreso juostelė**;
+- **įrašų apkarpymas** – kiekvienam video „✂️ Apkarpyti“: palikti nuo–iki ir (pasirinktinai) išmesti dalį iš vidurio;
+- **titrų taisymas** – „Paruošti titrus ir peržiūrą“ parodo titrus lentelėje, klaidas galima pataisyti prieš kuriant
+  (balso atpažinimas vyksta tik kartą – taisymas ir peržiūra nieko nekainuoja);
+- **greita peržiūra** – visas Reels mažesne kokybe per kelias sekundes, prieš kuriant galutinį video;
 - **viršelis** (JPG 1080×1920) su peržiūra prieš kuriant;
 - **balso atpažinimas titrams** ir **aprašymas, grotažymės, kabliukų idėjos** – reikia OpenAI rakto: `OPENAI_API_KEY`
   Streamlit Secrets arba įvedamas pačioje studijoje (laikomas tik naršyklės sesijoje).

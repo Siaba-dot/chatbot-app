@@ -58,8 +58,49 @@ def move_clip(prefix, i, step):
         clips[i], clips[i + step] = clips[i + step], clips[i]
 
 
-def clip_picker(prefix=""):
-    """Įkėlimo / filmavimo laukas ir įrašų sąrašas su tvarkos keitimu.
+def clip_segments(c):
+    """Įrašo paliekamos dalys pagal apkarpymą: [(nuo, iki), ...] arba None (visas įrašas)."""
+    if c.get("image"):
+        return None
+    a, b = c.get("trim") or (0.0, c["duration"])
+    cut = c.get("cut")
+    segs = [(a, b)]
+    if cut and a < cut[0] < cut[1] < b:
+        segs = [(a, cut[0]), (cut[1], b)]
+    if len(segs) == 1 and a <= 0.01 and b >= c["duration"] - 0.01:
+        return None
+    return segs
+
+
+def clip_length(c, image_duration):
+    if c.get("image"):
+        return image_duration
+    segs = clip_segments(c)
+    return sum(b - a for a, b in segs) if segs else c["duration"]
+
+
+def _trim_controls(prefix, c, box):
+    d = round(c["duration"], 1)
+    if d < 1.0:
+        return
+    with box.expander("✂️ Apkarpyti"):
+        t = st.slider("Palikti nuo – iki (s)", 0.0, d, tuple(c.get("trim") or (0.0, d)), 0.1,
+                      key=f"{prefix}trim-{c['id']}")
+        c["trim"] = (float(t[0]), float(t[1]))
+        cut_on = st.checkbox("Išmesti dalį iš vidurio", value=bool(c.get("cut")), key=f"{prefix}cuton-{c['id']}")
+        if cut_on and t[1] - t[0] > 0.6:
+            lo, hi = float(t[0]), float(t[1])
+            cur = c.get("cut") or (lo + (hi - lo) * 0.4, lo + (hi - lo) * 0.6)
+            cur = (min(max(cur[0], lo), hi), min(max(cur[1], lo), hi))
+            x = st.slider("Išmesti nuo – iki (s)", lo, hi, cur, 0.1, key=f"{prefix}cut-{c['id']}")
+            c["cut"] = (float(x[0]), float(x[1])) if x[1] - x[0] >= 0.1 else None
+        else:
+            c["cut"] = None
+        st.caption(f"Liks {clip_length(c, 0):.1f} s iš {c['duration']:.1f} s.")
+
+
+def clip_picker(prefix="", trim=False):
+    """Įkėlimo / filmavimo laukas ir įrašų sąrašas su tvarkos keitimu (ir apkarpymu, jei trim=True).
     Grąžina (įrašai, kiek sekundžių rodyti nuotrauką)."""
     st.session_state.setdefault(prefix + "clips", [])
     source = st.radio("Video", ["📁 Įkelti video", "🎥 Filmuoti dabar"], horizontal=True,
@@ -100,18 +141,25 @@ def clip_picker(prefix=""):
             info = ("🖼️ nuotrauka" if c.get("image") else "🔈 balsas" if c["audio"] == "speech"
                     else "🔇 be garso" if c["audio"] == "none" else "🔈 balso neaptikta")
             # Horizontalus konteineris (ne stulpeliai) – telefone neišsidėsto į atskiras eilutes.
-            row = st.container(horizontal=True, wrap=False, vertical_alignment="center", gap="small", border=True)
+            box = st.container(border=True, gap=None) if trim else st
+            row = box.container(horizontal=True, wrap=False, vertical_alignment="center", gap="small",
+                                border=not trim)
             name = c["name"] if len(c["name"]) <= 18 else c["name"][:8] + "…" + c["name"][-7:]
-            dur = image_duration if c.get("image") else c["duration"]
-            row.markdown(f"**{i + 1}.** {name}  \n{dur:.1f} s · {info}", width="stretch")
+            dur = clip_length(c, image_duration) if trim else image_duration if c.get("image") else c["duration"]
+            label = row.empty()
             row.button("⬆️", key=f"{prefix}up-{c['id']}", disabled=i == 0, on_click=move_clip,
                        args=(prefix, i, -1), help="Perkelti aukščiau")
             row.button("⬇️", key=f"{prefix}down-{c['id']}", disabled=i == len(clips) - 1, on_click=move_clip,
                        args=(prefix, i, 1), help="Perkelti žemiau")
             row.button("✖️", key=f"{prefix}del-{c['id']}", on_click=move_clip, args=(prefix, i, 0),
                        help="Pašalinti")
+            if trim and not c.get("image"):
+                _trim_controls(prefix, c, box)
+                dur = clip_length(c, image_duration)
+            label.markdown(f"**{i + 1}.** {name}  \n{dur:.1f} s · {info}", width="stretch")
         if len(clips) > 1:
-            total = sum(image_duration if c.get("image") else c["duration"] for c in clips)
+            total = sum(clip_length(c, image_duration) if trim else image_duration if c.get("image")
+                        else c["duration"] for c in clips)
             st.caption(f"Bendra trukmė prieš montažą: {total:.1f} s")
         st.caption("➕ Galite pridėti daugiau video – įkelti iš albumo arba nufilmuoti.")
     return clips, image_duration

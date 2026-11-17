@@ -410,10 +410,10 @@ def _out_size(w, h, ratio, max_side=1920):
     return int(w * k) // 2 * 2, int(h * k) // 2 * 2
 
 
-def frame_size(w, h, fmt="original", band=False):
+def frame_size(w, h, fmt="original", band=False, max_side=1920):
     """Galutinis kadro dydis ir mokymų titrų juostos aukštis: (plotis, aukštis, juosta).
     Fiksuotame formate juosta įsiterpia į kadrą (vaizdas sumažinamas), originaliame – pridedama apačioje."""
-    ow, oh = _out_size(w, h, FORMATS.get(fmt))
+    ow, oh = _out_size(w, h, FORMATS.get(fmt), max_side)
     if not band:
         return ow, oh, 0
     b = training_band(ow, oh)[1]
@@ -438,10 +438,11 @@ def denoise_filter(noise=None, loud=None):
 
 
 def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True,
-           ass_file=None, progress=None, denoise=False, analysis=None, band=False):
+           ass_file=None, progress=None, denoise=False, analysis=None, band=False, max_side=1920,
+           preset="veryfast", crf=20):
     w, h = info["width"], info["height"]
     ratio = FORMATS.get(fmt)
-    ow, oh, bh = frame_size(w, h, fmt, band)
+    ow, oh, bh = frame_size(w, h, fmt, band, max_side)
     total = sum(b - a for a, b in keep)
     cut = not (len(keep) == 1 and keep[0][0] <= 0.01 and keep[0][1] >= info["duration"] - 0.01)
     sel = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in keep)
@@ -489,7 +490,7 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
            "-i", path, "-filter_complex_script", script, "-map", "[v]"]
     if info["has_audio"]:
         cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+    cmd += ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
             "-movflags", "+faststart", "-t", f"{total:.3f}", out_path]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -515,17 +516,19 @@ def is_image(path):
     return out == "image2" or out.endswith("_pipe")
 
 
-def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION):
+def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION, segments=None):
     """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
     pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
     Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų. Nuotraukos rodomos
-    image_duration sekundžių.
+    image_duration sekundžių. segments – kiekvienam įrašui paliekamos dalys [(nuo, iki), ...]
+    (None – visas įrašas); taip įrašą galima apkarpyti ar iškirpti jo vidurį.
     Grąžina (kelias, [(pradžia, pabaiga)] – kiekvieno įrašo vieta sujungtame video)."""
     infos = [probe(p) for p in paths]
     images = [is_image(p) for p in paths]
     for inf, img in zip(infos, images):
         if img:
             inf.update(duration=float(image_duration), has_audio=False)
+    segments = list(segments or [None] * len(paths))
     ratio = FORMATS.get(fmt)
     sizes = [_out_size(i["width"], i["height"], ratio) for i in infos]
     if ratio:
@@ -535,10 +538,22 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
         k = min(1920, max(max(wh) for wh in sizes)) / max(W, H)
         W, H = int(W * k) // 2 * 2, int(H * k) // 2 * 2
     fps = next((i["fps"] for i, img in zip(infos, images) if not img), 30)
-    parts, total, spans = [], 0.0, []
-    for i, (p, inf) in enumerate(zip(paths, infos)):
-        d = inf["duration"]
-        spans.append((total, total + d))
+    # Kiekviena paliekama dalis – atskiras įėjimas (tas pats failas su -ss / -t).
+    pieces = []  # (įrašo nr., kelias, nuotrauka?, pradžia, trukmė)
+    for k, (p, inf, img) in enumerate(zip(paths, infos, images)):
+        segs = segments[k] if k < len(segments) else None
+        if img or not segs:
+            pieces.append((k, p, img, 0.0, inf["duration"]))
+        else:
+            for a, b in segs:
+                a, b = max(0.0, a), min(inf["duration"], b)
+                if b - a >= 0.1:
+                    pieces.append((k, p, img, a, b - a))
+    parts, total, spans = [], 0.0, [None] * len(paths)
+    audio_ok = {}
+    for i, (k, p, img, start, d) in enumerate(pieces):
+        a0 = spans[k][0] if spans[k] else total
+        spans[k] = (a0, total + d)
         total += d
         if ratio:  # fiksuotas formatas – užpildom kadrą (kraštai apkarpomi)
             fit = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
@@ -546,20 +561,25 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
             fit = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black"
         parts.append(f"[{i}:v]{fit},setsar=1,fps={fps},format=yuv420p,trim=duration={d:.3f},"
                      f"setpts=PTS-STARTPTS[v{i}]")
-        if inf["has_audio"] and len(_frame_levels(p)):
+        if p not in audio_ok:
+            audio_ok[p] = infos[k]["has_audio"] and len(_frame_levels(p)) > 0
+        if audio_ok[p]:
             parts.append(f"[{i}:a:0]aresample=48000,aformat=channel_layouts=stereo,apad,"
                          f"atrim=duration={d:.3f},asetpts=PTS-STARTPTS[a{i}]")
         else:
             parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={d:.3f}[a{i}]")
-    graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(paths))) + \
-        f"concat=n={len(paths)}:v=1:a=1[v][a]"
+    spans = [sp or (total, total) for sp in spans]
+    graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + \
+        f"concat=n={len(pieces)}:v=1:a=1[v][a]"
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write(graph)
         script = f.name
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1"]
-    for p, img in zip(paths, images):
+    for k, p, img, start, d in pieces:
         if img:  # nuotrauka kartojama kaip video
-            cmd += ["-loop", "1", "-framerate", str(fps), "-t", f"{image_duration:.3f}"]
+            cmd += ["-loop", "1", "-framerate", str(fps), "-t", f"{d:.3f}"]
+        elif start > 0 or d < infos[k]["duration"] - 0.01:
+            cmd += ["-ss", f"{start:.3f}", "-t", f"{d + 0.1:.3f}"]
         cmd += ["-i", p]
     cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
             "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
@@ -577,20 +597,12 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
     return out_path, spans
 
 
-def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None, min_silence=0.5,
-              padding=0.15, loudnorm=True, fades=True, denoise=True, subtitles=False, client=None,
-              language=None, subtitle_language="lt", subtitle_text="", subtitle_style="modern",
-              ypos=0.67, translate_model=None, protect=None, status=None, progress=None,
-              highlight="0AD6FF"):
-    """Visas automatinis montažas vienu kvietimu. Grąžina santrauką (dict).
-
-    Titrai: jei įraše yra balsas – atpažįstami automatiškai (reikia OpenAI kliento);
-    language – kalbama kalba (None = nustatyti automatiškai), subtitle_language – titrų
-    kalba (None = kaip kalbama; kitaip išverčiama). Jei balso nėra – naudojamas
-    subtitle_text, tolygiai išdėliotas per visą video. protect – laiko intervalai, kurių tylos
-    kirpimas neliečia (pvz. sujungti įrašai be balso). subtitle_style: "modern" – animuoti
-    titrai vaizdo viduryje, "training" – mokymų titrai juodoje juostoje po vaizdu.
-    """
+def analyze(path, remove_silence=True, noise_db=None, min_silence=0.5, padding=0.15, subtitles=False,
+            client=None, language=None, subtitle_language="lt", subtitle_text="", translate_model=None,
+            protect=None, status=None):
+    """1-as žingsnis: suranda, ką palikti (tylos kirpimas), ir paruošia titrų žodžius
+    [(žodis, pradžia, pabaiga)] jau sumontuoto video laiko skalėje. Rezultatą galima
+    peržiūrėti / pataisyti ir perduoti render_edit()."""
     say = status or (lambda msg: None)
     say("Analizuoju video…")
     info = probe(path)
@@ -609,9 +621,8 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
                     merged.append((a, b))
             keep = merged
 
-    ass_file, n_words, sub_mode, words = None, 0, None, []
+    words, sub_mode = [], None
     if subtitles:
-        words = []
         speech = status_ == "speech"
         # Jei girdimas garsas yra, bet balso neaptikome ir teksto neįvesta – vis tiek bandom atpažinti
         # (visiškos tylos Whisper'iui nesiunčiam – jis tada „prigalvoja“ teksto).
@@ -634,13 +645,46 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
                 segs = keep_segments(info["duration"], detect_silences(path, noise_db, 0.25, an), 0.0, 0.05)
             words = align_text(subtitle_text, remap_segments(segs, keep))
             sub_mode = "text"
-        n_words = len(words)
-        if words:
-            training = subtitle_style == "training"
-            w, h, bh = frame_size(info["width"], info["height"], fmt, training)
-            with tempfile.NamedTemporaryFile("w", suffix=".ass", delete=False, encoding="utf-8") as f:
-                f.write(build_ass_training(words, w, h, bh) if training else build_ass(words, w, h, ypos, highlight))
-                ass_file = f.name
+    return {"info": info, "audio": an, "keep": keep, "words": words, "subtitle_mode": sub_mode}
+
+
+def edit_lines(words):
+    """Titrai redagavimui: sakiniai [(pradžia, pabaiga, tekstas)]."""
+    return [(g[0][1], g[-1][2], " ".join(w[0] for w in g)) for g in group_lines(words)]
+
+
+def apply_line_edits(words, lines):
+    """Pataisyti sakiniai -> žodžiai. Nepakeistų sakinių žodžių laikai išlieka tikslūs,
+    pakeistų – išdėliojami per to sakinio laiką; tuščias sakinys pašalinamas."""
+    groups = group_lines(words)
+    out = []
+    for i, (a, b, text) in enumerate(lines):
+        text = (text or "").strip()
+        if not text:
+            continue
+        g = groups[i] if i < len(groups) else None
+        if g and " ".join(w[0] for w in g) == text and abs(g[0][1] - a) < 0.01 and abs(g[-1][2] - b) < 0.01:
+            out += g
+        else:
+            out += align_text(text, [(float(a), max(float(b), float(a) + 0.3))])
+    return out
+
+
+def render_edit(path, out_path, analysis, words=None, fmt="original", loudnorm=True, fades=True,
+                denoise=True, subtitle_style="modern", ypos=0.67, highlight="0AD6FF", status=None,
+                progress=None, max_side=1920, preset="veryfast", crf=20):
+    """2-as žingsnis: sumontuoja video pagal analyze() rezultatą su (galbūt pataisytais) titrais.
+    max_side / preset / crf – mažesnė raiška ir greitesnis kodavimas greitai peržiūrai."""
+    say = status or (lambda msg: None)
+    info, an, keep = analysis["info"], analysis["audio"], analysis["keep"]
+    words = analysis["words"] if words is None else words
+    ass_file = None
+    if words:
+        training = subtitle_style == "training"
+        w, h, bh = frame_size(info["width"], info["height"], fmt, training, max_side)
+        with tempfile.NamedTemporaryFile("w", suffix=".ass", delete=False, encoding="utf-8") as f:
+            f.write(build_ass_training(words, w, h, bh) if training else build_ass(words, w, h, ypos, highlight))
+            ass_file = f.name
 
     say("Montuoju video…")
     try:
@@ -652,7 +696,7 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
         for n, (dn, ln, fd) in enumerate(attempts):
             try:
                 res = render(path, out_path, keep, info, fmt, ln, fd, ass_file, progress,
-                             denoise=dn, analysis=an, band=band)
+                             denoise=dn, analysis=an, band=band, max_side=max_side, preset=preset, crf=crf)
                 break
             except RuntimeError as e:
                 if "NaN" not in str(e) or n == len(attempts) - 1:
@@ -661,9 +705,29 @@ def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None
     finally:
         if ass_file:
             os.unlink(ass_file)
-    res.update(original_duration=info["duration"], cuts=len(keep) - 1, words=n_words,
-               subtitle_mode=sub_mode, segments=keep, text=" ".join(w[0] for w in words))
+    res.update(original_duration=info["duration"], cuts=len(keep) - 1, words=len(words),
+               subtitle_mode=analysis["subtitle_mode"], segments=keep, text=" ".join(w[0] for w in words))
     return res
+
+
+def auto_edit(path, out_path, fmt="original", remove_silence=True, noise_db=None, min_silence=0.5,
+              padding=0.15, loudnorm=True, fades=True, denoise=True, subtitles=False, client=None,
+              language=None, subtitle_language="lt", subtitle_text="", subtitle_style="modern",
+              ypos=0.67, translate_model=None, protect=None, status=None, progress=None,
+              highlight="0AD6FF"):
+    """Visas automatinis montažas vienu kvietimu (analyze + render_edit). Grąžina santrauką (dict).
+
+    Titrai: jei įraše yra balsas – atpažįstami automatiškai (reikia OpenAI kliento);
+    language – kalbama kalba (None = nustatyti automatiškai), subtitle_language – titrų
+    kalba (None = kaip kalbama; kitaip išverčiama). Jei balso nėra – naudojamas
+    subtitle_text, tolygiai išdėliotas per visą video. protect – laiko intervalai, kurių tylos
+    kirpimas neliečia (pvz. sujungti įrašai be balso). subtitle_style: "modern" – animuoti
+    titrai vaizdo viduryje, "training" – mokymų titrai juodoje juostoje po vaizdu.
+    """
+    a = analyze(path, remove_silence, noise_db, min_silence, padding, subtitles, client, language,
+                subtitle_language, subtitle_text, translate_model, protect, status)
+    return render_edit(path, out_path, a, None, fmt, loudnorm, fades, denoise, subtitle_style, ypos, highlight,
+                       status, progress)
 
 
 if __name__ == "__main__":

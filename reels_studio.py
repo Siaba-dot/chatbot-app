@@ -271,7 +271,7 @@ def _run(cmd, total, progress, what):
 
 def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5, handle="",
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
-           color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=()):
+           color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}."""
     info = video_editor.probe(path)
     W, H, fps = info["width"], info["height"], info["fps"]
@@ -336,7 +336,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                *inputs, "-filter_complex_script", script, "-map", vout]
         if aout:
             cmd += ["-map", aout, "-c:a", "aac", "-b:a", "192k"]
-        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+        cmd += ["-c:v", "libx264", "-preset", "ultrafast" if preview else "veryfast", "-crf", "28" if preview else "19",
+                "-pix_fmt", "yuv420p",
                 "-r", str(fps), "-movflags", "+faststart", "-t", f"{duration:.3f}", out_path]
         _run(cmd, duration, progress, "Nepavyko paruošti Reels")
     finally:
