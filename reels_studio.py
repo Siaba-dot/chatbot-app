@@ -49,6 +49,28 @@ COLOR_FILTERS = {
     "Nespalvotos": ["hue=s=0", "eq=contrast=1.1"],
 }
 
+MUSIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "music")
+# Studijos muzikos biblioteka (sukurta tools/make_music.py – be autorių teisių apribojimų)
+MUSIC = {
+    "prabangus_pianinas": ("✨ Prabangus pianinas", "Lėti pianino akordai, daug erdvės – mada, interjeras, grožis."),
+    "lounge": ("🍸 Lounge", "Šiltas elektrinis pianinas ir minkštas ritmas – kavinės, viešbučiai, stilius."),
+    "kinematografiska": ("🎬 Kinematografiška", "Platūs pasažai ir lėtas pulsas – kelionės, prieš/po, istorijos."),
+    "energinga": ("⚡ Energinga", "118 BPM, gyvas ritmas – sportas, renginiai, greiti patarimai."),
+    "lofi": ("☕ Lo-fi", "Ramus siūbuojantis ritmas – kasdienybė, darbas, mokymai."),
+    "romantiska": ("🌸 Romantiška", "Švelnūs varpeliai – vestuvės, dovanos, gėlės."),
+}
+
+
+def music_library():
+    """{rodomas pavadinimas: {"path", "desc"}} – tik esantys failai."""
+    out = {}
+    for key, (title, desc) in MUSIC.items():
+        path = os.path.join(MUSIC_DIR, key + ".mp3")
+        if os.path.exists(path):
+            out[title] = {"path": path, "desc": desc}
+    return out
+
+
 LENGTHS = {"Be ribos": None, "15 s": 15, "30 s": 30, "60 s": 60, "90 s": 90}
 
 

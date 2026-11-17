@@ -86,8 +86,6 @@ st.session_state.setdefault(P + "template", "Prabangus auksas")
 if P + "accent" not in st.session_state:
     apply_template()
 
-client = clips_ui.openai_client()
-
 # ---------- I. Medžiaga ----------
 with st.container(border=True):
     step("I", "Medžiaga", "video, nuotraukos arba filmavimas")
@@ -121,26 +119,73 @@ with st.container(border=True):
 
     subtitles = st.toggle("Animuoti titrai", value=True,
                           help="Sakomas žodis paryškinamas akcento spalva.")
+
+    # Balso atpažinimas (OpenAI Whisper): raktas iš Secrets arba įvedamas čia.
+    has_secret = bool(clips_ui.configured_key())
+    if not has_secret:
+        with st.expander("🎙️ Balso atpažinimas – įveskite OpenAI raktą",
+                         expanded=not st.session_state.get("openai_key")):
+            st.text_input("OpenAI API raktas", type="password", key="openai_key", placeholder="sk-…",
+                          help="Raktas naudojamas tik šioje naršyklės sesijoje ir niekur nesaugomas. "
+                               "Kad nereikėtų įvesti kaskart – įrašykite jį Streamlit Cloud: "
+                               "⋮ → Settings → Secrets: OPENAI_API_KEY = \"sk-…\"")
+            st.caption("Raktą gausite platform.openai.com → API keys. Minutė atpažinimo kainuoja ~0,006 $.")
+    client = clips_ui.openai_client()
+    typed = st.session_state.get("openai_key", "").strip()
+    if client is not None and not has_secret and st.session_state.get(P + "checked_key") != typed:
+        try:
+            client.models.list()
+            st.session_state[P + "key_ok"] = True
+        except Exception as e:
+            auth = "401" in str(e) or "api key" in str(e).lower() or type(e).__name__ == "AuthenticationError"
+            # Tik tikrai neteisingas raktas atmetamas; ryšio sutrikimai – ne rakto kaltė.
+            st.session_state[P + "key_ok"] = "neteisingas raktas – patikrinkite, ar nukopijavote visą." \
+                if auth else True
+        st.session_state[P + "checked_key"] = typed
+    key_ok = has_secret or st.session_state.get(P + "key_ok") is True
+    if client is not None and not key_ok:
+        st.error(f"OpenAI raktas netinka: {st.session_state.get(P + 'key_ok')}")
+        client = None
+    elif client is not None:
+        st.success("🎙️ Balso atpažinimas įjungtas – titrai bus sukurti automatiškai iš kalbos.")
+
     subtitle_text, subtitle_language = "", "lt"
     if subtitles and clips:
-        if client and speech:
+        if client:
             choice = st.selectbox("Titrų kalba", ["Lietuvių", "Kaip kalbama video (be vertimo)", "English",
-                                                  "Русский", "Polski", "Deutsch"])
+                                                  "Русский", "Polski", "Deutsch"],
+                                  help="Jei video kalbama kita kalba, titrai bus išversti.")
             subtitle_language = {"Lietuvių": "lt", "English": "en", "Русский": "ru", "Polski": "pl",
                                  "Deutsch": "de"}.get(choice)
+            if not speech:
+                subtitle_text = st.text_area(
+                    "Titrų tekstas (jei video be balso)",
+                    placeholder="Balso neaptikta. Jei balsas yra – palikite tuščią, programa vis tiek bandys "
+                                "atpažinti. Jei ne – įrašykite tekstą.")
         else:
-            if speech:
-                st.caption("Balsui atpažinti reikia OPENAI_API_KEY – įklijuokite tekstą ranka.")
-            subtitle_text = st.text_area("Titrų tekstas", placeholder="Tekstas bus tolygiai išdėliotas per video.")
+            subtitle_text = st.text_area("Titrų tekstas", placeholder="Tekstas bus tolygiai išdėliotas per video.",
+                                         help="Be OpenAI rakto kalba neatpažįstama – titrams įrašykite tekstą.")
 
 # ---------- IV. Garsas ----------
 with st.container(border=True):
     step("IV", "Garsas", "muzika ir švarus balsas")
-    music_file = st.file_uploader("Foninė muzika (MP3, M4A, WAV)", key=P + "music",
-                                  help="Muzika kartojama per visą video ir švelniai užgęsta pabaigoje.")
+    library = reels_studio.music_library()
+    options = ["Be muzikos"] + list(library) + ["📁 Įkelti savo muziką"]
+    music_choice = st.selectbox("Foninė muzika", options, index=1 if library else 0, key=P + "music_choice",
+                                help="Studijos muzika sukurta specialiai – be autorių teisių apribojimų. "
+                                     "Muzika kartojama per visą video ir švelniai užgęsta pabaigoje.")
+    music_file = None
+    if music_choice in library:
+        st.caption(library[music_choice]["desc"])
+        st.audio(library[music_choice]["path"])
+    elif music_choice.startswith("📁"):
+        music_file = st.file_uploader("Jūsų muzika (MP3, M4A, WAV)", key=P + "music")
+        st.caption("Instagram gali nutildyti video su autorių teisių saugoma muzika – "
+                   "populiarią dainą geriau pridėti pačiame Instagram.")
+    has_music = music_choice in library or music_file is not None
     c1, c2 = st.columns(2)
-    music_volume = c1.slider("Muzikos garsumas", 0, 100, 22, 1, format="%d%%", disabled=not music_file) / 100
-    ducking = c2.toggle("Muzika patyli, kai kalbama", value=True, disabled=not music_file)
+    music_volume = c1.slider("Muzikos garsumas", 0, 100, 22, 1, format="%d%%", disabled=not has_music) / 100
+    ducking = c2.toggle("Muzika patyli, kai kalbama", value=True, disabled=not has_music)
     c1, c2 = st.columns(2)
     remove_silence = c1.toggle("Iškirpti pauzes", value=True)
     denoise = c2.toggle("Išvalyti foninį triukšmą", value=True)
@@ -218,7 +263,7 @@ if create and clips:
                 subtitles=subtitles, client=client, subtitle_language=subtitle_language,
                 subtitle_text=subtitle_text, subtitle_style="modern", protect=protect, highlight=highlight,
                 status=say, progress=lambda p: bar.progress(0.25 + p * 0.45))
-            music = None
+            music = library[music_choice]["path"] if music_choice in library else None
             if music_file:
                 music = os.path.join(tmp, "music" + (os.path.splitext(music_file.name)[1] or ".mp3"))
                 with open(music, "wb") as f:

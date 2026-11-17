@@ -117,11 +117,17 @@ def clip_picker(prefix=""):
     return clips, image_duration
 
 
-def openai_client():
+def configured_key():
+    """OpenAI raktas iš Streamlit Secrets arba aplinkos kintamųjų."""
     try:
-        key = st.secrets["OPENAI_API_KEY"]
+        return st.secrets["OPENAI_API_KEY"]
     except Exception:
-        key = os.environ.get("OPENAI_API_KEY")
+        return os.environ.get("OPENAI_API_KEY")
+
+
+def openai_client():
+    """OpenAI klientas: raktas iš Secrets / aplinkos arba įvestas programoje (laikomas tik šioje sesijoje)."""
+    key = configured_key() or st.session_state.get("openai_key", "").strip()
     if not key:
         return None
     import openai
