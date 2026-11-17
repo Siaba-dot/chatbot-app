@@ -574,7 +574,35 @@ def is_image(path):
     return out == "image2" or out.endswith("_pipe")
 
 
-def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION, segments=None):
+# Perėjimai tarp įrašų (ffmpeg xfade). "page" – lapo vertimas (savas perėjimas): įstrižas lenkimas eina nuo
+# dešiniojo apatinio kampo į kairę, už jo matosi šviesi lapo nugarėlė, ant kito kadro krenta šešėlis;
+# "tiles" – kvadratėliai.
+TRANSITIONS = {
+    "Be perėjimo": None,
+    "Lapo vertimas": "page",
+    "Kvadratėliai": "tiles",
+    "Švelnus išnykimas": "fade",
+    "Per šviesą": "fadewhite",
+    "Slinkimas": "smoothleft",
+    "Atsivėrimas": "circleopen",
+}
+TRANSITION_DURATION = 0.8
+# Be st()/ld(): xfade skaičiuoja keliomis gijomis, o bendri kintamieji tada „susimaišo“.
+PAGE_EXPR = "if(lt((X+0.35*Y),((W*1.13+0.35*H)*P)-(0.13*W)),A,if(lt((X+0.35*Y),((W*1.13+0.35*H)*P)),A*0.2+255*0.8*(0.78+0.22*((X+0.35*Y)-((W*1.13+0.35*H)*P)+(0.13*W))/(0.13*W)),B*(1-0.55*exp(-((X+0.35*Y)-((W*1.13+0.35*H)*P))/(0.05*W)))))"
+# Kvadratėliai: kadras keičiasi mažais kvadratėliais atsitiktine tvarka (pseudoatsitiktinis kiekvieno kvadrato laikas).
+TILES_EXPR = "if(lt(((sin(floor(X/(W/18))*12.9898+floor(Y/(W/18))*78.233)*43758.5453)-floor((sin(floor(X/(W/18))*12.9898+floor(Y/(W/18))*78.233)*43758.5453))),(1-P)*1.08-0.04),B,A)"
+
+
+def xfade_filter(transition, duration, offset):
+    kind = TRANSITIONS.get(transition, transition)
+    if kind in ("page", "tiles"):
+        expr = PAGE_EXPR if kind == "page" else TILES_EXPR
+        return f"xfade=transition=custom:duration={duration:.3f}:offset={offset:.3f}:expr='{expr}'"
+    return f"xfade=transition={kind}:duration={duration:.3f}:offset={offset:.3f}"
+
+
+def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION, segments=None,
+                 transition=None, transition_duration=TRANSITION_DURATION):
     """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
     pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
     Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų. Nuotraukos rodomos
@@ -627,8 +655,37 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
         else:
             parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={d:.3f}[a{i}]")
     spans = [sp or (total, total) for sp in spans]
-    graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + \
-        f"concat=n={len(pieces)}:v=1:a=1[v][a]"
+    kind = TRANSITIONS.get(transition, transition)
+    clip_ids = sorted({k for k, *_ in pieces})
+    if kind and len(clip_ids) > 1:
+        # Kiekvieno įrašo dalys sujungiamos atskirai, o tarp įrašų – perėjimas (įrašai persidengia).
+        lens = {k: sum(d for kk, _, _, _, d in pieces if kk == k) for k in clip_ids}
+        td = max(0.2, min(transition_duration, min(lens.values()) / 2.5))
+        for k in clip_ids:
+            idx = [i for i, (kk, *_) in enumerate(pieces) if kk == k]
+            if len(idx) == 1:
+                parts += [f"[v{idx[0]}]null[cv{k}]", f"[a{idx[0]}]anull[ca{k}]"]
+            else:
+                parts.append("".join(f"[v{i}][a{i}]" for i in idx) + f"concat=n={len(idx)}:v=1:a=1[cv{k}][ca{k}]")
+        parts += [f"[cv{k}]format=gbrp[gv{k}]" for k in clip_ids]
+        cur_v, cur_a, t = f"[gv{clip_ids[0]}]", f"[ca{clip_ids[0]}]", lens[clip_ids[0]]
+        new_spans, start = {}, 0.0
+        new_spans[clip_ids[0]] = (0.0, lens[clip_ids[0]])
+        for n, k in enumerate(clip_ids[1:], 1):
+            off = t - td
+            parts.append(f"{cur_v}[gv{k}]{xfade_filter(transition, td, off)}[xv{n}]")
+            parts.append(f"{cur_a}[ca{k}]acrossfade=d={td:.3f}[xa{n}]")
+            cur_v, cur_a = f"[xv{n}]", f"[xa{n}]"
+            new_spans[k] = (off, off + lens[k])
+            t = off + lens[k]
+        parts.append(f"{cur_v}format=yuv420p[v]")
+        parts.append(f"{cur_a}anull[a]")
+        total = t
+        spans = [new_spans.get(k, (total, total)) for k in range(len(paths))]
+        graph = ";".join(parts)
+    else:
+        graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + \
+            f"concat=n={len(pieces)}:v=1:a=1[v][a]"
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write(graph)
         script = f.name

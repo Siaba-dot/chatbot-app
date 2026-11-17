@@ -215,6 +215,25 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
     return out_path
 
 
+SIGNATURE_TRANSITIONS = ("Lapo vertimas", "Kvadratėliai")
+
+
+def transition_preview(frame_a, frame_b, out_path, transition, width=180, height=320, at=0.45):
+    """Perėjimo vidurys tarp dviejų kadrų (langeliui)."""
+    fit = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps=20,format=gbrp"
+    if not video_editor.TRANSITIONS.get(transition):
+        g = f"[1:v]{fit},format=yuv420p[out]"
+    else:
+        g = (f"[0:v]{fit}[a];[1:v]{fit}[b];[a][b]{video_editor.xfade_filter(transition, 1.0, 0.0)},"
+             f"select='gte(t,{at})',format=yuv420p[out]")
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-t", "1.2", "-i", frame_a, "-loop", "1",
+                        "-t", "1.2", "-i", frame_b, "-filter_complex", g, "-map", "[out]", "-frames:v", "1",
+                        "-q:v", "4", out_path], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr[-800:])
+    return out_path
+
+
 def grab_frame(path, out_path, at=1.0, width=360, height=640):
     """Vienas kadras (9:16) – pagrindas miniatiūroms."""
     seek = [] if video_editor.is_image(path) else ["-ss", f"{max(0.0, at):.3f}"]

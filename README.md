@@ -41,6 +41,9 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **efektai langeliuose** (galima derinti): Lėtas priartėjimas, Švytėjimas, Kino juostos, Kino grūdeliai, Vinjetė,
   Ryškumas, Šviesos blyksnis;
 - **trukmės riba** (15 / 30 / 60 / 90 s), **greitis**, **progreso juostelė**;
+- **perėjimai tarp įrašų** (langeliai su peržiūra tarp jūsų kadrų): ✦ Lapo vertimas (kadras persiverčia nuo apatinio
+  dešiniojo kampo kaip knygos lapas – su lapo nugarėle ir šešėliu), ✦ Kvadratėliai (kadras keičiasi mažais
+  kvadratėliais atsitiktine tvarka), Švelnus išnykimas, Per šviesą, Slinkimas, Atsivėrimas;
 - **įrašų apkarpymas** – kiekvienam video „✂️ Apkarpyti“: palikti nuo–iki ir (pasirinktinai) išmesti dalį iš vidurio;
   ties kiekviena riba rodomas kadras, o grotuvas iškart groja paliktą dalį;
 - **titrų taisymas** – „Paruošti titrus ir peržiūrą“ parodo titrus lentelėje, klaidas galima pataisyti prieš kuriant

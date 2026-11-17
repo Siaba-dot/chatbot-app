@@ -104,6 +104,22 @@ def pick_template(name):
     apply_template()
 
 
+def pick_transition(name):
+    st.session_state[P + "transition"] = name
+
+
+@st.cache_data(max_entries=60, show_spinner=False)
+def transition_tile(fa, fb, name):
+    with tempfile.TemporaryDirectory() as tmp:
+        a, b = os.path.join(tmp, "a.jpg"), os.path.join(tmp, "b.jpg")
+        for path, data in ((a, fa), (b, fb)):
+            with open(path, "wb") as f:
+                f.write(data)
+        out = reels_studio.transition_preview(a, b, os.path.join(tmp, "x.jpg"), name)
+        with open(out, "rb") as f:
+            return f.read()
+
+
 def pick_look(name):
     st.session_state[P + "look"] = name
 
@@ -174,6 +190,24 @@ if P + "accent" not in st.session_state:
 with st.container(border=True):
     step("I", "Medžiaga", "video, nuotraukos arba filmavimas")
     clips, image_duration = clips_ui.clip_picker(P, trim=True)
+    st.session_state.setdefault(P + "transition", "Be perėjimo")
+    transition = st.session_state[P + "transition"]
+    if len(clips) >= 2:
+        st.markdown("**Perėjimai tarp įrašų** · <small>✦ – firminiai studijos</small>", unsafe_allow_html=True)
+        try:
+            fa = base_frame(clips[0]["path"], 0.0 if clips[0].get("image") else min(1.0, clips[0]["duration"] / 2))
+            fb = base_frame(clips[1]["path"], 0.0 if clips[1].get("image") else min(1.0, clips[1]["duration"] / 2))
+        except Exception:
+            fa = fb = None
+        grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "xgrid")
+        for i, name in enumerate(video_editor.TRANSITIONS):
+            sel = name == transition
+            tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_x{i}")
+            if fa and fb:
+                tile.image(transition_tile(fa, fb, name), width="stretch")
+            mark = "✦ " if name in reels_studio.SIGNATURE_TRANSITIONS else ""
+            tile.button(mark + name, key=f"{P}xbtn{i}", type="primary" if sel else "secondary", width="stretch",
+                        on_click=pick_transition, args=(name,))
 
 states = {c["audio"] for c in clips}
 speech = "speech" in states
@@ -387,7 +421,7 @@ def source_for_cover():
 highlight = reels_studio._ass_color(reels_studio.ACCENTS[accent][0])[4:]  # BBGGRR
 work = st.session_state.setdefault(P + "work", tempfile.mkdtemp(prefix="reels_"))
 os.makedirs(work, exist_ok=True)
-signature = (tuple((c["id"], tuple(clips_ui.clip_segments(c) or ())) for c in clips), image_duration,
+signature = (tuple((c["id"], tuple(clips_ui.clip_segments(c) or ())) for c in clips), image_duration, transition,
              remove_silence, subtitles, client is not None, subtitle_language, subtitle_text.strip())
 prep = st.session_state.get(P + "prep")
 ready = bool(prep) and prep["sig"] == signature and os.path.exists(prep["src"])
@@ -403,7 +437,7 @@ def prepare(say, progress):
         src = os.path.join(work, f"joined_{datetime.datetime.now().strftime('%H%M%S%f')}.mkv")
         src, spans = video_editor.concat_clips([c["path"] for c in clips], src, "9:16",
                                                progress=lambda p: progress(p * 0.5), image_duration=image_duration,
-                                               segments=segments)
+                                               segments=segments, transition=transition)
         protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
     analysis = video_editor.analyze(src, remove_silence=remove_silence, subtitles=subtitles, client=client,
                                     subtitle_language=subtitle_language, subtitle_text=subtitle_text,
