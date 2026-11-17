@@ -125,13 +125,13 @@ def pick_look(name):
 
 
 @st.cache_data(max_entries=200, show_spinner=False)
-def style_tile(base, template, accent, color, hook, look, effects=()):
+def style_tile(base, template, accent, color, hook, look, effects=(), subs_y=0.72, hook_y=0.2):
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "b.jpg")
         with open(src, "wb") as f:
             f.write(base)
         out = reels_studio.style_preview(src, os.path.join(tmp, "s.jpg"), template, accent, color, effects,
-                                         hook, look)
+                                         hook, look, subs_ypos=subs_y, hook_ypos=hook_y)
         with open(out, "rb") as f:
             return f.read()
 
@@ -182,6 +182,10 @@ def thumb(base, color, effects, accent="Aukso gradientas"):
             return f.read()
 
 
+st.session_state.setdefault(P + "subs_pos", "Žemiau")
+st.session_state.setdefault(P + "hook_pos", "Aukščiau")
+subs_y = reels_studio.SUBTITLE_POSITIONS[st.session_state[P + "subs_pos"]]
+hook_y = reels_studio.HOOK_POSITIONS[st.session_state[P + "hook_pos"]]
 st.session_state.setdefault(P + "template", "Prabangus auksas")
 if P + "accent" not in st.session_state:
     apply_template()
@@ -236,7 +240,8 @@ with st.container(border=True):
     for i, (name, t) in enumerate(reels_studio.TEMPLATES.items()):
         sel = name == template
         tile = grid.container(width=124, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_t{i}")
-        tile.image(style_tile(base, name, t["accent"], t["color"], sample_hook, None), width="stretch")
+        tile.image(style_tile(base, name, t["accent"], t["color"], sample_hook, None, hook_y=hook_y),
+                   width="stretch")
         tile.button(name, key=f"{P}tbtn{i}", type="primary" if sel else "secondary", width="stretch",
                     on_click=pick_template, args=(name,))
 
@@ -262,7 +267,7 @@ with st.container(border=True):
     for i, (name, desc) in enumerate(reels_studio.EFFECTS.items()):
         sel = name in effects
         tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_e{i}")
-        img = (style_tile(base, template, accent, color, sample_hook, None, (name,))
+        img = (style_tile(base, template, accent, color, sample_hook, None, (name,), hook_y=hook_y)
                if name in reels_studio.TEXT_EFFECTS else thumb(base, color, (name,), accent))
         tile.image(img, width="stretch")
         mark = "✓ " if sel else "✦ " if name in reels_studio.SIGNATURE_EFFECTS else ""
@@ -281,6 +286,11 @@ with st.container(border=True):
     hook_duration = c1.slider("Kabliuko trukmė (s)", 1.5, 6.0, 3.0, 0.5)
     handle = c2.text_input("Paskyra", placeholder="@jusu.paskyra")
     cta = st.text_input("Kvietimas veikti pabaigoje", placeholder="Pvz.: Išsaugok vėlesniam")
+    c1, c2 = st.columns(2)
+    c1.select_slider("Kabliuko vieta", list(reels_studio.HOOK_POSITIONS), key=P + "hook_pos",
+                     help="Jei kabliukas uždengia veidą ar galvą – nuleiskite žemiau arba pakelkite.")
+    c2.select_slider("Titrų vieta", list(reels_studio.SUBTITLE_POSITIONS), key=P + "subs_pos",
+                     help="„Apačioje“ titrus gali dalinai uždengti Instagram aprašymas ir mygtukai.")
 
     subtitles = st.toggle("Animuoti titrai", value=True,
                           help="Sakomas žodis paryškinamas akcento spalva.")
@@ -292,7 +302,7 @@ with st.container(border=True):
         for i, (key, L) in enumerate(video_editor.SUBTITLE_LOOKS.items()):
             sel = key == look
             tile = grid.container(width=110, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_l{i}")
-            tile.image(style_tile(base, template, accent, color, "", key), width="stretch")
+            tile.image(style_tile(base, template, accent, color, "", key, subs_y=subs_y), width="stretch")
             tile.button(L["title"], key=f"{P}lbtn{i}", type="primary" if sel else "secondary", width="stretch",
                         on_click=pick_look, args=(key,))
 
@@ -467,14 +477,15 @@ def build(prep, words, tmp, out, quick, progress):
     edited = os.path.join(tmp, "edited.mp4")
     res = video_editor.render_edit(
         prep["src"], edited, prep["analysis"], words, fmt="9:16", denoise=denoise and not quick,
-        loudnorm=not quick, subtitle_style="modern", highlight=highlight, subtitle_look=look,
+        loudnorm=not quick, subtitle_style="modern", highlight=highlight, subtitle_look=look, ypos=subs_y,
         progress=lambda p: progress(p * 0.6), max_side=640 if quick else 1920,
         preset="ultrafast" if quick else "veryfast", crf=30 if quick else 20)
     fin = reels_studio.finish(
         edited, out, hook, hook_duration, cta, 2.5, handle, accent, template, music_path(tmp), music_volume,
         ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
-        subs_words=prep["analysis"]["words"] if words is None else words, subs_look=look)
+        subs_words=prep["analysis"]["words"] if words is None else words, subs_look=look, subs_ypos=subs_y,
+        hook_ypos=hook_y)
     return res, fin
 
 

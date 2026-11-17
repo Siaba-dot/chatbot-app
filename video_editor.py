@@ -667,7 +667,8 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
                 parts += [f"[v{idx[0]}]null[cv{k}]", f"[a{idx[0]}]anull[ca{k}]"]
             else:
                 parts.append("".join(f"[v{i}][a{i}]" for i in idx) + f"concat=n={len(idx)}:v=1:a=1[cv{k}][ca{k}]")
-        parts += [f"[cv{k}]format=gbrp[gv{k}]" for k in clip_ids]
+        # xfade reikalauja pastovaus kadrų dažnio ir vienodos laiko bazės (concat išvestis jų neturi).
+        parts += [f"[cv{k}]fps={fps},settb=1/{fps},setpts=N/({fps}*TB),format=gbrp[gv{k}]" for k in clip_ids]
         cur_v, cur_a, t = f"[gv{clip_ids[0]}]", f"[ca{clip_ids[0]}]", lens[clip_ids[0]]
         new_spans, start = {}, 0.0
         new_spans[clip_ids[0]] = (0.0, lens[clip_ids[0]])
