@@ -25,8 +25,12 @@ Prabangi (tamsi su auksu) studija Instagram Reels / TikTok / Shorts vaizdo įra�
 Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, titrai), plius:
 - **šablonai** (langeliai su peržiūra ant jūsų kadro): „Prabangus auksas“, „Ranka rašytas“ (Great Vibes kaligrafija),
   „Elegantiškas minimalizmas“ (Playfair Display, plona linija, švelnus ryškėjimas), „Ryškus (TikTok stilius)“;
-- **titrų stiliai** (langeliai su pavyzdžiu): Modernūs, Elegantiški, Dėžutėje, Ranka rašyti (Dancing Script), Minimalūs;
+- **titrų stiliai** (langeliai su pavyzdžiu): Modernūs, Elegantiški, Dėžutėje, Ranka rašyti (Dancing Script), Rašomi ranka,
+  Minimalūs;
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
+- **firminiai efektai**: „Aukso blizgesys“ (per metalinį tekstą kas 2,6 s perbėga šviesos ruožas), „Auksinės dulkės“
+  (plaukiojančios, mirgančios kibirkštėlės, kartojasi be sandūros) ir titrų stilius „Rašomi ranka“ (frazė rašoma
+  rašikliu iš kairės į dešinę, kol ištariama);
 - **kabliukas** – antraštė pirmoms sekundėms, **kvietimas veikti** pabaigoje, **@paskyra** viršuje;
 - **foninės muzikos biblioteka** (6 kūriniai be autorių teisių apribojimų: Prabangus pianinas, Lounge, Kinematografiška,
   Energinga, Lo-fi, Romantiška – `music/`, sukurta `tools/make_music.py`) arba sava muzika; ji automatiškai patyli, kai kalbama;

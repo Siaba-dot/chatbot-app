@@ -109,12 +109,12 @@ def pick_look(name):
 
 
 @st.cache_data(max_entries=200, show_spinner=False)
-def style_tile(base, template, accent, color, hook, look):
+def style_tile(base, template, accent, color, hook, look, effects=()):
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "b.jpg")
         with open(src, "wb") as f:
             f.write(base)
-        out = reels_studio.style_preview(src, os.path.join(tmp, "s.jpg"), template, accent, color, (),
+        out = reels_studio.style_preview(src, os.path.join(tmp, "s.jpg"), template, accent, color, effects,
                                          hook, look)
         with open(out, "rb") as f:
             return f.read()
@@ -226,7 +226,9 @@ with st.container(border=True):
     for i, (name, desc) in enumerate(reels_studio.EFFECTS.items()):
         sel = name in effects
         tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_e{i}")
-        tile.image(thumb(base, color, (name,)), width="stretch")
+        img = (style_tile(base, template, accent, color, sample_hook, None, (name,))
+               if name in reels_studio.TEXT_EFFECTS else thumb(base, color, (name,)))
+        tile.image(img, width="stretch")
         tile.button(("✓ " if sel else "") + name, key=f"{P}ebtn{i}", type="primary" if sel else "secondary",
                     width="stretch", help=desc, on_click=toggle_effect, args=(name,))
     if effects:
