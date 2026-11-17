@@ -99,6 +99,27 @@ def apply_template():
     st.session_state[P + "color"] = t["color"]
 
 
+def pick_template(name):
+    st.session_state[P + "template"] = name
+    apply_template()
+
+
+def pick_look(name):
+    st.session_state[P + "look"] = name
+
+
+@st.cache_data(max_entries=200, show_spinner=False)
+def style_tile(base, template, accent, color, hook, look):
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "b.jpg")
+        with open(src, "wb") as f:
+            f.write(base)
+        out = reels_studio.style_preview(src, os.path.join(tmp, "s.jpg"), template, accent, color, (),
+                                         hook, look)
+        with open(out, "rb") as f:
+            return f.read()
+
+
 def pick_color(name):
     st.session_state[P + "color"] = name
 
@@ -160,12 +181,8 @@ speech = "speech" in states
 # ---------- II. Stilius ----------
 with st.container(border=True):
     step("II", "Stilius", "šablonas, spalvos, akcentas")
-    template = st.radio("Šablonas", list(reels_studio.TEMPLATES), key=P + "template", horizontal=True,
-                        on_change=apply_template,
-                        captions=["Serifinis šriftas, auksas, šilta kino spalva",
-                                  "Šampano tonai, ramus kino vaizdas",
-                                  "Didelės raidės dėžutėje, sodrios spalvos"])
-    accent = st.selectbox("Akcento spalva", list(reels_studio.ACCENTS), key=P + "accent")
+    template = st.session_state[P + "template"]
+    accent = st.session_state[P + "accent"]
 
     st.session_state.setdefault(P + "effects", [])
     base = None
@@ -178,8 +195,22 @@ with st.container(border=True):
     if base is None:
         base = sample_frame()
 
-    st.markdown("**Filtrai**" + ("" if clips else " · <small>įkėlus video čia matysite savo kadrą</small>"),
-                unsafe_allow_html=True)
+    sample_hook = st.session_state.get(P + "hook") or "Jūsų antraštė čia"
+    st.markdown("**Šablonas** · <small>kabliuko ir kvietimo stilius</small>"
+                + ("" if clips else " · <small>įkėlus video matysite savo kadrą</small>"), unsafe_allow_html=True)
+    grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "tgrid")
+    for i, (name, t) in enumerate(reels_studio.TEMPLATES.items()):
+        sel = name == template
+        tile = grid.container(width=124, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_t{i}")
+        tile.image(style_tile(base, name, t["accent"], t["color"], sample_hook, None), width="stretch")
+        tile.button(name, key=f"{P}tbtn{i}", type="primary" if sel else "secondary", width="stretch",
+                    on_click=pick_template, args=(name,))
+
+    st.selectbox("Akcento spalva", list(reels_studio.ACCENTS), key=P + "accent",
+                 help="Gradientai – metalinis auksas ar sidabras kabliukui, kvietimui ir paryškintam titrų žodžiui.")
+    accent = st.session_state[P + "accent"]
+
+    st.markdown("**Filtrai**", unsafe_allow_html=True)
     color = st.session_state[P + "color"]
     grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "fgrid")
     for i, name in enumerate(reels_studio.COLOR_FILTERS):
@@ -204,7 +235,7 @@ with st.container(border=True):
 # ---------- III. Tekstai ----------
 with st.container(border=True):
     step("III", "Tekstai", "kabliukas, titrai, kvietimas")
-    hook = st.text_input("Kabliukas – pirmų sekundžių antraštė",
+    hook = st.text_input("Kabliukas – pirmų sekundžių antraštė", key=P + "hook",
                          placeholder="Pvz.: Kaip atrodyti brangiai be didelio biudžeto",
                          help="Trumpa intriguojanti frazė (iki ~8 žodžių) – sustabdo slinkimą.")
     c1, c2 = st.columns(2)
@@ -214,6 +245,17 @@ with st.container(border=True):
 
     subtitles = st.toggle("Animuoti titrai", value=True,
                           help="Sakomas žodis paryškinamas akcento spalva.")
+    st.session_state.setdefault(P + "look", "modern")
+    look = st.session_state[P + "look"]
+    if subtitles:
+        st.markdown("**Titrų stilius**", unsafe_allow_html=True)
+        grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "lgrid")
+        for i, (key, L) in enumerate(video_editor.SUBTITLE_LOOKS.items()):
+            sel = key == look
+            tile = grid.container(width=110, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_l{i}")
+            tile.image(style_tile(base, template, accent, color, "", key), width="stretch")
+            tile.button(L["title"], key=f"{P}lbtn{i}", type="primary" if sel else "secondary", width="stretch",
+                        on_click=pick_look, args=(key,))
 
     # Balso atpažinimas (OpenAI Whisper)
     speech_minutes = sum(clips_ui.clip_length(c, image_duration) for c in clips if not c.get("image")) / 60
@@ -386,13 +428,14 @@ def build(prep, words, tmp, out, quick, progress):
     edited = os.path.join(tmp, "edited.mp4")
     res = video_editor.render_edit(
         prep["src"], edited, prep["analysis"], words, fmt="9:16", denoise=denoise and not quick,
-        loudnorm=not quick, subtitle_style="modern", highlight=highlight,
+        loudnorm=not quick, subtitle_style="modern", highlight=highlight, subtitle_look=look,
         progress=lambda p: progress(p * 0.6), max_side=640 if quick else 1920,
         preset="ultrafast" if quick else "veryfast", crf=30 if quick else 20)
     fin = reels_studio.finish(
         edited, out, hook, hook_duration, cta, 2.5, handle, accent, template, music_path(tmp), music_volume,
         ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
-        progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick)
+        progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
+        subs_words=prep["analysis"]["words"] if words is None else words, subs_look=look)
     return res, fin
 
 

@@ -298,12 +298,48 @@ def _ass_escape(s):
     return s.replace("\\", "").replace("{", "(").replace("}", ")")
 
 
-def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF"):
-    """Modernūs titrai: Montserrat Black, DIDŽIOSIOS, balta su juodu kontūru,
-    sakomas žodis geltonas (highlight – ASS BGR spalva), frazė 'iššoka' ir išnyksta."""
-    fsize = round(width * 0.085)
-    outline = max(3, round(fsize / 12))
+# Animuotų titrų išvaizdos (look). Spalvos – ASS BGR be &H.
+SUBTITLE_LOOKS = {
+    "modern": {"title": "Modernūs", "font": FONT_NAME, "bold": 0, "size": 0.085, "upper": True, "base": "FFFFFF",
+               "box": False, "outline": 1 / 12, "shadow": 0.5, "dim": "70", "pop": True, "ypos": None},
+    "elegant": {"title": "Elegantiški", "font": "Playfair Display", "bold": -1, "size": 0.078, "upper": False,
+                "base": "DFEEF4", "box": False, "outline": 1 / 20, "shadow": 1.2, "dim": "60", "pop": False,
+                "ypos": None},
+    "box": {"title": "Dėžutėje", "font": FONT_NAME, "bold": 0, "size": 0.068, "upper": True, "base": "FFFFFF",
+            "box": True, "outline": 0.28, "shadow": 0, "dim": "50", "pop": True, "ypos": None},
+    "script": {"title": "Ranka rašyti", "font": "Dancing Script", "bold": -1, "size": 0.082, "upper": False,
+               "base": "FFFFFF", "box": False, "outline": 1 / 18, "shadow": 0.8, "dim": "50", "pop": False,
+               "ypos": None},
+    "minimal": {"title": "Minimalūs", "font": "Montserrat SemiBold", "bold": 0, "size": 0.056, "upper": False,
+                "base": "FFFFFF", "box": False, "outline": 1 / 16, "shadow": 0.4, "dim": "38", "pop": False,
+                "ypos": 0.74},
+}
+
+
+def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern", mask=False):
+    """Animuoti titrai. look: "modern" – Montserrat Black, DIDŽIOSIOS, balta su juodu kontūru, frazė „iššoka“;
+    "elegant" – Playfair Display, šampano spalva, švelniai išryškėja; "box" – didelės raidės permatomoje juodoje
+    dėžutėje; "script" – ranka rašytas šriftas; "minimal" – ramus, mažesnis šriftas žemiau. Sakomas žodis
+    paryškinamas highlight spalva (ASS BGR). mask=True – kaukė gradientui: baltas tik sakomas žodis, be kontūrų."""
+    L = SUBTITLE_LOOKS.get(look, SUBTITLE_LOOKS["modern"])
+    if L["ypos"] and ypos == 0.67:
+        ypos = L["ypos"]
+    fsize = round(width * L["size"])
+    outline = max(1 if not L["box"] else 4, round(fsize * L["outline"]))
+    shadow = round(outline * L["shadow"]) if not L["box"] else 0
     margin = round(width * 0.065)
+    base = L["base"]
+    if mask:  # tik užpildas – kontūrai, šešėliai ir dėžutė lieka iš įprastų titrų
+        base, highlight = "FFFFFF", "FFFFFF"
+        style = (f"Style: Default,{L['font']},{fsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
+                 f"{L['bold']},0,0,0,100,100,0,0,1,0,0,5,{margin},{margin},0,1")
+    elif L["box"]:  # BorderStyle 3: OutlineColour – dėžutės spalva
+        style = (f"Style: Default,{L['font']},{fsize},&H00{base},&H00{base},&H55000000,&H00000000,"
+                 f"{L['bold']},0,0,0,100,100,0,0,3,{outline},0,5,{margin},{margin},0,1")
+    else:
+        oc = "&H00000000" if look != "elegant" else "&H20100A08"
+        style = (f"Style: Default,{L['font']},{fsize},&H00{base},&H00{base},{oc},&H78000000,"
+                 f"{L['bold']},0,0,0,100,100,0,0,1,{outline},{max(1, shadow)},5,{margin},{margin},0,1")
     lines = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
         "WrapStyle: 0", "ScaledBorderAndShadow: yes", "",
@@ -311,8 +347,7 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF"):
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: Default,{FONT_NAME},{fsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,"
-        f"0,0,0,0,100,100,0,0,1,{outline},{max(2, outline // 2)},5,{margin},{margin},0,1",
+        style,
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
@@ -322,7 +357,7 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF"):
         end = ph[-1][2] + 0.35
         if pi + 1 < len(phrases):
             end = min(end, phrases[pi + 1][0][1])
-        texts = [_ass_escape(w[0].upper()) for w in ph]
+        texts = [_ass_escape(w[0].upper() if L["upper"] else w[0]) for w in ph]
         for i, (_, s, _) in enumerate(ph):
             a = ph[0][1] if i == 0 else s
             b = ph[i + 1][1] if i + 1 < len(ph) else end
@@ -330,15 +365,18 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF"):
                 continue
             parts = []
             for j, t in enumerate(texts):
-                if j < i:
-                    parts.append("{\\1c&HFFFFFF&\\1a&H00&}" + t)
+                if mask and j != i:
+                    parts.append("{\\1a&HFF&}" + t)
+                elif j < i:
+                    parts.append(f"{{\\1c&H{base}&\\1a&H00&}}" + t)
                 elif j == i:
                     parts.append(f"{{\\1c&H{highlight}&\\1a&H00&}}" + t)
                 else:
-                    parts.append("{\\1c&HFFFFFF&\\1a&H70&}" + t)
+                    parts.append(f"{{\\1c&H{base}&\\1a&H{L['dim']}&}}" + t)
             fx = pos
             if i == 0:
-                fx += "\\fad(100,0)\\fscx82\\fscy82\\t(0,180,\\fscx100\\fscy100)"
+                fx += ("\\fad(100,0)\\fscx82\\fscy82\\t(0,180,\\fscx100\\fscy100)" if L["pop"]
+                       else "\\fad(160,0)\\blur3\\t(0,220,\\blur0)")
             if i == len(ph) - 1:
                 fx += "\\fad(0,120)" if i else ""
             lines.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,{{{fx}}}" + " ".join(parts))
@@ -672,7 +710,7 @@ def apply_line_edits(words, lines):
 
 def render_edit(path, out_path, analysis, words=None, fmt="original", loudnorm=True, fades=True,
                 denoise=True, subtitle_style="modern", ypos=0.67, highlight="0AD6FF", status=None,
-                progress=None, max_side=1920, preset="veryfast", crf=20):
+                progress=None, max_side=1920, preset="veryfast", crf=20, subtitle_look="modern"):
     """2-as žingsnis: sumontuoja video pagal analyze() rezultatą su (galbūt pataisytais) titrais.
     max_side / preset / crf – mažesnė raiška ir greitesnis kodavimas greitai peržiūrai."""
     say = status or (lambda msg: None)
@@ -683,7 +721,8 @@ def render_edit(path, out_path, analysis, words=None, fmt="original", loudnorm=T
         training = subtitle_style == "training"
         w, h, bh = frame_size(info["width"], info["height"], fmt, training, max_side)
         with tempfile.NamedTemporaryFile("w", suffix=".ass", delete=False, encoding="utf-8") as f:
-            f.write(build_ass_training(words, w, h, bh) if training else build_ass(words, w, h, ypos, highlight))
+            f.write(build_ass_training(words, w, h, bh) if training
+                    else build_ass(words, w, h, ypos, highlight, subtitle_look))
             ass_file = f.name
 
     say("Montuoju video…")
