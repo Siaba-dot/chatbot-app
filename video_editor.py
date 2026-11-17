@@ -601,8 +601,60 @@ def xfade_filter(transition, duration, offset):
     return f"xfade=transition={kind}:duration={duration:.3f}:offset={offset:.3f}"
 
 
+def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, segments, transition, td, size, fps):
+    """Perėjimai dviem žingsniais: kiekvienas įrašas pirma paruošiamas atskirai (vienodas dydis, pastovus kadrų
+    dažnis), o tada tarp paruoštų failų daromas xfade. Taip xfade gauna įprastus failus su žinomu kadrų dažniu –
+    įvairios ffmpeg versijos kitaip negauna pastovaus kadrų dažnio iš sudėtinės filtrų grandinės."""
+    W, H = size
+    n = len(paths)
+    tmp = tempfile.mkdtemp()
+    try:
+        parts_paths, lens = [], []
+        for k, p in enumerate(paths):
+            part = os.path.join(tmp, f"part{k}.mkv")
+            concat_clips([p], part, fmt, (lambda x, k=k: progress(0.6 * (k + x) / n)) if progress else None,
+                         image_duration, [segments[k] if k < len(segments) else None], size=(W, H), rate=fps)
+            parts_paths.append(part)
+            lens.append(probe(part)["duration"])
+        td = max(0.2, min(td, min(lens) / 2.5))
+        g = [f"[{k}:v]fps={fps},format=gbrp[gv{k}]" for k in range(n)]
+        g += [f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo[ga{k}]" for k in range(n)]
+        cur_v, cur_a, t = "[gv0]", "[ga0]", lens[0]
+        spans = [(0.0, lens[0])]
+        for k in range(1, n):
+            off = t - td
+            g.append(f"{cur_v}[gv{k}]{xfade_filter(transition, td, off)}[xv{k}]")
+            g.append(f"{cur_a}[ga{k}]acrossfade=d={td:.3f}[xa{k}]")
+            cur_v, cur_a = f"[xv{k}]", f"[xa{k}]"
+            spans.append((off, off + lens[k]))
+            t = off + lens[k]
+        g.append(f"{cur_v}format=yuv420p[v]")
+        g.append(f"{cur_a}anull[a]")
+        script = os.path.join(tmp, "graph.txt")
+        with open(script, "w") as f:
+            f.write(";".join(g))
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1"]
+        for part in parts_paths:
+            cmd += ["-r", str(fps), "-i", part]
+        cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
+                "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for line in proc.stdout:
+            m = re.match(r"out_time_us=(\d+)", line)
+            if m and progress and t > 0:
+                progress(min(1.0, 0.6 + 0.4 * int(m.group(1)) / 1e6 / t))
+        err = proc.stderr.read()
+        if proc.wait() != 0:
+            raise RuntimeError(f"Nepavyko sujungti įrašų:\n{err[-2000:]}")
+    finally:
+        for name in os.listdir(tmp):
+            os.unlink(os.path.join(tmp, name))
+        os.rmdir(tmp)
+    return out_path, spans
+
+
 def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION, segments=None,
-                 transition=None, transition_duration=TRANSITION_DURATION):
+                 transition=None, transition_duration=TRANSITION_DURATION, size=None, rate=None):
     """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
     pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
     Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų. Nuotraukos rodomos
@@ -614,7 +666,6 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
     for inf, img in zip(infos, images):
         if img:
             inf.update(duration=float(image_duration), has_audio=False)
-    segments = list(segments or [None] * len(paths))
     ratio = FORMATS.get(fmt)
     sizes = [_out_size(i["width"], i["height"], ratio) for i in infos]
     if ratio:
@@ -624,6 +675,14 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
         k = min(1920, max(max(wh) for wh in sizes)) / max(W, H)
         W, H = int(W * k) // 2 * 2, int(H * k) // 2 * 2
     fps = next((i["fps"] for i, img in zip(infos, images) if not img), 30)
+    if size:
+        W, H = size
+    if rate:
+        fps = rate
+    segments = list(segments or [None] * len(paths))
+    if TRANSITIONS.get(transition, transition) and len(paths) > 1:
+        return _concat_with_transitions(paths, out_path, fmt, progress, image_duration, segments, transition,
+                                        transition_duration, (W, H), fps)
     # Kiekviena paliekama dalis – atskiras įėjimas (tas pats failas su -ss / -t).
     pieces = []  # (įrašo nr., kelias, nuotrauka?, pradžia, trukmė)
     for k, (p, inf, img) in enumerate(zip(paths, infos, images)):
@@ -655,38 +714,8 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
         else:
             parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={d:.3f}[a{i}]")
     spans = [sp or (total, total) for sp in spans]
-    kind = TRANSITIONS.get(transition, transition)
-    clip_ids = sorted({k for k, *_ in pieces})
-    if kind and len(clip_ids) > 1:
-        # Kiekvieno įrašo dalys sujungiamos atskirai, o tarp įrašų – perėjimas (įrašai persidengia).
-        lens = {k: sum(d for kk, _, _, _, d in pieces if kk == k) for k in clip_ids}
-        td = max(0.2, min(transition_duration, min(lens.values()) / 2.5))
-        for k in clip_ids:
-            idx = [i for i, (kk, *_) in enumerate(pieces) if kk == k]
-            if len(idx) == 1:
-                parts += [f"[v{idx[0]}]null[cv{k}]", f"[a{idx[0]}]anull[ca{k}]"]
-            else:
-                parts.append("".join(f"[v{i}][a{i}]" for i in idx) + f"concat=n={len(idx)}:v=1:a=1[cv{k}][ca{k}]")
-        # xfade reikalauja pastovaus kadrų dažnio ir vienodos laiko bazės (concat išvestis jų neturi).
-        parts += [f"[cv{k}]fps={fps},settb=1/{fps},setpts=N/({fps}*TB),format=gbrp[gv{k}]" for k in clip_ids]
-        cur_v, cur_a, t = f"[gv{clip_ids[0]}]", f"[ca{clip_ids[0]}]", lens[clip_ids[0]]
-        new_spans, start = {}, 0.0
-        new_spans[clip_ids[0]] = (0.0, lens[clip_ids[0]])
-        for n, k in enumerate(clip_ids[1:], 1):
-            off = t - td
-            parts.append(f"{cur_v}[gv{k}]{xfade_filter(transition, td, off)}[xv{n}]")
-            parts.append(f"{cur_a}[ca{k}]acrossfade=d={td:.3f}[xa{n}]")
-            cur_v, cur_a = f"[xv{n}]", f"[xa{n}]"
-            new_spans[k] = (off, off + lens[k])
-            t = off + lens[k]
-        parts.append(f"{cur_v}format=yuv420p[v]")
-        parts.append(f"{cur_a}anull[a]")
-        total = t
-        spans = [new_spans.get(k, (total, total)) for k in range(len(paths))]
-        graph = ";".join(parts)
-    else:
-        graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + \
-            f"concat=n={len(pieces)}:v=1:a=1[v][a]"
+    graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + \
+        f"concat=n={len(pieces)}:v=1:a=1[v][a]"
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write(graph)
         script = f.name
