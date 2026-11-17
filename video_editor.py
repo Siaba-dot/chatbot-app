@@ -310,6 +310,9 @@ SUBTITLE_LOOKS = {
     "script": {"title": "Ranka rašyti", "font": "Dancing Script", "bold": -1, "size": 0.082, "upper": False,
                "base": "FFFFFF", "box": False, "outline": 1 / 18, "shadow": 0.8, "dim": "50", "pop": False,
                "ypos": None},
+    "write": {"title": "Rašomi ranka", "font": "Dancing Script", "bold": -1, "size": 0.082, "upper": False,
+              "base": "FFFFFF", "box": False, "outline": 1 / 18, "shadow": 0.8, "dim": "00", "pop": False,
+              "ypos": None, "write": True},
     "minimal": {"title": "Minimalūs", "font": "Montserrat SemiBold", "bold": 0, "size": 0.056, "upper": False,
                 "base": "FFFFFF", "box": False, "outline": 1 / 16, "shadow": 0.4, "dim": "38", "pop": False,
                 "ypos": 0.74},
@@ -353,6 +356,23 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
     ]
     pos = f"\\an5\\pos({width // 2},{round(height * ypos)})"
     phrases = group_phrases(words)
+    if L.get("write"):  # frazė „rašoma“ rašikliu iš kairės į dešinę, kol ji ištariama
+        color = "FFFFFF" if mask else highlight
+        for pi, ph in enumerate(phrases):
+            a, spoken = ph[0][1], ph[-1][2]
+            end = spoken + 0.6
+            if pi + 1 < len(phrases):
+                end = min(end, phrases[pi + 1][0][1])
+            if end <= a:
+                continue
+            text = " ".join(_ass_escape(w[0]) for w in ph)
+            est = min(width - 2 * margin, len(text) * fsize * 0.44)
+            x0, x1 = round(width / 2 - est / 2 - fsize * 0.3), round(width / 2 + est / 2 + fsize * 0.4)
+            dur = max(0.25, min(spoken, end) - a)
+            fx = (f"{pos}\\1c&H{color}&\\clip({x0},0,{x0},{height})"
+                  f"\\t(0,{round(dur * 1000)},\\clip({x0},0,{x1},{height}))\\fad(0,150)")
+            lines.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(end)},Default,,0,0,0,,{{{fx}}}" + text)
+        return "\n".join(lines) + "\n"
     for pi, ph in enumerate(phrases):
         end = ph[-1][2] + 0.35
         if pi + 1 < len(phrases):

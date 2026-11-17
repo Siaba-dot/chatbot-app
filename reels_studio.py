@@ -76,7 +76,10 @@ EFFECTS = {
     "Vinjetė": "Patamsinti kraštai – akys krypsta į centrą.",
     "Ryškumas": "Aiškesnės detalės ir faktūros.",
     "Šviesos blyksnis": "Video prasideda baltu blyksniu.",
+    "Aukso blizgesys": "Firminis: per auksinį ar sidabrinį tekstą periodiškai perbėga šviesos blyksnis.",
+    "Auksinės dulkės": "Firminis: vaizde švelniai plaukioja ir mirga auksinės kibirkštėlės.",
 }
+TEXT_EFFECTS = ("Aukso blizgesys",)  # matosi tik ant teksto – peržiūra rodoma su pavyzdiniu tekstu
 
 
 def zoom_filters(W, H, duration):
@@ -119,13 +122,22 @@ def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, durati
 
 def thumbnail(frame, out_path, color="Natūralios", effects=(), width=180, height=320):
     """Mažas peržiūros paveikslėlis filtrų / efektų langeliui."""
-    g = look_graph("[0:v]", "[out]", color, effects, width, height, still=True,
-                   pre=[f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}",
-                        "setsar=1"])
-    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", frame, "-filter_complex", g, "-map", "[out]",
-                        "-frames:v", "1", "-q:v", "4", out_path], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(r.stderr[-800:])
+    pre = [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}", "setsar=1"]
+    tmp = tempfile.mkdtemp()
+    try:
+        if "Auksinės dulkės" in (effects or ()):
+            g = ";".join([look_graph("[0:v]", "[lk]", color, effects, width, height, still=True, pre=pre)]
+                         + dust_chains("[lk]", "[out]", width, height, 25, tmp, still=True))
+        else:
+            g = look_graph("[0:v]", "[out]", color, effects, width, height, still=True, pre=pre)
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", frame, "-filter_complex", g, "-map",
+                            "[out]", "-frames:v", "1", "-q:v", "4", out_path], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr[-800:])
+    finally:
+        for name in os.listdir(tmp):
+            os.unlink(os.path.join(tmp, name))
+        os.rmdir(tmp)
     return out_path
 
 
@@ -151,7 +163,9 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
                 f.write(video_editor.build_ass(SAMPLE_WORDS, width, height, highlight=hl, look=look))
             post.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
         pre = [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}", "setsar=1"]
-        if accent in GRADIENTS and post:
+        shine = "Aukso blizgesys" in (effects or ())
+        dust = "Auksinės dulkės" in (effects or ())
+        if (accent in GRADIENTS or shine) and post:
             masks = []
             if look:
                 a = os.path.join(tmp, "subs_mask.ass")
@@ -162,11 +176,14 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
                 masks.append(_cover_mask(tmp, width, height, hook, accent, template, 0.2))
             g = ";".join([look_graph("[0:v]", "[base]", color, effects, width, height, still=True, pre=pre,
                                      post=post)]
-                         + gradient_chains("[base]", "[gl]", width, height, 10, 1.3, accent, masks, tmp, template)
-                         + ["[gl]select='gte(t,1.0)'[out]"])
+                         + gradient_chains("[base]", "[gl]", width, height, 10, 1.3, accent, masks, tmp, template,
+                                           shine=shine, still=True)
+                         + ["[gl]select='gte(t,1.0)'[sel]"])
         else:
-            g = look_graph("[0:v]", "[out]", color, effects, width, height, still=True, pre=pre,
+            g = look_graph("[0:v]", "[sel]", color, effects, width, height, still=True, pre=pre,
                            post=post + ["select='gte(t,1.0)'"])
+        g += ";" + (";".join(dust_chains("[sel]", "[out]", width, height, 10, tmp, still=True)) if dust
+                    else "[sel]null[out]")
         r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-framerate", "10", "-t", "1.3",
                             "-i", frame, "-filter_complex", g, "-map", "[out]", "-frames:v", "1", "-q:v", "4",
                             out_path], capture_output=True, text=True)
@@ -344,12 +361,84 @@ def _hex(c):
     return [int(c[i:i + 2], 16) for i in (0, 2, 4)]
 
 
+def grad_stops(accent):
+    """Gradiento spalvų taškai; vienspalviam akcentui – ta pati spalva (blizgesiui ant paprasto teksto)."""
+    if accent in GRADIENTS:
+        return GRADIENTS[accent]
+    c = ACCENTS.get(accent, ACCENTS["Auksas"])[0]
+    return [(0.0, c), (1.0, c)]
+
+
+def shine_image(path, width, height):
+    """Šviesos ruožas (RGBA PNG): švelnus įstrižas blyksnis, kuris perbėga per metalinį tekstą."""
+    import numpy as np
+    bw = width * 0.16
+    y = np.arange(height)[:, None]
+    x = np.arange(width)[None, :]
+    d = (x - width / 2 + 0.45 * (y - height / 2)) / bw
+    a = np.exp(-d ** 2 * 2.2) * 0.85 + np.exp(-(d * 4) ** 2) * 0.15
+    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+    rgba[..., 0], rgba[..., 1], rgba[..., 2] = 255, 252, 236
+    rgba[..., 3] = np.clip(a * 255, 0, 255).astype(np.uint8)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
+                    f"{width}x{height}", "-i", "-", "-frames:v", "1", path], input=rgba.tobytes(), check=True)
+    return path
+
+
+def dust_media(path, width=540, height=960, fps=30, seconds=4.0, still=False, seed=11):
+    """Auksinės dulkės: permatomas, be sandūros kartojamas kibirkštėlių sluoksnis (MOV qtrle) arba vienas kadras (PNG)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = 70
+    px, py = rng.uniform(0, width, n), rng.uniform(0, height, n)
+    rise = rng.choice([1, 1, 2], n) * height  # per ciklą pakyla 1–2 kadro aukščius – ciklas be sandūros
+    sway, sph = rng.uniform(4, 18, n), rng.uniform(0, 2 * np.pi, n)
+    tw, tph = rng.choice([1, 2, 3], n), rng.uniform(0, 2 * np.pi, n)
+    size = rng.uniform(1.2, 3.6, n)
+    gold = np.array([[255, 236, 170], [245, 210, 120], [255, 248, 220]])[rng.integers(0, 3, n)]
+    r = 18
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    window = np.clip(1 - (xx ** 2 + yy ** 2) / r ** 2, 0, 1) ** 2  # apvalūs, švelnūs kraštai
+    frames = 1 if still else int(round(fps * seconds))
+    out = []
+    for f in range(frames):
+        ph = 0.37 if still else f / frames
+        img = np.zeros((height, width, 4), dtype=np.float32)
+        cx = (px + sway * np.sin(2 * np.pi * ph + sph)) % width
+        cy = (py - rise * ph) % height
+        bright = 0.25 + 0.75 * (0.5 + 0.5 * np.sin(2 * np.pi * tw * ph + tph)) ** 3
+        for i in range(n):
+            g = np.exp(-(xx ** 2 + yy ** 2) / (2 * size[i] ** 2)) * bright[i]
+            g += np.exp(-(xx ** 2 + yy ** 2) / (2 * (size[i] * 2.4) ** 2)) * bright[i] * 0.22  # švytėjimas
+            g *= window
+            x0, y0 = int(cx[i]) - r, int(cy[i]) - r
+            xs, ys = slice(max(0, x0), min(width, x0 + 2 * r + 1)), slice(max(0, y0), min(height, y0 + 2 * r + 1))
+            gs = g[ys.start - y0:ys.stop - y0, xs.start - x0:xs.stop - x0]
+            img[ys, xs, 3] = np.maximum(img[ys, xs, 3], gs)
+            img[ys, xs, :3] = np.where(gs[..., None] > 0.02, gold[i], img[ys, xs, :3])
+        img[..., 3] = np.clip(img[..., 3], 0, 1) * 255
+        out.append(np.clip(img, 0, 255).astype(np.uint8).tobytes())
+    codec = [] if still else ["-c:v", "qtrle"]
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
+                    f"{width}x{height}", "-r", str(fps), "-i", "-", *codec, path], input=b"".join(out), check=True)
+    return path
+
+
+def dust_chains(inp, out, width, height, fps, tmp, still=False):
+    """Uždeda auksines dulkes ant vaizdo (inp -> out)."""
+    p = dust_media(os.path.join(tmp, "dust.png" if still else "dust.mov"), fps=fps, still=still)
+    src = f"movie='{_filter_path(p)}'" + ("" if still else ":loop=0,setpts=N/(FRAME_RATE*TB)")
+    loop = ",loop=loop=-1:size=1:start=0" if still else ""
+    return [f"{src}{loop},scale={width}:{height},format=rgba[dust]",
+            f"{inp}[dust]overlay=shortest=1:format=auto{out}"]
+
+
 def gradient_image(path, width, height, accent, template="Prabangus auksas", hook_ypos=0.2):
     """Gradiento paveikslėlis (PPM). Kabliuko ir CTA srityse – metalinės juostos, sutapdintos su teksto
     eilutėmis (šviesus viršus, tamsesnė vidurio linija, blizgi apačia); likusiame kadre (titrams) – įstrižas
     blizgesys."""
     import numpy as np
-    stops = GRADIENTS[accent]
+    stops = grad_stops(accent)
     pos = np.array([p for p, _ in stops])
     cols = np.array([_hex(c) for _, c in stops], dtype=float)
     kind, hsize, csize, hook_y, cta_y = _overlay_layout(width, height, template, hook_ypos)
@@ -378,17 +467,27 @@ def gradient_image(path, width, height, accent, template="Prabangus auksas", hoo
 
 
 def gradient_chains(base, out, width, height, fps, duration, accent, masks, tmp, template="Prabangus auksas",
-                    hook_ypos=0.2, mask_pre=(), name="g"):
+                    hook_ypos=0.2, mask_pre=(), name="g", shine=False, still=False):
     """Filtrų grandinės, kurios „įlieja“ gradientą į tekstą: masks – ass filtrai, piešiantys baltą kaukę
-    ant juodo fono (mask_pre – filtrai prieš juos, pvz. laiko poslinkis ar priartėjimas)."""
+    ant juodo fono (mask_pre – filtrai prieš juos, pvz. laiko poslinkis ar priartėjimas).
+    shine – „Aukso blizgesys“: per tekstą kas 2,6 s perbėga šviesos ruožas (still – sustabdytas viduryje)."""
     grad = gradient_image(os.path.join(tmp, f"{name}.ppm"), width, height, accent, template, hook_ypos)
     mask_chain = ",".join(list(mask_pre) + list(masks))
-    return [
+    chains = [
         f"color=c=black:s={width}x{height}:r={fps}:d={duration:.3f},format=yuv420p,{mask_chain},format=gbrp[{name}m]",
-        f"movie='{_filter_path(grad)}',loop=loop=-1:size=1:start=0,fps={fps},format=gbrp[{name}g]",
+        f"movie='{_filter_path(grad)}',loop=loop=-1:size=1:start=0,fps={fps},format=gbrp[{name}g0]",
         f"{base}format=gbrp[{name}b]",
-        f"[{name}b][{name}g][{name}m]maskedmerge,format=yuv420p{out}",
     ]
+    if shine:
+        sh = shine_image(os.path.join(tmp, f"{name}_shine.png"), width, height)
+        # Pirmas perbėgimas – kai kabliukas jau ryškus (~1 s), vėliau kas 2,6 s.
+        x = "-W*0.08" if still else "if(lt(mod(t+1.6,2.6),1.1),-W+2*W*mod(t+1.6,2.6)/1.1,W)"
+        chains += [f"movie='{_filter_path(sh)}',loop=loop=-1:size=1:start=0,fps={fps},format=rgba[{name}s]",
+                   f"[{name}g0][{name}s]overlay=x='{x}':y=0:eval=frame:format=gbrp[{name}g]"]
+    else:
+        chains.append(f"[{name}g0]null[{name}g]")
+    chains.append(f"[{name}b][{name}g][{name}m]maskedmerge,format=yuv420p{out}")
+    return chains
 
 
 def _run(cmd, total, progress, what):
@@ -428,7 +527,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
         graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
         vout = "[base]"
-        if accent in GRADIENTS:
+        shine = "Aukso blizgesys" in (effects or ())
+        if accent in GRADIENTS or shine:
             masks = []
             if subs_words:
                 sw = [(w, a0 / speed, b0 / speed) for w, a0, b0 in subs_words]
@@ -443,8 +543,12 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, "", accent,
                                           template=template, mask=True))
             masks.append(f"ass=filename='{_filter_path(om)}':fontsdir='{_filter_path(FONT_DIR)}'")
-            graph += gradient_chains("[base]", "[gold]", W, H, fps, duration + 1, accent, masks, tmp, template)
+            graph += gradient_chains("[base]", "[gold]", W, H, fps, duration + 1, accent, masks, tmp, template,
+                                     shine=shine)
             vout = "[gold]"
+        if "Auksinės dulkės" in (effects or ()):
+            graph += dust_chains(vout, "[dusty]", W, H, fps, tmp)
+            vout = "[dusty]"
         if trimmed:
             graph.append(f"{vout}fade=t=out:st={duration - 0.5:.3f}:d=0.5[faded]")
             vout = "[faded]"
@@ -527,13 +631,16 @@ def make_cover(path, out_path, at=0.5, hook="", accent="Auksas", template="Praba
                                           hook_ypos=0.42, template=template))
             post.append(f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'")
         fx = [e for e in effects if e != "Šviesos blyksnis"]
-        if accent in GRADIENTS and post:
+        shine = "Aukso blizgesys" in fx
+        if (accent in GRADIENTS or shine) and post and hook.strip():
             g = ";".join([look_graph("[0:v]", "[base]", color, fx, width, height, still=True, pre=pre, post=post)]
-                         + gradient_chains("[base]", "[out]", width, height, 25, 10, accent, [_cover_mask(
+                         + gradient_chains("[base]", "[cv]", width, height, 25, 10, accent, [_cover_mask(
                              tmp, width, height, hook, accent, template)], tmp, template, 0.42,
-                             mask_pre=["setpts=PTS+5/TB"]))
+                             mask_pre=["setpts=PTS+5/TB"], shine=shine, still=True))
         else:
-            g = look_graph("[0:v]", "[out]", color, fx, width, height, still=True, pre=pre, post=post)
+            g = look_graph("[0:v]", "[cv]", color, fx, width, height, still=True, pre=pre, post=post)
+        g += ";" + (";".join(dust_chains("[cv]", "[out]", width, height, 25, tmp, still=True))
+                    if "Auksinės dulkės" in fx else "[cv]null[out]")
         seek = [] if video_editor.is_image(path) else ["-ss", f"{max(0.0, at):.3f}"]
         cmd = ["ffmpeg", "-y", "-loglevel", "error", *seek, "-i", path, "-filter_complex", g, "-map", "[out]",
                "-frames:v", "1", "-q:v", "2", out_path]
