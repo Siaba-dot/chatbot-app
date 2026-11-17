@@ -23,8 +23,10 @@ Galima naudoti ir be naršyklės: `python3 video_editor.py IN.mp4 OUT.mp4 --form
 ## ✨ Reels studija
 Prabangi (tamsi su auksu) studija Instagram Reels / TikTok / Shorts vaizdo įrašams – šoniniame meniu **Reels studija**.
 Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, titrai), plius:
-- **šablonai**: „Prabangus auksas“ ir „Elegantiškas minimalizmas“ (Playfair Display šriftas, plona auksinė linija,
-  švelnus ryškėjimas), „Ryškus (TikTok stilius)“ (didelės raidės spalvotoje dėžutėje);
+- **šablonai** (langeliai su peržiūra ant jūsų kadro): „Prabangus auksas“, „Ranka rašytas“ (Great Vibes kaligrafija),
+  „Elegantiškas minimalizmas“ (Playfair Display, plona linija, švelnus ryškėjimas), „Ryškus (TikTok stilius)“;
+- **titrų stiliai** (langeliai su pavyzdžiu): Modernūs, Elegantiški, Dėžutėje, Ranka rašyti (Dancing Script), Minimalūs;
+- **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **kabliukas** – antraštė pirmoms sekundėms, **kvietimas veikti** pabaigoje, **@paskyra** viršuje;
 - **foninės muzikos biblioteka** (6 kūriniai be autorių teisių apribojimų: Prabangus pianinas, Lounge, Kinematografiška,
   Energinga, Lo-fi, Romantiška – `music/`, sukurta `tools/make_music.py`) arba sava muzika; ji automatiškai patyli, kai kalbama;
@@ -84,3 +86,5 @@ premium_minutes = 60
 note = "7 dienos nemokamai · mokant už metus – 2 mėnesiai dovanų"
 show = true    # false – lentelės nerodyti
 ```
+
+Šriftai – SIL Open Font License (licencijos `fonts/licenses/`).
