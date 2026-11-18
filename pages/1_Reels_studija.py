@@ -97,6 +97,11 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary p { font-fam
 [class*="st-key-reels_view"] video, [class*="st-key-reels_view"] img { max-height: 56vh; object-fit: contain; }
 [class*="st-key-reels_view"] [data-testid="stImage"], [class*="st-key-reels_view"] [data-testid="stVideo"] {
   display: flex; justify-content: center; }
+.lux-story { text-align: center; max-width: 46rem; margin: -.3rem auto .5rem; font-family: 'Playfair Display', serif;
+  font-style: italic; color: #DCCFB8; font-size: .98rem; line-height: 1.5; }
+.lux-story span { display: block; font-style: normal; margin-top: .15rem;
+  background: linear-gradient(100deg, #B85F12, #FFD58A 45%, #E39B2E 70%, #B85F12);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lux-empty { border: 1px dashed var(--line); border-radius: 14px; padding: 2.4rem 1rem; text-align: center;
   color: #8EA2BF; }
 /* Baltijos gintaras: logotipas ir lietuviškas ornamentas */
@@ -128,6 +133,14 @@ st.markdown(f"""
 
 user = accounts.require_login()
 plan = user["plan"]
+
+# Gintaro istorija prisijungus: trumpai (kad peržiūra liktų arti), visa – išskleidžiama
+st.markdown('<div class="lux-story">Gintaras milijonus metų saugo sustabdytą akimirką – mes darome tą patį su '
+            'jūsų video. <span>Jūsų akimirkos – kaip gintaras: išsaugotos gražiausios.</span></div>',
+            unsafe_allow_html=True)
+_, _mid, _ = st.columns([1, 3, 1])
+with _mid.expander("✦  Gintaro istorija"):
+    st.markdown(accounts.STORY_FULL)
 
 
 def step(n, title, desc=""):
