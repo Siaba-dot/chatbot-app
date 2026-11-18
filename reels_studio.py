@@ -21,6 +21,7 @@ from video_editor import FONT_DIR, FONT_NAME, TRAINING_FONT, _ass_escape, _ass_t
 
 # Akcento spalvos: pavadinimas -> (RGB hex, teksto spalva ant jos)
 ACCENTS = {
+    "Gintaro gradientas": ("E0A43A", "0E1420"),
     "Aukso gradientas": ("D9B24C", "0B0B0C"),
     "Sidabro gradientas": ("C9CBD1", "0B0B0C"),
     "Auksas": ("E3C16F", "0B0B0C"),
@@ -37,6 +38,9 @@ SCRIPT = "Great Vibes"
 
 # Metaliniai gradientai (spalvų taškai nuo raidės viršaus iki apačios): akcento pavadinimas -> [(vieta, RGB)]
 GRADIENTS = {
+    # Firminis studijos metalas – Baltijos gintaras (medus -> gintaras -> sakų ruda)
+    "Gintaro gradientas": [(0.0, "FFF1D2"), (0.28, "F6D08A"), (0.48, "D98F2B"), (0.56, "B8701A"),
+                           (0.68, "EBAE4E"), (0.86, "FBDFA5"), (1.0, "9A5A14")],
     "Aukso gradientas": [(0.0, "FFF4C8"), (0.28, "F3D67E"), (0.48, "C99A30"), (0.56, "B07F1C"),
                          (0.68, "E9C964"), (0.86, "FBE7A2"), (1.0, "A47A1E")],
     "Sidabro gradientas": [(0.0, "FFFFFF"), (0.28, "E2E4E9"), (0.48, "9A9DA5"), (0.56, "80838C"),
@@ -45,6 +49,7 @@ GRADIENTS = {
 
 # Teksto šablonai. elegant – serifinis šriftas be dėžutės su plona linija, box – ryški dėžutė.
 TEMPLATES = {
+    "Baltijos gintaras": {"kind": "elegant", "accent": "Gintaro gradientas", "color": "Baltijos auksas"},
     "Prabangus auksas": {"kind": "elegant", "accent": "Aukso gradientas", "color": "Auksinė valanda"},
     "Ranka rašytas": {"kind": "script", "accent": "Aukso gradientas", "color": "Auksinė valanda"},
     "Elegantiškas minimalizmas": {"kind": "elegant", "accent": "Sidabro gradientas", "color": "Kino"},
@@ -497,6 +502,7 @@ def frame_image(path, width, height, accent="Aukso gradientas"):
     apačioje (RGBA PNG)."""
     import numpy as np
     stops = GRADIENTS.get(accent) or (GRADIENTS["Sidabro gradientas"] if "idabr" in accent
+                                      else GRADIENTS["Gintaro gradientas"] if "intar" in accent
                                       else GRADIENTS["Aukso gradientas"])
     pos = np.array([p for p, _ in stops])
     cols = np.array([_hex(c) for _, c in stops], dtype=float)
@@ -826,7 +832,7 @@ if __name__ == "__main__":
     ap.add_argument("--cta", default="")
     ap.add_argument("--handle", default="")
     ap.add_argument("--accent", default="Auksas", choices=list(ACCENTS))
-    ap.add_argument("--template", default="Prabangus auksas", choices=list(TEMPLATES))
+    ap.add_argument("--template", default="Baltijos gintaras", choices=list(TEMPLATES))
     ap.add_argument("--music")
     ap.add_argument("--music-volume", type=float, default=0.25)
     ap.add_argument("--no-ducking", action="store_true")

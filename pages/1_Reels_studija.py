@@ -22,12 +22,12 @@ st.set_page_config(page_title="Reels studija", page_icon="✨", layout="wide", i
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,400&family=Inter:wght@400;500;600&display=swap');
-:root { --gold: #D4AF37; --gold-2: #F3DE9C; --gold-3: #9C7A26; --ink: #0B0B0C; --line: rgba(212,175,55,.22); }
+:root { --gold: #E0A43A; --gold-2: #F6D08A; --gold-3: #9A5A14; --ink: #0E1420; --line: rgba(224,164,58,.22); }
 .stApp {
   background:
-    radial-gradient(1200px 500px at 50% -120px, rgba(212,175,55,.13), transparent 70%),
-    radial-gradient(800px 400px at 110% 30%, rgba(156,122,38,.07), transparent 70%),
-    #0B0B0C;
+    radial-gradient(1200px 500px at 50% -120px, rgba(224,164,58,.13), transparent 70%),
+    radial-gradient(800px 400px at 110% 30%, rgba(90,130,190,.07), transparent 70%),
+    #0E1420;
 }
 .stApp, .stApp p, .stApp label, .stApp li { font-family: 'Inter', system-ui, sans-serif; }
 #MainMenu, footer { visibility: hidden; }
@@ -36,62 +36,75 @@ st.markdown("""
   font-weight: 600; }
 .lux-title { font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: clamp(2.1rem, 7vw, 3.3rem);
   line-height: 1.08; margin: .5rem 0 .6rem;
-  background: linear-gradient(100deg, #9C7A26 0%, #F3DE9C 35%, #D4AF37 55%, #FFF3CF 70%, #B8912E 100%);
+  background: linear-gradient(100deg, #9A5A14 0%, #F6D08A 35%, #E0A43A 55%, #FFF1D2 70%, #C27A22 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent; }
-.lux-sub { color: #B8AF9C; font-size: 1rem; max-width: 34rem; margin: 0 auto; }
+.lux-sub { color: #B5B3AE; font-size: 1rem; max-width: 34rem; margin: 0 auto; }
 .lux-rule { width: 84px; height: 1px; margin: 1.2rem auto 0;
   background: linear-gradient(90deg, transparent, var(--gold), transparent); }
 .lux-step { display: flex; align-items: baseline; gap: .8rem; margin: .2rem 0 .6rem; }
 .lux-step .n { font-family: 'Playfair Display', serif; font-style: italic; color: var(--gold); font-size: 1.5rem; }
-.lux-step .t { font-family: 'Playfair Display', serif; font-size: 1.35rem; color: #F4EEDF; font-weight: 500; }
-.lux-step .d { color: #8F8778; font-size: .85rem; margin-left: auto; }
+.lux-step .t { font-family: 'Playfair Display', serif; font-size: 1.35rem; color: #F3EBDD; font-weight: 500; }
+.lux-step .d { color: #8C8A86; font-size: .85rem; margin-left: auto; }
 div[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--line) !important;
   background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.01)); border-radius: 14px; }
 .stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"], .stFormSubmitButton > button {
-  background: linear-gradient(100deg, #B8912E, #F3DE9C 45%, #D4AF37 70%, #B8912E);
-  color: #0B0B0C; border: 0; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-  box-shadow: 0 8px 30px rgba(212,175,55,.18); }
-.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button:hover { filter: brightness(1.07); color: #0B0B0C; }
+  background: linear-gradient(100deg, #C27A22, #F6D08A 45%, #E0A43A 70%, #C27A22);
+  color: #0E1420; border: 0; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  box-shadow: 0 8px 30px rgba(224,164,58,.18); }
+.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button:hover { filter: brightness(1.07); color: #0E1420; }
 .stButton > button[kind="secondary"], .stDownloadButton > button[kind="secondary"] {
   border-color: var(--line); }
 [data-testid="stMetricValue"] { font-family: 'Playfair Display', serif; color: var(--gold-2); }
 .lux-caption { white-space: pre-wrap; border-left: 2px solid var(--gold); padding: .2rem 0 .2rem 1rem;
-  color: #EDE6D6; }
+  color: #F0E8DA; }
 .lux-tags { color: var(--gold-2); font-size: .92rem; margin-top: .6rem; }
 .lux-premium { border: 1px solid var(--line); border-radius: 12px; padding: .7rem .9rem; margin: .3rem 0 .6rem;
-  background: linear-gradient(100deg, rgba(212,175,55,.10), rgba(212,175,55,.02)); color: #E9DFC6; font-size: .92rem; }
-.lux-foot { text-align: center; color: #5E584D; font-size: .75rem; letter-spacing: .3em; margin-top: 2rem; }
+  background: linear-gradient(100deg, rgba(224,164,58,.10), rgba(224,164,58,.02)); color: #EFE2C8; font-size: .92rem; }
+.lux-foot { text-align: center; color: #5A6070; font-size: .75rem; letter-spacing: .3em; margin-top: 2rem; }
 [class*="st-key-reels_fgrid"] button, [class*="st-key-reels_egrid"] button {
   min-height: 1.9rem; padding: .15rem .3rem; border-radius: 8px; }
 [class*="st-key-reels_tile"] button *, [class*="st-key-reels_tsel"] button * {
   font-size: .74rem !important; line-height: 1.15; letter-spacing: 0; text-transform: none; }
-[class*="st-key-reels_tsel"] button, [class*="st-key-reels_tsel"] button * { color: #0B0B0C !important; }
+[class*="st-key-reels_tsel"] button, [class*="st-key-reels_tsel"] button * { color: #0E1420 !important; }
 [class*="st-key-reels_tile"] img, [class*="st-key-reels_tsel"] img {
   border-radius: 10px 10px 0 0; transition: transform .15s; }
 [class*="st-key-reels_tile"] img { opacity: .82; }
 [class*="st-key-reels_tsel"] img { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* Šoninis nustatymų skydelis */
-section[data-testid="stSidebar"] { background: linear-gradient(180deg, #121114, #0B0B0C);
+section[data-testid="stSidebar"] { background: linear-gradient(180deg, #141C2B, #0E1420);
   border-right: 1px solid var(--line); }
 @media (min-width: 900px) { section[data-testid="stSidebar"] { width: 430px !important; } }
 section[data-testid="stSidebar"] [data-testid="stExpander"] details { border-color: var(--line); border-radius: 12px; }
 section[data-testid="stSidebar"] [data-testid="stExpander"] summary p { font-family: 'Playfair Display', serif;
-  font-size: 1.08rem; color: #F4EEDF; }
+  font-size: 1.08rem; color: #F3EBDD; }
 .lux-side-title { font-family: 'Playfair Display', serif; font-size: 1.5rem; color: var(--gold-2); margin: .2rem 0 .6rem; }
 .block-container { max-width: 1100px; padding-top: 2.2rem; }
-.lux-hint { color: #8F8778; font-size: .85rem; text-align: center; margin: -.4rem 0 .8rem; }
+.lux-hint { color: #8C8A86; font-size: .85rem; text-align: center; margin: -.4rem 0 .8rem; }
 [class*="st-key-reels_actions"] button { padding-left: .3rem; padding-right: .3rem; }
 [class*="st-key-reels_actions"] button p { font-size: .9rem; white-space: nowrap; }
 [class*="st-key-reels_view"] video, [class*="st-key-reels_view"] img { max-height: 56vh; object-fit: contain; }
 [class*="st-key-reels_view"] [data-testid="stImage"], [class*="st-key-reels_view"] [data-testid="stVideo"] {
   display: flex; justify-content: center; }
 .lux-empty { border: 1px dashed var(--line); border-radius: 14px; padding: 2.4rem 1rem; text-align: center;
-  color: #8F8778; }
+  color: #8C8A86; }
+.rs-logo { display: block; margin: 1.6rem auto .35rem; width: 58px; height: 58px;
+  filter: drop-shadow(0 6px 18px rgba(224,164,58,.35)); }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="lux-hero" style="padding:.2rem 0 .9rem">
+  <svg class="rs-logo" viewBox="0 0 64 64" aria-hidden="true">
+    <defs><linearGradient id="amb" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF1D2"/><stop offset=".35" stop-color="#F6D08A"/>
+      <stop offset=".7" stop-color="#D98F2B"/><stop offset="1" stop-color="#9A5A14"/></linearGradient>
+      <radialGradient id="ambg" cx=".38" cy=".55" r=".5"><stop offset="0" stop-color="#FFF7E6" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#FFF7E6" stop-opacity="0"/></radialGradient></defs>
+    <path d="M32 4 C32 4 12 28 12 41 a20 20 0 0 0 40 0 C52 28 32 4 32 4Z" fill="url(#amb)"/>
+    <path d="M32 4 C32 4 12 28 12 41 a20 20 0 0 0 40 0 C52 28 32 4 32 4Z" fill="url(#ambg)"/>
+    <text x="32" y="50" text-anchor="middle" font-family="Playfair Display, Georgia, serif" font-weight="700"
+      font-size="17" fill="#0E1420" letter-spacing="1">RS</text>
+  </svg>
   <div class="lux-kicker">Reels · TikTok · Shorts · YouTube</div>
   <div class="lux-title" style="font-size:clamp(1.8rem,5vw,2.6rem)">Reels montavimo studija</div>
 </div>
@@ -208,7 +221,7 @@ st.session_state.setdefault(P + "subs_pos", "Žemiau")
 st.session_state.setdefault(P + "hook_pos", "Aukščiau")
 subs_y = reels_studio.SUBTITLE_POSITIONS[st.session_state[P + "subs_pos"]]
 hook_y = reels_studio.HOOK_POSITIONS[st.session_state[P + "hook_pos"]]
-st.session_state.setdefault(P + "template", "Prabangus auksas")
+st.session_state.setdefault(P + "template", "Baltijos gintaras")
 if P + "accent" not in st.session_state:
     apply_template()
 
@@ -714,4 +727,4 @@ if plan == "admin":
                    "Minučių apskaita išsivalo, kai programa perkraunama ar atnaujinama – "
                    "OpenAI svetainėje nustatykite ir išlaidų ribą.")
 
-st.markdown('<div class="lux-foot">REELS STUDIJA</div>', unsafe_allow_html=True)
+st.markdown('<div class="lux-foot">REELS STUDIJA · BALTIJOS GINTARAS</div>', unsafe_allow_html=True)

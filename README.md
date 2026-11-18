@@ -28,9 +28,9 @@ titrų taisymas; visi nustatymai (formatas, stilius, tekstai, garsas, tempas) �
 Kitokios orientacijos vaizdas dedamas per vidurį su sulietu fonu; teksto dydžiai pritaikomi kadrui.
 **Titrų ir kabliuko dydis** reguliuojamas slankikliais (60–150 %).
 
-Prabangi (tamsi su auksu) studija Instagram Reels / TikTok / Shorts vaizdo įrašams – šoniniame meniu **Reels studija**.
+Prabangi studija firminiu **„Baltijos gintaro“** stiliumi (naktinė mėlyna su gintaru, gintaro lašo logotipas) Instagram Reels / TikTok / Shorts vaizdo įrašams – šoniniame meniu **Reels studija**.
 Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, titrai), plius:
-- **šablonai** (langeliai su peržiūra ant jūsų kadro): „Prabangus auksas“, „Ranka rašytas“ (Great Vibes kaligrafija),
+- **šablonai** (langeliai su peržiūra ant jūsų kadro): ✦ „Baltijos gintaras“ (firminis, numatytasis – gintaro gradientas ir filtras „Baltijos auksas“), „Prabangus auksas“, „Ranka rašytas“ (Great Vibes kaligrafija),
   „Elegantiškas minimalizmas“ (Playfair Display, plona linija, švelnus ryškėjimas), „Ryškus (TikTok stilius)“;
 - **titrų stiliai** (langeliai su pavyzdžiu): Modernūs, Elegantiški, Dėžutėje, Ranka rašyti (Dancing Script), Rašomi ranka,
   Minimalūs;
