@@ -109,6 +109,16 @@ def zoom_filters(W, H, duration):
             f"crop={W}:{H}"]
 
 
+def punch_filters(W, H, times, amp=0.07, length=0.55):
+    """Akcentų priartėjimas: ties svarbiausiais žodžiais kadras trumpam „įšoka“ arčiau (punch-in) ir grįžta."""
+    times = sorted(times)[:40]
+    if not times:
+        return []
+    z = "+".join(f"between(t,{a:.2f},{a + length:.2f})*sin(PI*(t-{a:.2f})/{length:.2f})" for a in times)
+    k = f"(1+{amp}*({z}))"
+    return [f"scale=w='trunc({W}*{k}/2)*2':h='trunc({H}*{k}/2)*2':eval=frame", f"crop={W}:{H}"]
+
+
 AMBER_LOOK = ["colorbalance=rs=0.16:gs=0.05:bs=-0.2:rm=0.12:gm=0.03:bm=-0.16:rh=0.08:bh=-0.12",
               "eq=saturation=1.2:contrast=1.08:brightness=0.03", "vignette=PI/4.5"]
 
@@ -725,7 +735,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
-           music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN):
+           music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN, punch=False):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
     natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
@@ -764,6 +774,14 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if extend > 0.01:  # įgarsinimas ilgesnis – paskutinis kadras palaikomas ilgiau
             pre.append(f"tpad=stop_mode=clone:stop_duration={extend:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
+        # svarbiausių žodžių (*žodis*) laikai galutiniame video – akcentų priartėjimui
+        punches = []
+        if punch and subs_words:
+            punches = [a0 / speed for w, a0, _ in subs_words if video_editor.is_key(w)]
+            if moment:
+                punches = [a0 + moment_len if a0 >= moment_at else a0 for a0 in punches]
+        punch_f = punch_filters(W, H, punches)
+        pre += punch_f
         if moment:
             sp = pre.pop(0) if pre and pre[0].startswith("setpts") else "null"
             graph = moment_chains("[0:v]", "[mv]", moment_at, moment_len, fps, sp)
@@ -784,6 +802,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                     f.write(video_editor.build_ass(sw, W, H, ypos=subs_ypos, look=subs_look, mask=True,
                                                    size=subs_size))
                 masks.append(f"ass=filename='{_filter_path(sm)}':fontsdir='{_filter_path(FONT_DIR)}'")
+                masks += punch_f  # titrai sumontuoti anksčiau – „įšoka“ kartu su vaizdu
                 if "Lėtas priartėjimas" in (effects or ()):  # titrai sumontuoti anksčiau – priartėja kartu su vaizdu
                     masks += zoom_filters(W, H, duration)
             om = os.path.join(tmp, "overlay_mask.ass")

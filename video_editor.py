@@ -294,6 +294,56 @@ def align_text(text, speech):
     return out
 
 
+KEY_MARK = "*"
+# Dažni lietuviški (ir angliški) žodžiai, kurie niekada nebūna „svarbiausi“
+_COMMON = set("""ir bet kad kai kaip kur kas jei nes tai tas ta tie tos šis ši šie šios čia ten dar jau
+labai tik net gal yra buvo bus būti esu esi esame galima reikia savo mano tavo jūsų mūsų jo jos jų man tau
+mums jums jie jos mes jūs aš tu su be per prie nuo iki apie dėl po už ant į iš pas tarp prieš ar arba nei
+taip ne nė va štai kiek koks kokia toks tokia viską viskas kažkas niekas kiekvienas visi visos the and for
+you that this with are was have just""".split())
+
+
+def is_key(word):
+    """Ar žodis pažymėtas kaip svarbiausias (*žodis*)."""
+    return len(word) > 2 and word.startswith(KEY_MARK) and KEY_MARK in word[1:]
+
+
+def plain(word):
+    """Žodis be paryškinimo žymių."""
+    return word.replace(KEY_MARK, "")
+
+
+def plain_text(words):
+    return " ".join(plain(w[0]) for w in words)
+
+
+def mark_key_words(words, every=2.4):
+    """Automatiškai pažymi svarbiausius žodžius (*žodis*): skaičius, šauktinius ir ilgus prasminius žodžius –
+    daugiausiai po vieną frazėje ir ne dažniau kaip kas `every` s. Jei naudotojas pats pažymėjo
+    bent vieną žodį – paliekama jo valia."""
+    if any(is_key(w[0]) for w in words):
+        return list(words)
+    out, last = list(words), -1e9
+    pos = 0
+    for ph in group_phrases(words):
+        best, score = None, 0
+        for k, (w, a, b) in enumerate(ph):
+            core = re.sub(r"[^\w%€$]", "", w, flags=re.UNICODE)
+            if not core or core.lower() in _COMMON:
+                continue
+            sc = len(core) + (12 if re.search(r"\d", core) else 0) + (3 if w.endswith("!") else 0) \
+                + (2 if core.isupper() and len(core) > 1 else 0)
+            if sc > score:
+                best, score = k, sc
+        if best is not None and score >= 7 and ph[best][1] - last >= every:
+            w, a, b = ph[best]
+            m = re.match(r"^(\W*)(.*?)(\W*)$", w, flags=re.UNICODE)  # skyrybos ženklai lieka už žymių
+            out[pos + best] = (f"{m.group(1)}{KEY_MARK}{m.group(2)}{KEY_MARK}{m.group(3)}", a, b)
+            last = a
+        pos += len(ph)
+    return out
+
+
 def group_phrases(words, max_words=4, max_gap=0.6):
     phrases, cur = [], []
     for w in words:
@@ -301,7 +351,7 @@ def group_phrases(words, max_words=4, max_gap=0.6):
             phrases.append(cur)
             cur = []
         cur.append(w)
-        if re.search(r"[.!?…]$", w[0]):
+        if re.search(r"[.!?…]\**$", w[0]):
             phrases.append(cur)
             cur = []
     if cur:
@@ -337,6 +387,9 @@ SUBTITLE_LOOKS = {
                 "base": "FFFFFF", "box": False, "outline": 1 / 16, "shadow": 0.4, "dim": "38", "pop": False,
                 "ypos": 0.74},
 }
+
+
+KEY_SCALE = 128  # svarbiausio žodžio dydis, %
 
 
 def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern", mask=False, size=1.0):
@@ -387,7 +440,7 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
                 end = min(end, phrases[pi + 1][0][1])
             if end <= a:
                 continue
-            text = " ".join(_ass_escape(w[0]) for w in ph)
+            text = " ".join(_ass_escape(plain(w[0])) for w in ph)
             est = min(width - 2 * margin, len(text) * fsize * 0.44)
             x0, x1 = round(width / 2 - est / 2 - fsize * 0.3), round(width / 2 + est / 2 + fsize * 0.4)
             dur = max(0.25, min(spoken, end) - a)
@@ -399,15 +452,23 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
         end = ph[-1][2] + 0.35
         if pi + 1 < len(phrases):
             end = min(end, phrases[pi + 1][0][1])
-        texts = [_ass_escape(w[0].upper() if L["upper"] else w[0]) for w in ph]
+        texts = [_ass_escape(plain(w[0]).upper() if L["upper"] else plain(w[0])) for w in ph]
+        keys = [is_key(w[0]) for w in ph]
         for i, (_, s, _) in enumerate(ph):
             a = ph[0][1] if i == 0 else s
             b = ph[i + 1][1] if i + 1 < len(ph) else end
             if b <= a:
                 continue
             parts = []
+            dur_ms = max(1, round((b - a) * 1000))
             for j, t in enumerate(texts):
-                if mask and j != i:
+                if keys[j]:  # svarbiausias žodis – visada akcento spalva, didesnis; ištariant „iššoka“
+                    big = f"\\fscx{KEY_SCALE}\\fscy{KEY_SCALE}"
+                    pop = (f"\\fscx{KEY_SCALE + 22}\\fscy{KEY_SCALE + 22}\\t(0,{min(220, dur_ms)},{big})"
+                           if j == i else big)
+                    col = "\\1a&H00&" if mask else f"\\1c&H{highlight}&\\1a&H00&"
+                    parts.append(f"{{{col}{pop}}}" + t + "{\\fscx100\\fscy100}")
+                elif mask and j != i:
                     parts.append("{\\1a&HFF&}" + t)
                 elif j < i:
                     parts.append(f"{{\\1c&H{base}&\\1a&H00&}}" + t)
@@ -473,7 +534,7 @@ def build_ass_training(words, width, height, band):
         b = max(g[-1][2] + 0.5, a + 1.0)
         if gi + 1 < len(groups):
             b = min(b, groups[gi + 1][0][1])
-        text = _ass_escape(" ".join(w[0] for w in g))
+        text = _ass_escape(plain_text(g))
         lines.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,{pos}{text}")
     return "\n".join(lines) + "\n"
 
@@ -922,7 +983,7 @@ def render_edit(path, out_path, analysis, words=None, fmt="original", loudnorm=T
         if ass_file:
             os.unlink(ass_file)
     res.update(original_duration=info["duration"], cuts=len(keep) - 1, words=len(words),
-               subtitle_mode=analysis["subtitle_mode"], segments=keep, text=" ".join(w[0] for w in words))
+               subtitle_mode=analysis["subtitle_mode"], segments=keep, text=plain_text(words))
     return res
 
 
