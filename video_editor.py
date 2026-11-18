@@ -26,9 +26,9 @@ SUBTITLE_STYLES = ("modern", "training")
 FFMPEG_THREADS = os.environ.get("REELS_FFMPEG_THREADS", "2")
 
 
-def limit_threads(cmd):
+def limit_threads(cmd, threads=None):
     """Prideda gijų ribas ffmpeg komandai: filtrams, kiekvieno įėjimo dekoderiui ir koduotojui."""
-    t = FFMPEG_THREADS
+    t = threads or FFMPEG_THREADS
     out = [cmd[0], "-filter_threads", t, "-filter_complex_threads", t]
     for i, x in enumerate(cmd[1:-1], 1):
         if x == "-i":
