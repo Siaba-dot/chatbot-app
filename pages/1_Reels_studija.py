@@ -1,6 +1,8 @@
 import datetime
 import html
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -256,6 +258,47 @@ st.session_state.setdefault(P + "subs_pos", "Žemiau")
 st.session_state.setdefault(P + "hook_pos", "Aukščiau")
 subs_y = reels_studio.SUBTITLE_POSITIONS[st.session_state[P + "subs_pos"]]
 hook_y = reels_studio.HOOK_POSITIONS[st.session_state[P + "hook_pos"]]
+# ---------- Prekės ženklo rinkinys: išsaugoti numatytieji nustatymai ----------
+BRAND_DIR = os.path.join(accounts.DATA_DIR, "brand")
+BRAND_KEYS = ("template", "accent", "color", "handle", "cta", "brand_color", "logo_on", "logo_pos", "logo_size",
+              "logo_opacity")
+
+
+def brand_file():
+    return os.path.join(BRAND_DIR, re.sub(r"[^\w.-]", "_", user.get("username") or "studija"))
+
+
+if P + "brand_loaded" not in st.session_state:
+    st.session_state[P + "brand_loaded"] = True
+    try:
+        with open(brand_file() + ".json", encoding="utf-8") as f:
+            saved_brand = json.load(f)
+    except Exception:
+        saved_brand = {}
+    for k, v in saved_brand.items():
+        if k in BRAND_KEYS:
+            st.session_state.setdefault(P + k, v)
+    if os.path.exists(brand_file() + "_logo.png"):
+        st.session_state.setdefault(P + "logo_path", brand_file() + "_logo.png")
+    if st.session_state.get(P + "template") not in reels_studio.TEMPLATES:
+        st.session_state.pop(P + "template", None)
+
+
+def save_brand():
+    os.makedirs(BRAND_DIR, exist_ok=True)
+    data = {k: st.session_state[P + k] for k in BRAND_KEYS if P + k in st.session_state}
+    lp = st.session_state.get(P + "logo_path")
+    if lp and os.path.exists(lp) and os.path.abspath(lp) != os.path.abspath(brand_file() + "_logo.png"):
+        shutil.copy(lp, brand_file() + "_logo.png")
+    with open(brand_file() + ".json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    st.session_state[P + "brand_saved"] = True
+
+
+def use_brand_color():
+    st.session_state[P + "accent"] = st.session_state[P + "brand_color"].upper()
+
+
 st.session_state.setdefault(P + "template", "Baltijos gintaras")
 if P + "accent" not in st.session_state:
     apply_template()
@@ -326,8 +369,14 @@ with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True)
         tile.button(name, key=f"{P}tbtn{i}", type="primary" if sel else "secondary", width="stretch",
                     on_click=pick_template, args=(name,))
 
-    st.selectbox("Akcento spalva", list(reels_studio.ACCENTS), key=P + "accent",
-                 help="Gradientai – metalinis auksas ar sidabras kabliukui, kvietimui ir paryškintam titrų žodžiui.")
+    accent_opts = list(reels_studio.ACCENTS)
+    for extra in (st.session_state.get(P + "accent"), (st.session_state.get(P + "brand_color") or "").upper()):
+        if extra and extra.startswith("#") and extra not in accent_opts:
+            accent_opts.append(extra)
+    st.selectbox("Akcento spalva", accent_opts, key=P + "accent",
+                 format_func=lambda a: f"💎 Prekės ženklo spalva {a}" if a.startswith("#") else a,
+                 help="Gradientai – metalinis auksas ar sidabras kabliukui, kvietimui ir paryškintam titrų žodžiui. "
+                      "Savo spalvą nustatysite skiltyje „Prekės ženklas“.")
     accent = st.session_state[P + "accent"]
 
     st.markdown("**Filtrai** · <small>✦ – firminiai studijos</small>", unsafe_allow_html=True)
@@ -369,8 +418,8 @@ with sb.expander("✍️  Tekstai ir titrai"):
                          help="Trumpa intriguojanti frazė (iki ~8 žodžių) – sustabdo slinkimą.")
     c1, c2 = st.columns(2)
     hook_duration = c1.slider("Kabliuko trukmė (s)", 1.5, 6.0, 3.0, 0.5)
-    handle = c2.text_input("Paskyra", placeholder="@jusu.paskyra")
-    cta = st.text_input("Kvietimas veikti pabaigoje", placeholder="Pvz.: Išsaugok vėlesniam")
+    handle = c2.text_input("Paskyra", placeholder="@jusu.paskyra", key=P + "handle")
+    cta = st.text_input("Kvietimas veikti pabaigoje", placeholder="Pvz.: Išsaugok vėlesniam", key=P + "cta")
     c1, c2 = st.columns(2)
     c1.select_slider("Kabliuko vieta", list(reels_studio.HOOK_POSITIONS), key=P + "hook_pos",
                      help="Jei kabliukas uždengia veidą ar galvą – nuleiskite žemiau arba pakelkite.")
@@ -471,6 +520,54 @@ with sb.expander("✍️  Tekstai ir titrai"):
                                               "per video.")
 
 # ---------- IV. Garsas ----------
+with sb.expander("💎  Prekės ženklas"):
+    st.caption("Jūsų logotipas ir spalva ant kiekvieno video. Išsaugokite – kitą kartą šablonas, spalvos, "
+               "paskyra, kvietimas ir logotipas bus nustatyti automatiškai.")
+    logo_up = st.file_uploader("Logotipas (geriausia PNG su permatomu fonu)", type=["png", "jpg", "jpeg", "webp"],
+                               key=P + "logo_up")
+    if logo_up is not None and st.session_state.get(P + "logo_id") != logo_up.file_id:
+        from PIL import Image
+        bdir = st.session_state.setdefault(P + "brand_tmp", tempfile.mkdtemp(prefix="brand_"))
+        lp = os.path.join(bdir, f"logo_{logo_up.file_id}.png")
+        try:
+            with Image.open(logo_up) as im:
+                im.convert("RGBA").save(lp)
+            st.session_state[P + "logo_path"] = lp
+            st.session_state[P + "logo_id"] = logo_up.file_id
+            st.session_state[P + "logo_on"] = True
+        except Exception:
+            st.error("Logotipo nepavyko atidaryti – įkelkite PNG ar JPG.")
+    logo_path = st.session_state.get(P + "logo_path")
+    if logo_path and not os.path.exists(logo_path):
+        logo_path = None
+    if logo_path:
+        c1, c2 = st.columns([1, 2])
+        c1.image(logo_path, width="stretch")
+        for k, v in (("logo_on", True), ("logo_pos", reels_studio.LOGO_POSITIONS[0]), ("logo_size", 16),
+                     ("logo_opacity", 85)):
+            st.session_state.setdefault(P + k, v)
+        c2.toggle("Rodyti logotipą", key=P + "logo_on")
+        st.selectbox("Logotipo vieta", reels_studio.LOGO_POSITIONS, key=P + "logo_pos")
+        c1, c2 = st.columns(2)
+        c1.slider("Dydis", 8, 30, format="%d%%", key=P + "logo_size", help="Kadro pločio dalis")
+        c2.slider("Matomumas", 30, 100, step=5, format="%d%%", key=P + "logo_opacity")
+    st.session_state.setdefault(P + "brand_color", "#E39B2E")
+    c1, c2 = st.columns([1, 2], vertical_alignment="bottom")
+    c1.color_picker("Spalva", key=P + "brand_color", help="Jūsų prekės ženklo spalva – kabliukui, kvietimui, "
+                                                          "paryškintiems žodžiams ir progreso juostai.")
+    c2.button("Naudoti kaip akcentą", on_click=use_brand_color, width="stretch", key=P + "use_brand_color",
+              disabled=st.session_state.get(P + "accent") == st.session_state[P + "brand_color"].upper())
+    st.button("💾  Išsaugoti mano prekės ženklą", on_click=save_brand, type="primary", width="stretch",
+              key=P + "save_brand", help="Išsaugomi: šablonas, akcentas, filtras, paskyra, kvietimas, spalva ir "
+                                         "logotipas. Pastaba: atnaujinus programą serveryje, išsaugojimas gali "
+                                         "išsitrinti – tada tiesiog išsaugokite iš naujo.")
+    if st.session_state.pop(P + "brand_saved", False):
+        st.success("Išsaugota – kitą kartą prisijungus viskas bus nustatyta.")
+logo = ({"path": logo_path, "pos": st.session_state.get(P + "logo_pos", reels_studio.LOGO_POSITIONS[0]),
+         "size": st.session_state.get(P + "logo_size", 16) / 100,
+         "opacity": st.session_state.get(P + "logo_opacity", 85) / 100}
+        if logo_path and st.session_state.get(P + "logo_on", True) else None)
+
 with sb.expander("🎵  Garsas ir muzika", expanded=has_vo):
     st.markdown("**🎙️ Įgarsinimas – jūsų balsas**")
     vo_file = st.file_uploader("Balso įrašas (garso arba video failas)", key=P + "vo_file",
@@ -559,6 +656,8 @@ def other_format(fmt_name, tmp, progress):
     cover = os.path.join(tmp, "cover.jpg")
     reels_studio.make_cover(src, cover, min(cover_at, prep["analysis"]["info"]["duration"] - 0.1), hook, accent,
                             template, handle, size[0], size[1], color=color, effects=effects, text_size=text_size)
+    if logo:
+        reels_studio.stamp_logo(cover, logo)
     return out, cover
 
 
@@ -634,7 +733,7 @@ def all_formats_ui(result):
                            width="stretch", key=P + "dl_zip")
 
 
-highlight = reels_studio._ass_color(reels_studio.ACCENTS[accent][0])[4:]  # BBGGRR
+highlight = reels_studio._ass_color(reels_studio.accent_colors(accent)[0])[4:]  # BBGGRR
 work = st.session_state.setdefault(P + "work", tempfile.mkdtemp(prefix="reels_"))
 os.makedirs(work, exist_ok=True)
 signature = (tuple((c["id"], tuple(clips_ui.clip_segments(c) or ())) for c in clips), image_duration, transition, fmt,
@@ -731,7 +830,7 @@ def build(prep, words, tmp, out, quick, progress, fmt=fmt):
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
         subs_words=words, subs_look=look, subs_ypos=subs_y,
         hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
-        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch,
+        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch, logo=logo,
         moment_at=st.session_state.get(P + "moment_at", 3.0) if "Gintaro akimirka" in effects else None)
     return res, fin
 
@@ -884,6 +983,8 @@ with top:
             try:
                 reels_studio.make_cover(path, out, at, hook, accent, template, handle, cover_size[0] // 2,
                                         cover_size[1] // 2, color=color, effects=effects, text_size=text_size)
+                if logo:
+                    reels_studio.stamp_logo(out, logo)
                 with open(out, "rb") as f:
                     st.session_state[P + "preview"] = f.read()
                 st.session_state[P + "view"] = "cover"
@@ -927,6 +1028,8 @@ with top:
                 cover = os.path.join(tmp, "cover.jpg")
                 reels_studio.make_cover(path, cover, at, hook, accent, template, handle, cover_size[0],
                                         cover_size[1], color=color, effects=effects, text_size=text_size)
+                if logo:
+                    reels_studio.stamp_logo(cover, logo)
                 caption = None
                 if client:
                     say("Rašau aprašymą ir grotažymes…")
