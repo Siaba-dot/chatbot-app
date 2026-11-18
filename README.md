@@ -57,8 +57,9 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
   kvadratėliais atsitiktine tvarka), Švelnus išnykimas, Per šviesą, Slinkimas, Atsivėrimas;
 - **kabliuko ir titrų vieta** – „Kabliuko vieta“ (Viršuje / Aukščiau / Žemiau) ir „Titrų vieta“ (Viduryje / Žemiau /
   Apačioje), kad tekstas neuždengtų veido;
-- **įrašų apkarpymas** – kiekvienam video „✂️ Apkarpyti“: palikti nuo–iki ir (pasirinktinai) išmesti dalį iš vidurio;
-  ties kiekviena riba rodomas kadras, o grotuvas iškart groja paliktą dalį;
+- **kadrų takelis apkarpymui** – kiekvienam video „✂️ Apkarpyti – kadrų takelis“: juosta su kadrų miniatiūromis,
+  tempiamos geltonos rankenėlės (pradžia / pabaiga), padėties linija su kadro peržiūra, „✂ Skelti“ (padalinti toje
+  vietoje), „🗑 Ištrinti“ (pažymėtą dalį) ir „↺ Iš naujo“; veikia ir liečiant telefone;
 - **titrų taisymas** – „Paruošti titrus ir peržiūrą“ parodo titrus lentelėje, klaidas galima pataisyti prieš kuriant
   (balso atpažinimas vyksta tik kartą – taisymas ir peržiūra nieko nekainuoja);
 - **greita peržiūra** – visas Reels mažesne kokybe per kelias sekundes, prieš kuriant galutinį video;

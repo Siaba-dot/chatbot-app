@@ -16,6 +16,9 @@ import video_editor
 # Filmavimas programoje: kamera + mikrofonas per naršyklę (components/recorder/index.html)
 video_recorder = components.declare_component(
     "video_recorder", path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "recorder"))
+# Kadrų takelis apkarpymui: miniatiūros, tempiamos rankenėlės, „Skelti čia“ (components/timeline/index.html)
+trim_timeline = components.declare_component(
+    "trim_timeline", path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "timeline"))
 
 
 def add_clip(prefix, clip_id, ext, data, name, kind):
@@ -82,6 +85,11 @@ def clip_segments(c):
     """Įrašo paliekamos dalys pagal apkarpymą: [(nuo, iki), ...] arba None (visas įrašas)."""
     if c.get("image"):
         return None
+    if c.get("segments"):  # kadrų takelis: bet kiek dalių
+        segs = [(float(a), float(b)) for a, b in c["segments"] if b - a >= 0.1]
+        if not segs or (len(segs) == 1 and segs[0][0] <= 0.01 and segs[0][1] >= c["duration"] - 0.01):
+            return None
+        return segs
     a, b = c.get("trim") or (0.0, c["duration"])
     cut = c.get("cut")
     segs = [(a, b)]
@@ -99,54 +107,40 @@ def clip_length(c, image_duration):
     return sum(b - a for a, b in segs) if segs else c["duration"]
 
 
-@st.cache_data(max_entries=300, show_spinner=False)
-def _frame_at(path, t):
-    """Mažas kadras (JPG) iš video ties t sekunde – apkarpymo vietoms parodyti."""
-    r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, t):.2f}", "-i", path, "-frames:v", "1",
-                        "-vf", "scale=180:-2", "-q:v", "5", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
-                       capture_output=True)
-    return r.stdout or None
-
-
-def _frames_strip(c, points):
-    """Kadrų juostelė: [(užrašas, laikas)] – kiekvienas kadras su užrašu po juo."""
-    strip = st.container(horizontal=True, wrap=True, gap="small")
-    for label, t in points:
-        img = _frame_at(c["path"], round(min(t, c["duration"] - 0.05), 1))
-        tile = strip.container(width=84, gap=None)
-        if img:
-            tile.image(img, width="stretch")
-        tile.caption(f"{label}  \n{t:.1f} s")
+@st.cache_data(max_entries=40, show_spinner=False)
+def _filmstrip(path, duration, n=14, height=200):
+    """Kadrų miniatiūros takeliui (data URL sąrašas), tolygiai per visą įrašą."""
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-vf",
+                        f"fps={n / max(0.5, duration):.5f},scale=-2:{height}", "-frames:v", str(n),
+                        "-q:v", "6", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], capture_output=True)
+    data, out, i = r.stdout, [], 0
+    while True:  # JPEG kadrai vienas po kito: FFD8 … FFD9
+        a = data.find(b"\xff\xd8", i)
+        if a < 0:
+            break
+        b = data.find(b"\xff\xd9", a)
+        if b < 0:
+            break
+        out.append("data:image/jpeg;base64," + base64.b64encode(data[a:b + 2]).decode())
+        i = b + 2
+    return out
 
 
 def _trim_controls(prefix, c, box):
     d = round(c["duration"], 1)
     if d < 1.0:
         return
-    with box.expander("✂️ Apkarpyti"):
-        t = st.slider("Palikti nuo – iki (s)", 0.0, d, tuple(c.get("trim") or (0.0, d)), 0.1,
-                      key=f"{prefix}trim-{c['id']}")
-        c["trim"] = (float(t[0]), float(t[1]))
-        cut_on = st.checkbox("Išmesti dalį iš vidurio", value=bool(c.get("cut")), key=f"{prefix}cuton-{c['id']}")
-        if cut_on and t[1] - t[0] > 0.6:
-            lo, hi = float(t[0]), float(t[1])
-            cur = c.get("cut") or (lo + (hi - lo) * 0.4, lo + (hi - lo) * 0.6)
-            cur = (min(max(cur[0], lo), hi), min(max(cur[1], lo), hi))
-            x = st.slider("Išmesti nuo – iki (s)", lo, hi, cur, 0.1, key=f"{prefix}cut-{c['id']}")
-            c["cut"] = (float(x[0]), float(x[1])) if x[1] - x[0] >= 0.1 else None
-        else:
-            c["cut"] = None
-        a, b = c["trim"]
-        points = [("Pradžia", a)]
-        if c["cut"]:
-            points += [("✂️ Išmetama nuo", c["cut"][0]), ("✂️ Išmetama iki", c["cut"][1])]
-        points.append(("Pabaiga", max(a, b - 0.1)))
-        _frames_strip(c, points)
-        st.caption(f"Liks {clip_length(c, 0):.1f} s iš {c['duration']:.1f} s.")
-        if not c["path"].endswith(".mkv"):  # naršyklės įrašų (MKV) telefonai negroja
-            st.video(c["path"], start_time=a, end_time=b, width=240)
-            st.caption("▶ Grojama palikta dalis." + (" Išmetama vidurio dalis čia nepraleidžiama – ją matysite "
-                                                    "greitoje peržiūroje." if c["cut"] else ""))
+    with box.expander("✂️ Apkarpyti – kadrų takelis"):
+        thumbs = _filmstrip(c["path"], c["duration"])
+        segs = c.get("segments") or [list(x) for x in (clip_segments(c) or [(0.0, c["duration"])])]
+        val = trim_timeline(duration=float(c["duration"]), segments=[list(x) for x in segs], thumbs=thumbs,
+                            key=f"{prefix}tl-{c['id']}", default=None)
+        if val and val.get("segments") and val.get("t") != c.get("seg_t"):
+            c["segments"] = [list(x) for x in val["segments"]]
+            c["seg_t"] = val.get("t")
+            c.pop("trim", None)
+            c.pop("cut", None)
+            st.rerun()  # perskaičiuoja trukmes ir peržiūrą
 
 
 def clip_picker(prefix="", trim=False):
