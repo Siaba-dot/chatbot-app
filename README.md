@@ -57,6 +57,9 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
   kvadratėliais atsitiktine tvarka), Švelnus išnykimas, Per šviesą, Slinkimas, Atsivėrimas;
 - **kabliuko ir titrų vieta** – „Kabliuko vieta“ (Viršuje / Aukščiau / Žemiau) ir „Titrų vieta“ (Viduryje / Žemiau /
   Apačioje), kad tekstas neuždengtų veido;
+- **įgarsinimas** – šoniniame skydelyje „Garsas“ → „🎙️ Įgarsinimas“: įkeliate savo balsą (garso ar video failą);
+  jis sustiprinamas ir išvalomas, skamba visu garsumu, titrai kuriami iš jo, muzika po juo patyli; video klipų garsą
+  galima išjungti / patylinti / palikti; jei balsas ilgesnis – paskutinis kadras prailginamas;
 - **muzikos takelis** – „III Muzikos takelis“: pagal paruoštą video (iškirptos pauzės, greitis) – kadrų juosta ir muzikos
   juosta; „+ Pridėti“ deda pasirinktą kūrinį padėties linijos vietoje, blokus galima tempti, keisti jų ilgį kraštais,
   kiekvienam – atskiras garsumas; tarp blokų – tyla, bloko pradžia ir pabaiga švelniai įsilieja / užgęsta;

@@ -826,6 +826,43 @@ def analyze(path, remove_silence=True, noise_db=None, min_silence=0.5, padding=0
     return {"info": info, "audio": an, "keep": keep, "words": words, "subtitle_mode": sub_mode}
 
 
+def media_duration(path):
+    """Bet kokio garso / video failo trukmė (s)."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                         capture_output=True, text=True).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return 0.0
+
+
+def analyze_voice(path, subtitles=True, client=None, language=None, subtitle_language="lt", subtitle_text="",
+                  translate_model=None, status=None):
+    """Įgarsinimo (atskiro balso failo) titrai: žodžiai [(žodis, pradžia, pabaiga)] balso laiko skalėje.
+    Balsas atpažįstamas (OpenAI) arba įvestas tekstas išdėliojamas pagal kalbos intervalus."""
+    say = status or (lambda msg: None)
+    if not subtitles:
+        return [], None
+    an = analyze_audio(path)
+    dur = media_duration(path)
+    audible = an is not None and an["loud"] > -60
+    if client is not None and audible and not subtitle_text.strip():
+        say("Atpažįstu įgarsinimo balsą titrams…")
+        words, segments, detected = transcribe(path, client, language)
+        mode = "voice"
+        if subtitle_language and segments and not same_language(subtitle_language, detected):
+            say("Verčiu titrus…")
+            tr = translate_lines(client, [t for t, _, _ in segments], subtitle_language, translate_model)
+            words = translated_words(segments, tr, words)
+            mode = "translated"
+        return words, mode
+    if subtitle_text.strip():
+        say("Dėlioju titrus pagal įgarsinimą…")
+        segs = keep_segments(dur, detect_silences(path, None, 0.25, an), 0.0, 0.05) if an else [(0.0, dur)]
+        return align_text(subtitle_text, segs or [(0.0, dur)]), "text"
+    return [], None
+
+
 def edit_lines(words):
     """Titrai redagavimui: sakiniai [(pradžia, pabaiga, tekstas)]."""
     return [(g[0][1], g[-1][2], " ".join(w[0] for w in g)) for g in group_lines(words)]
