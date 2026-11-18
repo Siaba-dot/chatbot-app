@@ -60,7 +60,8 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **✦ Svarbiausi žodžiai** – studija pati parenka svarbiausius žodžius (skaičius, prasminius žodžius) ir titruose juos
   padidina bei nuspalvina akcento (ar metalo gradiento) spalva; titrų taisyme žodį galima pažymėti ir patiems: `*žodis*`.
   **Akcentų priartėjimas** – ties tais žodžiais kadras trumpam „įšoka“ arčiau;
-- **✦ „Gintaro akimirka“** – firminis efektas: pasirinktoje vietoje (slankiklis „kurią sekundę sustabdyti“) video sustoja 1,6 s, kadras nušvinta gintaro šviesa ir video tęsiasi; sustojimo metu klipo garsas nutyla, titrai pasislenka;
+- **✦ „Gintaro akimirka“** – firminis efektas: pasirinktoje vietoje (slankiklis „kurioje sekundėje nušvinta“) kadras
+  1,6 s švelniai nušvinta šilta gintaro šviesa su švytėjimu ir truputį priartėja; video ir kalba nesustoja;
 - **firminiai efektai**: „Aukso blizgesys“ (per metalinį tekstą kas 2,6 s perbėga šviesos ruožas), „Auksinės dulkės“
   (plaukiojančios, mirgančios kibirkštėlės, kartojasi be sandūros) ir titrų stilius „Rašomi ranka“ (frazė rašoma
   rašikliu iš kairės į dešinę, kol ištariama);
