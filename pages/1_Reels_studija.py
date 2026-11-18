@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -394,6 +395,13 @@ with sb.expander("✍️  Tekstai ir titrai"):
                        width="stretch")
             tile.button(L["title"], key=f"{P}lbtn{i}", type="primary" if sel else "secondary", width="stretch",
                         on_click=pick_look, args=(key,))
+        key_words = st.toggle("✦ Svarbiausi žodžiai – didesni ir auksiniai", value=True, key=P + "key_words",
+                              help="Studija pati parenka svarbiausius žodžius (skaičius, prasminius žodžius) ir juos "
+                                   "išryškina. Titrų taisyme žodį galite pažymėti ir patys: *žodis*.")
+        punch = st.toggle("✦ Akcentų priartėjimas", value=True, key=P + "punch", disabled=not key_words,
+                          help="Ties svarbiausiais žodžiais kadras trumpam „įšoka“ arčiau – kaip profesionalų montaže.")
+    else:
+        key_words = punch = False
 
     # Balso atpažinimas (OpenAI Whisper)
     speech_minutes = sum(clips_ui.clip_length(c, image_duration) for c in clips if not c.get("image")) / 60
@@ -538,6 +546,94 @@ def source_for_cover():
     return clips[-1]["path"], 0.0
 
 
+def other_format(fmt_name, tmp, progress):
+    """Tas pats Reels kitu formatu: medžiaga sujungiama iš naujo pasirinktu formatu, o analizė (iškirptos pauzės,
+    titrai, kalbos atpažinimas) panaudojama ta pati – nieko neperskaičiuojama ir minutės neskaičiuojamos."""
+    f, size = reels_studio.STUDIO_FORMATS[fmt_name]
+    src = os.path.join(tmp, "joined.mkv")
+    src, _ = video_editor.concat_clips([c["path"] for c in clips], src, f, progress=lambda p: progress(p * 0.3),
+                                       image_duration=image_duration,
+                                       segments=[clips_ui.clip_segments(c) for c in clips], transition=transition)
+    out = os.path.join(tmp, "reels.mp4")
+    build(dict(prep, src=src), words, tmp, out, False, lambda p: progress(0.3 + p * 0.65), fmt=f)
+    cover = os.path.join(tmp, "cover.jpg")
+    reels_studio.make_cover(src, cover, min(cover_at, prep["analysis"]["info"]["duration"] - 0.1), hook, accent,
+                            template, handle, size[0], size[1], color=color, effects=effects, text_size=text_size)
+    return out, cover
+
+
+def all_formats_ui(result):
+    """✦ Visi formatai vienu paspaudimu – tas pats video 16:9 (YouTube), 1:1, 4:5 ir 9:16 su ZIP paketu."""
+    st.markdown("**📐 Visi formatai vienu paspaudimu**")
+    done = result.setdefault("formats", {})
+    main_fmt = result.get("fmt_name", st.session_state[P + "format"])
+    others = [n for n in reels_studio.STUDIO_FORMATS if n != main_fmt]
+    # analizė tinka, jei medžiaga ir jos nustatymai nepakito (formatas – nesvarbu)
+    same = bool(prep) and os.path.exists(prep["src"]) and prep["sig"][:3] + prep["sig"][4:] == signature[:3] + signature[4:]
+    pick = st.multiselect("Kokių formatų dar reikia?", others, default=[n for n in others if n not in done],
+                          key=P + "more_formats", label_visibility="collapsed",
+                          placeholder="Pasirinkite formatus")
+    todo = [n for n in pick if n not in done]
+    if st.button(f"✨ Sukurti {len(todo)} formatus" if len(todo) != 1 else "✨ Sukurti formatą",
+                 disabled=not todo or not same, width="stretch",
+                 key=P + "formats_btn",
+                 help="Tas pats montažas, titrai, muzika ir efektai – kiekvienam tinklui savo formatu. "
+                      "Kalbos atpažinimas nekartojamas."):
+        box = st.status("Kuriami formatai…", expanded=True)
+        bar = st.progress(0.0)
+        for i, name in enumerate(todo):
+            box.write(f"{name}…")
+            with tempfile.TemporaryDirectory() as tmp:
+                try:
+                    out, cover = other_format(name, tmp, lambda p: bar.progress(min(1.0, (i + p) / len(todo))))
+                except Exception as e:
+                    box.update(label=f"Nepavyko: {name}", state="error")
+                    st.error(str(e))
+                    break
+                tag = reels_studio.STUDIO_FORMATS[name][0].replace(":", "x")
+                vpath = os.path.join(work, f"{result['name']}_{tag}.mp4")
+                cpath = os.path.join(work, f"{result['name']}_{tag}_virselis.jpg")
+                shutil.copy(out, vpath)
+                shutil.copy(cover, cpath)
+                done[name] = {"video": vpath, "cover": cpath}
+        else:
+            box.update(label="Formatai paruošti", state="complete", expanded=False)
+        bar.empty()
+    ready_f = {n: d for n, d in done.items() if os.path.exists(d["video"])}
+    if not ready_f:
+        st.caption("Pažymėkite formatus ir spauskite – gausite tą patį Reels YouTube, Instagram įrašui ar kvadratu."
+                   if same else "Medžiaga pakeista – pirmiausia spauskite „Kurti“.")
+        return
+    tabs = st.tabs([n.split(" · ")[0] + " · " + n.split(" · ")[1].split(",")[0] for n in ready_f])
+    for tab, (name, d) in zip(tabs, ready_f.items()):
+        with tab:
+            w = reels_studio.STUDIO_FORMATS[name][1]
+            cols = st.columns([1, 1.2, 1]) if w[1] > w[0] else st.columns([0.1, 3, 0.1])
+            cols[1].video(d["video"])
+            b1, b2 = st.columns(2)
+            with open(d["video"], "rb") as fv:
+                b1.download_button("⬇  Video", fv.read(), file_name=os.path.basename(d["video"]), mime="video/mp4",
+                                   width="stretch", key=P + "dl_" + name)
+            with open(d["cover"], "rb") as fc:
+                b2.download_button("⬇  Viršelis", fc.read(), file_name=os.path.basename(d["cover"]),
+                                   mime="image/jpeg", width="stretch", key=P + "dlc_" + name)
+    zpath = os.path.join(work, result["name"] + "_visi_formatai.zip")
+    names = sorted(ready_f)
+    if result.get("zip_names") != names or not os.path.exists(zpath):
+        with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:  # video jau suspausti
+            tag = reels_studio.STUDIO_FORMATS[main_fmt][0].replace(":", "x")
+            z.writestr(f"{result['name']}_{tag}.mp4", result["video"])
+            z.writestr(f"{result['name']}_{tag}_virselis.jpg", result["cover"])
+            for d in ready_f.values():
+                z.write(d["video"], os.path.basename(d["video"]))
+                z.write(d["cover"], os.path.basename(d["cover"]))
+        result["zip_names"] = names
+    with open(zpath, "rb") as fz:
+        st.download_button(f"📦  Atsisiųsti visus formatus (ZIP, {len(ready_f) + 1} video)", fz.read(),
+                           file_name=os.path.basename(zpath), mime="application/zip", type="primary",
+                           width="stretch", key=P + "dl_zip")
+
+
 highlight = reels_studio._ass_color(reels_studio.ACCENTS[accent][0])[4:]  # BBGGRR
 work = st.session_state.setdefault(P + "work", tempfile.mkdtemp(prefix="reels_"))
 os.makedirs(work, exist_ok=True)
@@ -612,10 +708,14 @@ def music_path(tmp):
     return library[music_choice]["path"] if music_choice in library else None
 
 
-def build(prep, words, tmp, out, quick, progress):
-    """Montažas + Reels apdaila. quick – greita peržiūra (maža raiška, greitas kodavimas)."""
+def build(prep, words, tmp, out, quick, progress, fmt=fmt):
+    """Montažas + Reels apdaila. quick – greita peržiūra (maža raiška, greitas kodavimas).
+    fmt – kitas formatas (prep["src"] tada turi būti sujungtas tuo formatu)."""
     edited = os.path.join(tmp, "edited.mp4")
     words = prep["analysis"]["words"] if words is None else words
+    # svarbiausi žodžiai: naudotojo *žymės* arba automatinis parinkimas; išjungus – žymės pašalinamos
+    words = (video_editor.mark_key_words(words) if key_words
+             else [(video_editor.plain(w), a, b) for w, a, b in words])
     if vo_path:  # įgarsinimo titrai – galutinio video laiku; montaže jie dar bus pagreitinti kartu su vaizdu
         words = [(w, a * speed, b * speed) for w, a, b in words]
     res = video_editor.render_edit(
@@ -631,7 +731,7 @@ def build(prep, words, tmp, out, quick, progress):
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
         subs_words=words, subs_look=look, subs_ypos=subs_y,
         hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
-        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0,
+        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch,
         moment_at=st.session_state.get(P + "moment_at", 3.0) if "Gintaro akimirka" in effects else None)
     return res, fin
 
@@ -658,20 +758,24 @@ if clips and subtitles:
                 st.rerun()
         else:
             a = prep["analysis"]
-            lines = prep["lines"]
+            base_words = (video_editor.mark_key_words(a["words"]) if key_words
+                          else [(video_editor.plain(w), x, y) for w, x, y in a["words"]])
+            lines = video_editor.edit_lines(base_words)
             if lines:
                 import pandas as pd
-                st.caption("Spustelėkite tekstą ir pataisykite; ištrintas tekstas – eilutė nerodoma.")
+                st.caption("Spustelėkite tekstą ir pataisykite; ištrintas tekstas – eilutė nerodoma."
+                           + (" Svarbiausi žodžiai pažymėti *žvaigždutėmis* – pridėkite ar nuimkite jas patys."
+                              if key_words else ""))
                 df = pd.DataFrame([{"Nuo": round(x, 1), "Iki": round(y, 1), "Tekstas": t} for x, y, t in lines])
                 edited = st.data_editor(
-                    df, key=f"{P}lines_{prep['n']}", hide_index=True, width="stretch", num_rows="fixed",
+                    df, key=f"{P}lines_{prep['n']}_{int(key_words)}", hide_index=True, width="stretch", num_rows="fixed",
                     disabled=["Nuo", "Iki"],
                     column_config={"Nuo": st.column_config.NumberColumn("Nuo (s)", format="%.1f", width="small"),
                                    "Iki": st.column_config.NumberColumn("Iki (s)", format="%.1f", width="small"),
                                    "Tekstas": st.column_config.TextColumn("Tekstas", width="large")})
                 new_lines = [(x, y, str(t) if t is not None else "")
                              for (x, y, _), t in zip(lines, edited["Tekstas"].tolist())]
-                words = video_editor.apply_line_edits(a["words"], new_lines)
+                words = video_editor.apply_line_edits(base_words, new_lines)
                 changed = sum(1 for (_, _, t0), (_, _, t1) in zip(lines, new_lines) if t0 != t1)
                 if changed:
                     st.caption(f"✏️ Pataisyta eilučių: {changed} – spauskite „Peržiūra“ viršuje.")
@@ -845,7 +949,8 @@ with top:
             st.session_state[P + "result"] = {
                 "video": video, "cover": cover_bytes, "caption": caption, "portrait": portrait,
                 "before": res["original_duration"], "after": fin["duration"], "cuts": res["cuts"],
-                "name": "reels_" + datetime.datetime.now().strftime("%Y%m%d_%H%M")}
+                "name": "reels_" + datetime.datetime.now().strftime("%Y%m%d_%H%M"),
+                "fmt_name": st.session_state[P + "format"]}
             st.session_state[P + "view"] = "result"
 
     result = st.session_state.get(P + "result")
@@ -889,6 +994,8 @@ with top:
                     st.markdown("**Kabliukų idėjos kitam kartui:** " + " · ".join(f"„{h}“" for h in cap["hooks"]))
             elif client is None and plan != "basic":
                 st.caption("Aprašymui ir grotažymėms sugeneruoti reikia OpenAI rakto.")
+        with st.container(border=True):
+            all_formats_ui(result)
 
 if plan == "admin":
     with st.expander("👑 Administravimas – klientai ir naudojimas šį mėnesį"):
