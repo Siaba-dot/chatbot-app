@@ -105,6 +105,44 @@ def _check(username, password):
     return key if hmac.compare_digest(str(cfg.get("password", "")).encode(), password.encode()) else None
 
 
+# Prekės ženklo istorija prisijungimo puslapyje (trumpa versija + visa išskleidžiama)
+STORY_HTML = """
+<style>
+.st-story { text-align: center; margin: .2rem auto 1rem; max-width: 34rem; }
+.st-story .q { font-family: 'Playfair Display', Georgia, serif; font-style: italic; font-size: 1.12rem;
+  line-height: 1.55; color: #F3E7D3; }
+.st-story .m { margin-top: .8rem; font-family: 'Playfair Display', Georgia, serif; font-size: 1.05rem;
+  background: linear-gradient(100deg, #B85F12, #FFD58A 45%, #E39B2E 70%, #B85F12);
+  -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: .02em; }
+</style>
+<div class="st-story">
+  <div class="q">Gintaras milijonus metų saugo sustabdytą akimirką.<br>Mes darome tą patį su jūsų video.</div>
+  <div class="m">Jūsų akimirkos – kaip gintaras: išsaugotos gražiausios.</div>
+</div>
+"""
+
+STORY_FULL = """
+Senovėje Baltijos jūros dugne stovėjo gintaro rūmai. Juose gyveno jūrų deivė **Jūratė**. Ji pamilo paprastą
+žvejį **Kastytį**, tačiau griaustinio dievas, supykęs dėl tos meilės, sudaužė jos rūmus. Nuo tada audros į
+Lietuvos krantą išmeta gintaro gabalėlius – tos meilės nuolaužas.
+
+Bet gintaras slepia dar vieną paslaptį. Prieš milijonus metų lašas sakų sustabdė akimirką – lapelį, oro
+burbuliuką, saulės spindulį – ir išsaugojo ją amžinai. Todėl kiekvienas gintaro gabalėlis yra laiko
+sustabdyta istorija.
+
+Šiandien mūsų akimirkos gyvena trumpuose video. Jos greitai prabėga ekrane, nors kiekviena verta būti
+išsaugota gražiai.
+
+Taip gimė **Reels montavimo studija** – lietuviška studija su Baltijos gintaro dvasia. Ji iš jūsų video
+išsaugo tai, kas vertingiausia: iškerpa tuščias pauzes, nušveičia garsą, suteikia vaizdui šiltą gintaro
+šviesą ir paverčia kasdienį įrašą žibančia istorija.
+
+Kaip jūra išneša gintarą į krantą, taip studija iškelia į šviesą geriausias jūsų akimirkas.
+
+*Jūsų akimirkos – kaip gintaras: išsaugotos gražiausios.*
+"""
+
+
 def require_login():
     """Grąžina naudotoją arba parodo prisijungimo formą ir sustabdo puslapį."""
     u = current()
@@ -118,6 +156,9 @@ def require_login():
         return u
     _, mid, _ = st.columns([1, 3, 1])
     with mid:
+        st.markdown(STORY_HTML, unsafe_allow_html=True)
+        with st.expander("✦  Gintaro istorija"):
+            st.markdown(STORY_FULL)
         with st.form("login"):
             st.markdown("#### Prisijungimas")
             name = st.text_input("Prisijungimo vardas", autocomplete="username")
