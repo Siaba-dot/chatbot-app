@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --amber: #E39B2E; --honey: #FFD58A; --ink: #061226; --text: #F3E7D3; --muted: #B4C3D8; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--text); background: transparent;
+         user-select: none; -webkit-user-select: none; }
+  .wrap { padding: 4px 2px 6px; }
+  .preview { display: flex; justify-content: center; margin-bottom: 8px; }
+  .preview img { max-height: 180px; max-width: 100%; border-radius: 10px; border: 1px solid rgba(227,155,46,.35); }
+  .time { text-align: center; font-variant-numeric: tabular-nums; font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+  .time b { color: var(--honey); font-weight: 600; }
+  .area { position: relative; touch-action: none; }
+  .label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 6px 0 4px; }
+  .strip { position: relative; height: 46px; display: flex; border-radius: 8px; overflow: hidden; background: #000; }
+  .strip img { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; pointer-events: none; opacity: .9; }
+  .lane { position: relative; height: 54px; border-radius: 8px; margin-top: 4px;
+          background: repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 10%),
+                      rgba(14,34,66,.65);
+          border: 1px dashed rgba(227,155,46,.35); }
+  .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+           color: var(--muted); font-size: 13px; pointer-events: none; }
+  .blk { position: absolute; top: 4px; bottom: 4px; border-radius: 8px; overflow: hidden; touch-action: none;
+         display: flex; align-items: center; padding: 0 18px; font-size: 12px; font-weight: 600; color: var(--ink);
+         box-shadow: 0 2px 10px rgba(0,0,0,.35); cursor: grab; white-space: nowrap; }
+  .blk.sel { outline: 2px solid #fff; outline-offset: 1px; }
+  .blk .wave { position: absolute; inset: 0; opacity: .25; pointer-events: none;
+               background: repeating-linear-gradient(90deg, rgba(6,18,38,.9) 0 2px, transparent 2px 5px);
+               -webkit-mask: linear-gradient(0deg, transparent 15%, #000 50%, transparent 85%);
+                       mask: linear-gradient(0deg, transparent 15%, #000 50%, transparent 85%); }
+  .blk span { position: relative; overflow: hidden; text-overflow: ellipsis; }
+  .h { position: absolute; top: 0; bottom: 0; width: 14px; background: rgba(6,18,38,.35); cursor: ew-resize;
+       display: flex; align-items: center; justify-content: center; touch-action: none; }
+  .h::after { content: ""; width: 3px; height: 18px; border-radius: 2px; background: rgba(6,18,38,.8); }
+  .h.l { left: 0; } .h.r { right: 0; }
+  .h::before { content: ""; position: absolute; inset: -6px -8px; }
+  .play { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; margin-left: -1px; pointer-events: none;
+          box-shadow: 0 0 6px rgba(0,0,0,.6); }
+  .play::before { content: ""; position: absolute; top: -6px; left: -5px; width: 12px; height: 12px;
+                  border-radius: 50%; background: #fff; }
+  .row { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  select, button { font: inherit; font-size: 14px; border-radius: 10px; color: var(--text);
+                   background: rgba(14,34,66,.8); border: 1px solid rgba(227,155,46,.45); padding: 9px 8px; }
+  select { flex: 1; min-width: 0; }
+  button { white-space: nowrap; cursor: pointer; }
+  button.gold { background: linear-gradient(100deg, #B85F12, #FFD58A 45%, #E39B2E 70%, #B85F12); color: var(--ink);
+                border: 0; font-weight: 600; }
+  button:disabled { opacity: .4; cursor: default; }
+  .vol { display: flex; align-items: center; gap: 8px; flex: 1; font-size: 13px; color: var(--muted); }
+  .vol input { flex: 1; accent-color: var(--amber); }
+  .info { margin-top: 8px; font-size: 12.5px; color: var(--muted); text-align: center; line-height: 1.45; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="preview"><img id="prev" alt=""></div>
+  <div class="time"><b id="cur">0:00.0</b> / <span id="dur">0:00.0</span></div>
+  <div class="area" id="area">
+    <div class="label">Vaizdas</div>
+    <div class="strip" id="strip"></div>
+    <div class="label">Muzika</div>
+    <div class="lane" id="lane"><div class="empty" id="empty">Pasirinkite kūrinį ir spauskite „+ Pridėti“</div></div>
+  </div>
+  <div class="row">
+    <select id="pick"></select>
+    <button id="add" class="gold">+ Pridėti</button>
+  </div>
+  <div class="row">
+    <div class="vol">🔊 <input id="vol" type="range" min="0" max="150" step="5"><span id="volv">100%</span></div>
+    <button id="del">🗑</button>
+  </div>
+  <div class="info">Bakstelėkite juostą – pasirinksite vietą · tempkite bloką – perkelsite · tempkite kraštus – ilgis</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const MIN = 1.0;  // trumpiausias muzikos blokas, s
+const COLORS = ["#E39B2E", "#F2C46B", "#D9772A", "#8FB3E8", "#C9A2E8", "#7FD1B9", "#F28C8C"];
+let D = 10, thumbs = [], tracks = [], blocks = [], play = 0, sel = -1, drag = null, lastArgs = "";
+
+function send(type, extra) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, extra), "*"); }
+function resize() { send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 6}); }
+function emit() {
+  send("streamlit:setComponentValue", {dataType: "json", value: {t: Date.now(),
+    blocks: blocks.map(b => ({name: b.name, start: +b.start.toFixed(2), end: +b.end.toFixed(2), vol: b.vol}))}});
+}
+const fmt = t => { const m = Math.floor(t / 60), s = t - m * 60; return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1); };
+const W = () => $("lane").clientWidth;
+const tx = t => t / D * W();
+const xt = x => Math.max(0, Math.min(D, x / W() * D));
+const color = name => COLORS[Math.max(0, tracks.indexOf(name)) % COLORS.length];
+const sortB = () => { const s = blocks[sel]; blocks.sort((a, b) => a.start - b.start); sel = blocks.indexOf(s); };
+
+function render() {
+  const lane = $("lane");
+  lane.querySelectorAll(".blk,.play").forEach(e => e.remove());
+  $("empty").style.display = blocks.length ? "none" : "flex";
+  blocks.forEach((b, i) => {
+    const el = document.createElement("div"); el.className = "blk" + (i === sel ? " sel" : "");
+    el.style.left = tx(b.start) + "px"; el.style.width = Math.max(28, tx(b.end) - tx(b.start)) + "px";
+    el.style.background = color(b.name);
+    el.innerHTML = `<div class="wave"></div><span>${b.name.replace(/^\S+\s/, "")}</span>`;
+    el.addEventListener("pointerdown", e => startDrag(e, i, "move"));
+    for (const side of ["l", "r"]) {
+      const h = document.createElement("div"); h.className = "h " + side;
+      h.addEventListener("pointerdown", e => startDrag(e, i, side)); el.appendChild(h);
+    }
+    lane.appendChild(el);
+  });
+  document.querySelectorAll(".play").forEach(e => e.remove());
+  for (const host of [$("strip"), lane]) {
+    const p = document.createElement("div"); p.className = "play"; p.style.left = tx(play) + "px"; host.appendChild(p);
+  }
+  $("cur").textContent = fmt(play); $("dur").textContent = fmt(D);
+  if (thumbs.length) $("prev").src = thumbs[Math.min(thumbs.length - 1, Math.floor(play / D * thumbs.length))];
+  const b = blocks[sel];
+  $("vol").disabled = $("del").disabled = !b;
+  if (b) { $("vol").value = b.vol; $("volv").textContent = b.vol + "%"; } else { $("volv").textContent = "–"; }
+  resize();
+}
+
+function startDrag(e, i, mode) {
+  e.stopPropagation(); e.preventDefault();
+  sel = i; const r = $("lane").getBoundingClientRect();
+  drag = {i, mode, x0: e.clientX - r.left, s0: blocks[i].start, e0: blocks[i].end, moved: false};
+  document.addEventListener("pointermove", onDrag);
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
+  render();
+}
+function onDrag(e) {
+  if (!drag) return;
+  const r = $("lane").getBoundingClientRect(), dt = (e.clientX - r.left - drag.x0) / W() * D;
+  const b = blocks[drag.i], prevEnd = drag.i > 0 ? blocks[drag.i - 1].end : 0;
+  const nextStart = drag.i < blocks.length - 1 ? blocks[drag.i + 1].start : D;
+  if (Math.abs(dt) > 0.02) drag.moved = true;
+  if (drag.mode === "move") {
+    const len = drag.e0 - drag.s0;
+    b.start = Math.max(prevEnd, Math.min(drag.s0 + dt, nextStart - len)); b.end = b.start + len; play = b.start;
+  } else if (drag.mode === "l") {
+    b.start = Math.max(prevEnd, Math.min(drag.s0 + dt, b.end - MIN)); play = b.start;
+  } else {
+    b.end = Math.min(nextStart, Math.max(drag.e0 + dt, b.start + MIN)); play = b.end;
+  }
+  render();
+}
+function endDrag() {
+  document.removeEventListener("pointermove", onDrag);
+  document.removeEventListener("pointerup", endDrag);
+  document.removeEventListener("pointercancel", endDrag);
+  if (!drag) return;
+  const moved = drag.moved; drag = null; sortB(); if (moved) emit(); render();
+}
+
+// bakstelėjimas juostose – padėties linija
+$("area").addEventListener("pointerdown", e => {
+  if (e.target.closest(".blk")) return;
+  const area = $("area"); area.setPointerCapture(e.pointerId);
+  const move = ev => { const r = $("lane").getBoundingClientRect(); play = xt(ev.clientX - r.left);
+                       sel = blocks.findIndex(b => play >= b.start && play <= b.end); render(); };
+  move(e);
+  area.addEventListener("pointermove", move);
+  area.addEventListener("pointerup", () => area.removeEventListener("pointermove", move), {once: true});
+});
+
+$("add").onclick = () => {
+  const name = $("pick").value; if (!name) return;
+  // laisva vieta nuo padėties linijos iki kito bloko
+  let start = play;
+  const inside = blocks.find(b => start >= b.start && start < b.end); if (inside) start = inside.end;
+  const next = blocks.filter(b => b.start >= start).sort((a, b) => a.start - b.start)[0];
+  const end = Math.min(D, next ? next.start : D, start + Math.max(MIN, Math.min(10, D)));
+  if (end - start < MIN) { $("empty").style.display = "none"; return; }
+  blocks.push({name, start, end, vol: 100}); sel = blocks.length - 1; sortB(); emit(); render();
+};
+$("del").onclick = () => { if (sel < 0) return; blocks.splice(sel, 1); sel = -1; emit(); render(); };
+$("vol").oninput = () => { const b = blocks[sel]; if (!b) return; b.vol = +$("vol").value; $("volv").textContent = b.vol + "%"; };
+$("vol").onchange = () => emit();
+
+window.addEventListener("message", e => {
+  if (!e.data || e.data.type !== "streamlit:render") return;
+  const a = e.data.args || {};
+  const key = JSON.stringify([a.duration, a.blocks, a.tracks, (a.thumbs || []).length]);
+  if (key === lastArgs || drag) { resize(); return; }
+  lastArgs = key;
+  D = a.duration || 10; thumbs = a.thumbs || []; tracks = a.tracks || [];
+  blocks = (a.blocks || []).map(b => ({name: b.name, start: Math.min(b.start, D), end: Math.min(b.end, D), vol: b.vol ?? 100}))
+                           .filter(b => b.end - b.start >= 0.3);
+  const pick = $("pick"); const cur = pick.value; pick.innerHTML = "";
+  tracks.forEach(t => { const o = document.createElement("option"); o.value = o.textContent = t; pick.appendChild(o); });
+  if (tracks.includes(cur)) pick.value = cur;
+  $("strip").innerHTML = ""; thumbs.forEach(src => { const im = document.createElement("img"); im.src = src; $("strip").appendChild(im); });
+  if (sel >= blocks.length) sel = -1;
+  render();
+});
+new ResizeObserver(() => render()).observe(document.body);
+send("streamlit:componentReady", {apiVersion: 1});
+</script>
+</body>
+</html>
