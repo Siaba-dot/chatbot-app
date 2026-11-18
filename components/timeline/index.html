@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --amber: #E39B2E; --honey: #FFD58A; --ink: #061226; --text: #F3E7D3; --muted: #B4C3D8; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--text); background: transparent;
+         user-select: none; -webkit-user-select: none; }
+  .wrap { padding: 4px 2px 6px; }
+  .preview { display: flex; justify-content: center; margin-bottom: 8px; }
+  .preview img { max-height: 210px; max-width: 100%; border-radius: 10px; border: 1px solid rgba(227,155,46,.35);
+                 background: #000; }
+  .time { text-align: center; font-variant-numeric: tabular-nums; font-size: 14px; color: var(--muted);
+          margin-bottom: 8px; }
+  .time b { color: var(--honey); font-weight: 600; }
+  .track { position: relative; height: 64px; border-radius: 10px; overflow: visible; touch-action: none; }
+  .strip { position: absolute; inset: 0; display: flex; border-radius: 10px; overflow: hidden; background: #000; }
+  .strip img { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; pointer-events: none; }
+  .gap { position: absolute; top: 0; bottom: 0; background: rgba(4,12,27,.78); pointer-events: none;
+         background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.06) 0 6px, transparent 6px 12px); }
+  .seg { position: absolute; top: -3px; bottom: -3px; border: 3px solid var(--amber); border-radius: 9px;
+         box-shadow: 0 0 0 1px rgba(0,0,0,.35), 0 4px 14px rgba(227,155,46,.25); }
+  .seg.sel { border-color: var(--honey); box-shadow: 0 0 0 1px rgba(0,0,0,.35), 0 0 18px rgba(255,213,138,.55); }
+  .h { position: absolute; top: -3px; bottom: -3px; width: 16px; background: var(--amber); touch-action: none;
+       display: flex; align-items: center; justify-content: center; cursor: ew-resize; }
+  .seg.sel .h { background: var(--honey); }
+  .h::after { content: ""; width: 3px; height: 22px; border-radius: 2px; background: rgba(6,18,38,.75); }
+  .h.l { left: -3px; border-radius: 8px 0 0 8px; }
+  .h.r { right: -3px; border-radius: 0 8px 8px 0; }
+  .h::before { content: ""; position: absolute; inset: -6px -10px; }  /* didesnis paspaudimo plotas pirštui */
+  .play { position: absolute; top: -10px; bottom: -10px; width: 2px; background: #fff; margin-left: -1px;
+          box-shadow: 0 0 6px rgba(0,0,0,.6); pointer-events: none; }
+  .play::before { content: ""; position: absolute; top: -2px; left: -5px; width: 12px; height: 12px;
+                  border-radius: 50%; background: #fff; }
+  .btns { display: flex; gap: 8px; margin-top: 16px; }
+  button { flex: 1; font: inherit; font-size: 14px; white-space: nowrap; padding: 9px 6px; border-radius: 10px; cursor: pointer;
+           color: var(--text); background: rgba(14,34,66,.7); border: 1px solid rgba(227,155,46,.45); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.gold { background: linear-gradient(100deg, #B85F12, #FFD58A 45%, #E39B2E 70%, #B85F12); color: var(--ink);
+                border: 0; font-weight: 600; }
+  .info { margin-top: 8px; font-size: 13px; color: var(--muted); text-align: center; }
+  .info b { color: var(--honey); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="preview"><img id="prev" alt=""></div>
+  <div class="time"><b id="cur">0:00.0</b> / <span id="dur">0:00.0</span></div>
+  <div class="track" id="track"><div class="strip" id="strip"></div></div>
+  <div class="btns">
+    <button id="split" class="gold">✂ Skelti</button>
+    <button id="del">🗑 Ištrinti</button>
+    <button id="reset">↺ Iš naujo</button>
+  </div>
+  <div class="info" id="info"></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const MIN = 0.2;  // trumpiausia dalis, s
+let D = 1, thumbs = [], segs = [], play = 0, sel = 0, drag = null, lastArgs = "";
+
+function send(type, extra) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, extra), "*"); }
+function resize() { send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 6}); }
+function emit() {
+  send("streamlit:setComponentValue", {dataType: "json",
+    value: {segments: segs.map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)]), t: Date.now()}});
+}
+const fmt = t => { const m = Math.floor(t / 60), s = t - m * 60; return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1); };
+const W = () => $("track").clientWidth;
+const tx = t => t / D * W();
+const xt = x => Math.max(0, Math.min(D, x / W() * D));
+// dalis ties laiku t (riboje – vėlesnė; pačioje pabaigoje – paskutinė)
+const segAt = t => { const i = segs.findIndex(([a, b]) => t >= a - 1e-6 && t < b - 1e-6);
+                     return i >= 0 ? i : (segs.length && Math.abs(t - segs[segs.length - 1][1]) < 1e-6 ? segs.length - 1 : -1); };
+
+function render() {
+  const tr = $("track");
+  tr.querySelectorAll(".gap,.seg,.play").forEach(e => e.remove());
+  // išmestos dalys – patamsintos
+  let prev = 0;
+  for (const [a, b] of segs.concat([[D, D]])) {
+    if (a - prev > 0.01) {
+      const g = document.createElement("div"); g.className = "gap";
+      g.style.left = tx(prev) + "px"; g.style.width = (tx(a) - tx(prev)) + "px"; tr.appendChild(g);
+    }
+    prev = b;
+  }
+  segs.forEach(([a, b], i) => {
+    const s = document.createElement("div"); s.className = "seg" + (i === sel ? " sel" : "");
+    s.style.left = tx(a) + "px"; s.style.width = Math.max(18, tx(b) - tx(a)) + "px";
+    for (const side of ["l", "r"]) {
+      const h = document.createElement("div"); h.className = "h " + side;
+      h.addEventListener("pointerdown", e => startDrag(e, i, side)); s.appendChild(h);
+    }
+    tr.appendChild(s);
+  });
+  const p = document.createElement("div"); p.className = "play"; p.style.left = tx(play) + "px"; tr.appendChild(p);
+  $("cur").textContent = fmt(play); $("dur").textContent = fmt(D);
+  if (thumbs.length) $("prev").src = thumbs[Math.min(thumbs.length - 1, Math.floor(play / D * thumbs.length))];
+  const kept = segs.reduce((s, [a, b]) => s + b - a, 0);
+  $("info").innerHTML = `Liks <b>${kept.toFixed(1)} s</b> iš ${D.toFixed(1)} s · dalių: ${segs.length}` +
+    `<br>Tempkite geltonas rankenėles · bakstelėkite juostą ir „Skelti“ – padalinsite`;
+  const i = segAt(play);
+  $("split").disabled = i < 0 || play - segs[i][0] < MIN || segs[i][1] - play < MIN;
+  $("del").disabled = segs.length < 2;
+  resize();
+}
+
+function startDrag(e, i, side) {
+  e.stopPropagation(); e.preventDefault();
+  sel = i; drag = {i, side};
+  // klausomės viso dokumento: render() perpiešia rankenėles, todėl pati rankenėlė įvykių nebegautų
+  document.addEventListener("pointermove", onDrag);
+  document.addEventListener("pointerup", endDrag, {once: true});
+  document.addEventListener("pointercancel", endDrag, {once: true});
+  render();
+}
+function onDrag(e) {
+  if (!drag) return;
+  const r = $("track").getBoundingClientRect(), t = xt(e.clientX - r.left), {i, side} = drag;
+  const lo = i > 0 ? segs[i - 1][1] : 0, hi = i < segs.length - 1 ? segs[i + 1][0] : D;
+  if (side === "l") segs[i][0] = Math.max(lo, Math.min(t, segs[i][1] - MIN));
+  else segs[i][1] = Math.min(hi, Math.max(t, segs[i][0] + MIN));
+  play = side === "l" ? segs[i][0] : segs[i][1];
+  render();
+}
+function endDrag() {
+  document.removeEventListener("pointermove", onDrag);
+  document.removeEventListener("pointerup", endDrag);
+  document.removeEventListener("pointercancel", endDrag);
+  if (!drag) return;
+  drag = null; emit(); render();
+}
+
+// bakstelėjimas / tempimas juostoje – padėties linija
+$("track").addEventListener("pointerdown", e => {
+  if (e.target.classList.contains("h")) return;
+  const tr = $("track"); tr.setPointerCapture(e.pointerId);
+  const move = ev => { const r = tr.getBoundingClientRect(); play = xt(ev.clientX - r.left);
+                       const i = segAt(play); if (i >= 0) sel = i; render(); };
+  move(e);
+  tr.addEventListener("pointermove", move);
+  tr.addEventListener("pointerup", () => tr.removeEventListener("pointermove", move), {once: true});
+});
+
+$("split").onclick = () => {
+  const i = segAt(play); if (i < 0) return;
+  const [a, b] = segs[i]; segs.splice(i, 1, [a, play], [play, b]); sel = i + 1; emit(); render();
+};
+$("del").onclick = () => {
+  // ištrinama pažymėta (šviesesnė) dalis
+  let i = sel >= 0 && sel < segs.length ? sel : segAt(play); if (i < 0 || segs.length < 2) return;
+  segs.splice(i, 1); sel = Math.min(i, segs.length - 1); emit(); render();
+};
+$("reset").onclick = () => { segs = [[0, D]]; sel = 0; emit(); render(); };
+
+window.addEventListener("message", e => {
+  if (!e.data || e.data.type !== "streamlit:render") return;
+  const a = e.data.args || {};
+  const key = JSON.stringify([a.duration, a.segments, (a.thumbs || []).length]);
+  if (key === lastArgs || drag) { resize(); return; }
+  lastArgs = key;
+  D = a.duration || 1; thumbs = a.thumbs || [];
+  segs = (a.segments && a.segments.length ? a.segments : [[0, D]]).map(([x, y]) => [x, y]);
+  if (!$("strip").children.length && thumbs.length) {
+    thumbs.forEach(src => { const im = document.createElement("img"); im.src = src; $("strip").appendChild(im); });
+  }
+  if (segAt(play) < 0) play = segs[0][0];
+  render();
+});
+new ResizeObserver(() => render()).observe(document.body);
+send("streamlit:componentReady", {apiVersion: 1});
+</script>
+</body>
+</html>
