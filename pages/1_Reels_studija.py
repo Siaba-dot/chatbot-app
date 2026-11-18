@@ -184,6 +184,166 @@ def transition_tile(fa, fb, name):
             return f.read()
 
 
+SPEEDS = [1.0, 1.05, 1.1, 1.15, 1.25, 1.5]
+PROGRESS = ["Viršuje", "Apačioje", "Nėra"]
+
+
+# ---------- ✨ Dirbtinis intelektas ----------
+def ai_words():
+    """Paruoštos kalbos žodžiai (montažo laiku) – AI kontekstui."""
+    pr = st.session_state.get(P + "prep")
+    return list(pr["analysis"]["words"]) if pr else []
+
+
+def set_hook(text):
+    st.session_state[P + "hook"] = text
+
+
+def run_ai_hooks(client, words, text):
+    st.session_state.pop(P + "ai_hooks_err", None)
+    try:
+        st.session_state[P + "hook_ideas"] = reels_studio.ai_hooks(client, words, text=text)
+    except Exception as e:
+        st.session_state[P + "ai_hooks_err"] = str(e)
+
+
+AI_LABELS = {"template": "Šablonas", "accent": "Akcentas", "color": "Filtras", "effects": "Efektai",
+             "look": "Titrų stilius", "hook": "Kabliukas", "cta": "Kvietimas", "link": "Nuoroda",
+             "hook_pos": "Kabliuko vieta", "subs_pos": "Titrų vieta", "text_size": "Kabliuko dydis",
+             "subs_size": "Titrų dydis", "key_words": "Svarbiausi žodžiai", "punch": "Akcentų priartėjimas",
+             "end_card": "Pabaigos kortelė", "yt_end": "YouTube pabaigos ekranas",
+             "moment_at": "Gintaro akimirka (s)", "transition": "Perėjimas", "music_choice": "Muzika",
+             "music_volume": "Muzikos garsumas", "length": "Ilgiausia trukmė", "speed": "Greitis",
+             "progress": "Progreso juostelė"}
+
+
+def ai_options():
+    """Ką AI režisierius gali keisti ir kokios reikšmės leistinos."""
+    looks = {k: L["title"] for k, L in video_editor.SUBTITLE_LOOKS.items()}
+    return {
+        "template": {n: f"accent {t['accent']}, filter {t['color']}" for n, t in reels_studio.TEMPLATES.items()},
+        "accent": list(reels_studio.ACCENTS), "color": list(reels_studio.COLOR_FILTERS),
+        "effects": reels_studio.EFFECTS, "look": looks, "hook": "short text", "cta": "short text",
+        "link": "url", "hook_pos": list(reels_studio.HOOK_POSITIONS),
+        "subs_pos": list(reels_studio.SUBTITLE_POSITIONS), "text_size": "60-150 (%)", "subs_size": "60-150 (%)",
+        "key_words": "bool", "punch": "bool", "end_card": "bool (end card with link and QR)",
+        "yt_end": "bool (16:9 YouTube end screen)", "moment_at": "0.5-60 seconds",
+        "transition": list(video_editor.TRANSITIONS),
+        "music_choice": ["Be muzikos"] + list(reels_studio.music_library()), "music_volume": "0-100 (%)",
+        "length": list(reels_studio.LENGTHS), "speed": SPEEDS, "progress": PROGRESS}
+
+
+def ai_current():
+    ss = st.session_state
+    return {k: ss.get(P + k) for k in AI_LABELS if P + k in ss}
+
+
+def _ai_value(key, v, opts):
+    """Patikrina AI pasiūlytą reikšmę; netinkama – None."""
+    o = opts[key]
+    if key == "effects":
+        return [e for e in (v if isinstance(v, list) else []) if e in reels_studio.EFFECTS]
+    if key == "look":
+        return v if v in o else next((k for k, t in o.items() if t == v), None)
+    if isinstance(o, (list, dict)):
+        if key == "speed":
+            try:
+                return min(SPEEDS, key=lambda x: abs(x - float(v)))
+            except (TypeError, ValueError):
+                return None
+        return v if v in o else None
+    if o.startswith("bool"):
+        return bool(v) if isinstance(v, bool) else None
+    if key in ("text_size", "subs_size", "music_volume"):
+        try:
+            lo, hi = (0, 100) if key == "music_volume" else (60, 150)
+            v = max(lo, min(hi, int(round(float(v)))))
+            return v if key == "music_volume" else v // 5 * 5
+        except (TypeError, ValueError):
+            return None
+    if key == "moment_at":
+        try:
+            return round(max(0.5, min(60.0, float(v))), 1)
+        except (TypeError, ValueError):
+            return None
+    return str(v).strip()[:120] if isinstance(v, str) else None
+
+
+def apply_ai_changes(changes):
+    """Pritaiko pakeitimus (su atšaukimu). Grąžina [(pavadinimas, reikšmė)]."""
+    ss, opts = st.session_state, ai_options()
+    clean = {}
+    for k, v in changes.items():
+        if k in opts:
+            val = _ai_value(k, v, opts)
+            if val is not None and ss.get(P + k) != val:
+                clean[k] = val
+    if "template" in clean:  # šablonas atneša savo akcentą ir filtrą, jei AI jų nenurodė
+        t = reels_studio.TEMPLATES[clean["template"]]
+        clean.setdefault("accent", t["accent"])
+        clean.setdefault("color", t["color"])
+    if "moment_at" in clean:  # akimirkai reikia efekto
+        fx = list(clean.get("effects", ss.get(P + "effects", [])))
+        if "Gintaro akimirka" not in fx:
+            clean["effects"] = fx + ["Gintaro akimirka"]
+    if "music_choice" in clean:  # nauja muzika – muzikos takelis iš naujo
+        ss.pop(P + "mblocks", None)
+    undo = {k: ss.get(P + k, "__none__") for k in clean}
+    for k, v in clean.items():
+        ss[P + k] = v
+    ss[P + "ai_undo"] = undo
+    return [(AI_LABELS.get(k, k), v) for k, v in clean.items()]
+
+
+def run_ai_director(client, words, preset=None):
+    ss = st.session_state
+    req = (preset or ss.get(P + "ai_req") or "").strip()
+    ss.pop(P + "ai_result", None)
+    if not req:
+        return
+    try:
+        speed_now = float(ss.get(P + "speed", 1.0))
+        if preset == "moment" and words:
+            t, word, why = reels_studio.ai_moment(client, words, speed_now)
+            res = {"changes": {"moment_at": t}, "summary": f"Akimirka – ties žodžiu „{word}“: {why}".strip()}
+        else:
+            res = reels_studio.ai_direct(client, req, ai_current(), ai_options(), words, speed_now)
+        done = apply_ai_changes(res["changes"])
+        ss[P + "ai_result"] = {"summary": res["summary"], "done": done}
+        if done:
+            ss[P + "auto_preview"] = True
+    except Exception as e:
+        ss[P + "ai_result"] = {"error": str(e)}
+
+
+def undo_ai():
+    ss = st.session_state
+    for k, v in (ss.pop(P + "ai_undo", None) or {}).items():
+        if v == "__none__":
+            ss.pop(P + k, None)
+        else:
+            ss[P + k] = v
+    ss[P + "ai_result"] = {"summary": "↶ Pakeitimai atšaukti.", "done": []}
+
+
+def marked(words):
+    """Svarbiausi žodžiai: naudotojo *žymės*, AI parinkti (Premium) arba taisyklė."""
+    words = list(words)
+    if not words or any(video_editor.is_key(w) for w, _, _ in words):
+        return words
+    if client is not None:
+        cache = st.session_state.setdefault(P + "ai_keys", {})
+        k = hash(tuple((w, round(a, 2)) for w, a, _ in words))
+        if k not in cache:
+            try:
+                cache[k] = reels_studio.ai_key_word_indices(client, words)
+            except Exception:
+                cache[k] = None
+        if cache[k]:
+            return reels_studio.mark_indices(words, cache[k])
+    return marked(words)
+
+
 def pick_look(name):
     st.session_state[P + "look"] = name
 
@@ -406,7 +566,8 @@ with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True)
     if effects:
         st.caption("Pasirinkta: " + " · ".join(effects))
     if "Gintaro akimirka" in effects:
-        st.slider("✦ Gintaro akimirka – kurią sekundę sustabdyti", 0.5, 60.0, 3.0, 0.1, key=P + "moment_at",
+        st.session_state.setdefault(P + "moment_at", 3.0)
+        st.slider("✦ Gintaro akimirka – kurią sekundę sustabdyti", 0.5, 60.0, step=0.1, key=P + "moment_at",
                   format="%.1f s", help=f"Šioje vietoje kadras sustoja {reels_studio.MOMENT_LEN:.1f} s, nušvinta "
                   "gintaro šviesa ir video tęsiasi. Vieta skaičiuojama galutiniame video "
                   "(jei per toli – priartinama prie pabaigos).")
@@ -455,10 +616,12 @@ with sb.expander("✍️  Tekstai ir titrai"):
                        width="stretch")
             tile.button(L["title"], key=f"{P}lbtn{i}", type="primary" if sel else "secondary", width="stretch",
                         on_click=pick_look, args=(key,))
-        key_words = st.toggle("✦ Svarbiausi žodžiai – didesni ir auksiniai", value=True, key=P + "key_words",
-                              help="Studija pati parenka svarbiausius žodžius (skaičius, prasminius žodžius) ir juos "
-                                   "išryškina. Titrų taisyme žodį galite pažymėti ir patys: *žodis*.")
-        punch = st.toggle("✦ Akcentų priartėjimas", value=True, key=P + "punch", disabled=not key_words,
+        for k in ("key_words", "punch"):
+            st.session_state.setdefault(P + k, True)
+        key_words = st.toggle("✦ Svarbiausi žodžiai – didesni ir auksiniai", key=P + "key_words",
+                              help="Studija pati parenka svarbiausius žodžius (skaičius, prasminius žodžius; Premium – "
+                                   "dirbtinis intelektas) ir juos išryškina. Titrų taisyme žodį galite pažymėti ir patys: *žodis*.")
+        punch = st.toggle("✦ Akcentų priartėjimas", key=P + "punch", disabled=not key_words,
                           help="Ties svarbiausiais žodžiais kadras trumpam „įšoka“ arčiau – kaip profesionalų montaže.")
     else:
         key_words = punch = False
@@ -529,6 +692,19 @@ with sb.expander("✍️  Tekstai ir titrai"):
             subtitle_text = st.text_area("Titrų tekstas", placeholder="Tekstas bus tolygiai išdėliotas per video.",
                                          help="Įrašykite tekstą – programa suskaidys jį į frazes ir išdėlios "
                                               "per video.")
+
+    # ✨ AI kabliukai iš kalbos (Premium)
+    if client is not None and (ai_words() or subtitle_text.strip()):
+        st.button("✨ AI: pasiūlyk kabliukų", key=P + "ai_hooks_btn", width="stretch",
+                  on_click=run_ai_hooks, args=(client, ai_words(), subtitle_text),
+                  help="Dirbtinis intelektas perskaito, ką sakote video, ir pasiūlo kabliukų pirmoms sekundėms.")
+        if st.session_state.get(P + "ai_hooks_err"):
+            st.error(st.session_state[P + "ai_hooks_err"])
+        ideas = st.session_state.get(P + "hook_ideas") or []
+        if ideas:
+            st.caption("Paspauskite – kabliukas bus įrašytas:")
+            for i, h in enumerate(ideas):
+                st.button(f"„{h}“", key=f"{P}hook_idea{i}", width="stretch", on_click=set_hook, args=(h,))
 
 # ---------- IV. Garsas ----------
 with sb.expander("💎  Prekės ženklas"):
@@ -604,7 +780,9 @@ with sb.expander("🎵  Garsas ir muzika", expanded=has_vo):
     st.markdown("**🎵 Foninė muzika**")
     library = reels_studio.music_library()
     options = ["Be muzikos"] + list(library) + ["📁 Įkelti savo muziką"]
-    music_choice = st.selectbox("Foninė muzika", options, index=1 if library else 0, key=P + "music_choice",
+    if st.session_state.get(P + "music_choice") not in options:
+        st.session_state[P + "music_choice"] = options[1] if library else options[0]
+    music_choice = st.selectbox("Foninė muzika", options, key=P + "music_choice",
                                 help="Studijos muzika sukurta specialiai – be autorių teisių apribojimų. "
                                      "Muzika kartojama per visą video ir švelniai užgęsta pabaigoje.")
     music_file = None
@@ -620,7 +798,9 @@ with sb.expander("🎵  Garsas ir muzika", expanded=has_vo):
                    "kokia muzika kurioje vietoje.")
     has_music = music_choice in library or music_file is not None or bool(st.session_state.get(P + "mblocks"))
     c1, c2 = st.columns(2)
-    music_volume = c1.slider("Muzikos garsumas", 0, 100, 22, 1, format="%d%%", disabled=not has_music) / 100
+    st.session_state.setdefault(P + "music_volume", 22)
+    music_volume = c1.slider("Muzikos garsumas", 0, 100, step=1, format="%d%%", disabled=not has_music,
+                             key=P + "music_volume") / 100
     ducking = c2.toggle("Muzika patyli, kai kalbama", value=True, disabled=not has_music)
     c1, c2 = st.columns(2)
     remove_silence = c1.toggle("Iškirpti pauzes", value=True)
@@ -629,11 +809,12 @@ with sb.expander("🎵  Garsas ir muzika", expanded=has_vo):
 # ---------- V. Tempas ----------
 with sb.expander("⏱  Tempas, trukmė, viršelis"):
     c1, c2 = st.columns(2)
-    length = c1.select_slider("Ilgiausia trukmė", list(reels_studio.LENGTHS), value="90 s")
-    speed = c2.select_slider("Greitis", [1.0, 1.05, 1.1, 1.15, 1.25, 1.5], value=1.0,
-                             format_func=lambda x: f"{x:g}×")
+    for k, v in (("length", "90 s"), ("speed", 1.0), ("progress", "Viršuje")):
+        st.session_state.setdefault(P + k, v)
+    length = c1.select_slider("Ilgiausia trukmė", list(reels_studio.LENGTHS), key=P + "length")
+    speed = c2.select_slider("Greitis", SPEEDS, format_func=lambda x: f"{x:g}×", key=P + "speed")
     c1, c2 = st.columns(2)
-    progress_bar = c1.radio("Progreso juostelė", ["Viršuje", "Apačioje", "Nėra"], horizontal=True)
+    progress_bar = c1.radio("Progreso juostelė", PROGRESS, horizontal=True, key=P + "progress")
     total = float(sum(clips_ui.clip_length(c, image_duration) for c in clips))
     cover_at = c2.slider("Viršelio kadras (s)", 0.0, max(0.1, round(total, 1)), min(1.0, round(total, 1)), 0.1,
                          disabled=not clips)
@@ -702,6 +883,45 @@ def link_help(result):
                 "**Pabaigos ekranas** (End screen) → pridėkite **„Video“** (pvz. „Naujausias įkėlimas“ arba "
                 "„Tinkamiausias žiūrovui“) ir **„Prenumeruoti“** → nutempkite juos ant auksinio stačiakampio ir "
                 "apskritimo → **Išsaugoti**. Elementai rodomi paskutines sekundes, video turi būti bent 25 s.")
+
+
+def ai_director_ui():
+    """✨ AI režisierius – Reels patobulinimas pagal žodinį prašymą."""
+    box = st.container(key=P + "ai_box")
+    if client is None:
+        if clips:
+            box.caption("✨ **AI režisierius** – Reels patobulinimas pagal jūsų prašymą: " +
+                        ("Premium plane." if plan == "basic" else "reikia OpenAI rakto (Tekstai ir titrai)."))
+        return
+    if not clips:
+        return
+    words = ai_words()
+    box.text_input("✨ AI režisierius – ką patobulinti?", key=P + "ai_req",
+                   placeholder="Pvz.: padaryk prabangiau ir energingiau, iki 30 s, sustabdyk ties žodžiu „paslaptis“",
+                   help="Parašykite savais žodžiais – AI pakeis šabloną, filtrus, efektus, titrus, kabliuką, "
+                        "muziką, tempą ir parodys peržiūrą. Viską galima atšaukti.")
+    row = box.container(horizontal=True, gap="small", wrap=True)
+    row.button("✨ Pritaikyti", type="primary", key=P + "ai_go", on_click=run_ai_director, args=(client, words))
+    presets = [("💎 Prabangiau", "Padaryk prabangiau ir elegantiškiau"),
+               ("⚡ Energingiau", "Padaryk energingiau ir dinamiškiau, trumpesnį"),
+               ("🌿 Ramiau", "Padaryk ramesnį, švelnesnį ir natūralesnį")]
+    for i, (label, text) in enumerate(presets):
+        row.button(label, key=f"{P}ai_p{i}", on_click=run_ai_director, args=(client, words, text))
+    if words:
+        row.button("✦ Akimirka svarbiausioje vietoje", key=P + "ai_moment", on_click=run_ai_director,
+                   args=(client, words, "moment"),
+                   help="AI suras svarbiausią kalbos vietą ir ten sustabdys kadrą (Gintaro akimirka).")
+    res = st.session_state.get(P + "ai_result")
+    if res:
+        if res.get("error"):
+            box.error(res["error"])
+        else:
+            lines = [f"- **{k}:** {', '.join(map(str, v)) if isinstance(v, list) else v}" for k, v in res["done"]]
+            box.info((res.get("summary") or "") + ("\n\n" + "\n".join(lines) if lines else
+                                                    ("" if res.get("summary", "").startswith("↶")
+                                                     else "\n\nNieko keisti nereikėjo.")))
+            if res["done"] and st.session_state.get(P + "ai_undo"):
+                box.button("↶ Atšaukti AI pakeitimus", key=P + "ai_undo_btn", on_click=undo_ai)
 
 
 def all_formats_ui(result):
@@ -856,7 +1076,7 @@ def build(prep, words, tmp, out, quick, progress, fmt=fmt):
     edited = os.path.join(tmp, "edited.mp4")
     words = prep["analysis"]["words"] if words is None else words
     # svarbiausi žodžiai: naudotojo *žymės* arba automatinis parinkimas; išjungus – žymės pašalinamos
-    words = (video_editor.mark_key_words(words) if key_words
+    words = (marked(words) if key_words
              else [(video_editor.plain(w), a, b) for w, a, b in words])
     if vo_path:  # įgarsinimo titrai – galutinio video laiku; montaže jie dar bus pagreitinti kartu su vaizdu
         words = [(w, a * speed, b * speed) for w, a, b in words]
@@ -900,7 +1120,7 @@ if clips and subtitles:
                 st.rerun()
         else:
             a = prep["analysis"]
-            base_words = (video_editor.mark_key_words(a["words"]) if key_words
+            base_words = (marked(a["words"]) if key_words
                           else [(video_editor.plain(w), x, y) for w, x, y in a["words"]])
             lines = video_editor.edit_lines(base_words)
             if lines:
@@ -1008,6 +1228,8 @@ with top:
                                help="Greita peržiūra: visas video mažesne kokybe per kelias sekundes")
         create = row.button("✨ Kurti", type="primary", width="stretch", disabled=not clips, key=P + "create_btn",
                             help="Galutinis video pilna kokybe")
+        quick_btn = quick_btn or bool(st.session_state.pop(P + "auto_preview", False) and clips)
+        ai_director_ui()
         work_area = st.container()
 
     def show(media, kind, caption=None):

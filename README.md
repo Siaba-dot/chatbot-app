@@ -41,6 +41,12 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **✨ AI režisierius** (Premium) – po peržiūros langu parašote savais žodžiais, pvz. „padaryk prabangiau ir
+  energingiau, iki 30 s, sustabdyk ties žodžiu paslaptis“: dirbtinis intelektas pakeičia šabloną, filtrą, efektus,
+  titrų stilių, kabliuką, kvietimą, muziką, tempą ir trukmę, parodo, ką pakeitė, ir iškart sukuria peržiūrą;
+  greiti mygtukai „Prabangiau“, „Energingiau“, „Ramiau“, „Akimirka svarbiausioje vietoje“; viską galima atšaukti;
+- **✨ AI kabliukai** – pagal tai, ką sakote video, pasiūlo 5 kabliukus, įrašomus vienu paspaudimu;
+- **✨ AI svarbiausi žodžiai** (Premium) – paryškinamus žodžius parenka dirbtinis intelektas (be rakto – taisyklė);
 - **✦ Pabaigos kortelė** – video pabaigoje gintarinė kortelė (3,5 s): kvietimas veikti, nuoroda, **QR kodas** ir paskyra;
   **YouTube pabaigos ekranas** (16:9) – 10 s kortelė su auksinėmis vietomis, ant kurių YouTube Studio uždedami
   paspaudžiami elementai „Video“ ir „Prenumeruoti“. Prie rezultato – nuoroda kopijavimui, ji pridedama ir prie AI
