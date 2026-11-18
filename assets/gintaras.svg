@@ -1,82 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Baltijos gintaras">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Reels studija – gintaro lašas">
   <defs>
-    <!-- pailgas, asimetriškas Baltijos gintaro gabalėlis (sustingęs sakų lašas su nuskilusiais kraštais) -->
-    <path id="ga-shape" d="M8 82 L13 66 L24 50 Q30 40 40 32 L56 21 L76 13 Q90 8 102 11 L113 21 L112 36
-      Q109 47 101 56 L92 70 L77 83 Q68 90 58 95 L42 103 L26 104 L13 96 Z"/>
-    <clipPath id="ga-stone"><use href="#ga-shape"/></clipPath>
-    <!-- pagrindas: storesnis vidurys šviečia, ploni kraštai tamsūs -->
-    <linearGradient id="ga-base" x1="0.1" y1="0.9" x2="0.95" y2="0.1">
-      <stop offset="0" stop-color="#7A2E05"/>
-      <stop offset="0.25" stop-color="#C2600F"/>
-      <stop offset="0.5" stop-color="#F2A43A"/>
-      <stop offset="0.72" stop-color="#FFC85E"/>
-      <stop offset="1" stop-color="#B85A10"/>
+    <!-- gintaras – sustingęs sakų lašas: smailia viršūne, apvaliu, sunkiu dugnu -->
+    <path id="rs-drop" d="M60 6 C64 20 72 30 82 42 C92 54 98 64 98 78 C98 99 81 114 60 114 C39 114 22 99 22 78
+      C22 64 28 54 38 42 C48 30 56 20 60 6 Z"/>
+    <clipPath id="rs-clip"><use href="#rs-drop"/></clipPath>
+    <!-- metalinis gintaras: šviesus medus viršuje → gintaras → tamsus konjakas dugne -->
+    <linearGradient id="rs-body" x1="0.25" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#FFF1C9"/>
+      <stop offset="0.28" stop-color="#FFD27A"/>
+      <stop offset="0.55" stop-color="#E9A23B"/>
+      <stop offset="0.8" stop-color="#B8650F"/>
+      <stop offset="1" stop-color="#7A3A06"/>
     </linearGradient>
-    <linearGradient id="ga-depth" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FFE7A8" stop-opacity="0.5"/>
-      <stop offset="0.5" stop-color="#FFE7A8" stop-opacity="0"/>
-      <stop offset="1" stop-color="#5A2005" stop-opacity="0.55"/>
-    </linearGradient>
-    <filter id="ga-cloud" x="0" y="0" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.06 0.035" numOctaves="4" seed="23" result="n"/>
-      <feColorMatrix in="n" type="matrix"
-        values="0 0 0 0 1   0 0 0 0 0.8   0 0 0 0 0.45   0 0 0 0.7 -0.22"/>
-    </filter>
-    <!-- švytėjimas seka akmens formą (ne apskritimas) -->
-    <filter id="ga-glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="5"/>
-    </filter>
-    <linearGradient id="ga-hl" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.8"/>
+    <!-- vidinė šviesa – lyg saulė šviestų pro gintarą -->
+    <radialGradient id="rs-core" cx="0.5" cy="0.66" r="0.42">
+      <stop offset="0" stop-color="#FFE6A6" stop-opacity="0.75"/>
+      <stop offset="0.6" stop-color="#FFC25E" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#FFC25E" stop-opacity="0"/>
+    </radialGradient>
+    <!-- tamsesnis kraštas – tūris -->
+    <radialGradient id="rs-rim" cx="0.5" cy="0.62" r="0.62">
+      <stop offset="0.72" stop-color="#5A2A04" stop-opacity="0"/>
+      <stop offset="1" stop-color="#5A2A04" stop-opacity="0.55"/>
+    </radialGradient>
+    <linearGradient id="rs-shine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
       <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
+    <linearGradient id="rs-ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4A2306"/>
+      <stop offset="1" stop-color="#2A1203"/>
+    </linearGradient>
+    <filter id="rs-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
   </defs>
-
-  <use href="#ga-shape" fill="#F2A23A" fill-opacity="0.38" filter="url(#ga-glow)"/>
-  <!-- šešėlis po akmeniu -->
-  <path d="M16 110 Q62 104 108 74" fill="none" stroke="#000" stroke-opacity="0.35" stroke-width="5"
-        stroke-linecap="round" filter="url(#ga-glow)"/>
-
-  <g clip-path="url(#ga-stone)">
-    <rect width="120" height="120" fill="url(#ga-base)"/>
-    <rect width="120" height="120" filter="url(#ga-cloud)" opacity="0.5"/>
-    <rect width="120" height="120" fill="url(#ga-depth)"/>
-
-    <!-- nuskilusios plokštumos: viršutinė šviesi, apatinė tamsesnė, vidurinė „lentelė“ -->
-    <path d="M13 66 L24 50 Q30 40 40 32 L56 21 L76 13 Q90 8 102 11 L113 21 L92 30 L70 44 L48 60 L30 72 Z"
-          fill="#FFEAB8" fill-opacity="0.22"/>
-    <path d="M113 21 L112 36 Q109 47 101 56 L92 70 L77 83 Q68 90 58 95 L42 103 L26 104 L13 96 L8 82 L30 72 L48 60
-             L70 44 L92 30 Z" fill="#4E1C04" fill-opacity="0.22"/>
-    <path d="M30 72 L48 60 L70 44 L92 30 L96 36 L76 52 L54 68 L36 80 Z" fill="#FFD27A" fill-opacity="0.25"/>
-    <g fill="none" stroke="#FFE6B0" stroke-opacity="0.4" stroke-width="0.8" stroke-linejoin="round">
-      <path d="M30 72 L48 60 L70 44 L92 30"/>
-      <path d="M36 80 L54 68 L76 52 L96 36"/>
-    </g>
-
-    <!-- vidiniai įtrūkimai -->
-    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M44 72 L51 66 L57 69 L63 62" stroke="#FFF0CF" stroke-opacity="0.45" stroke-width="0.8"/>
-      <path d="M80 40 L85 44 L84 50" stroke="#4A1A03" stroke-opacity="0.45" stroke-width="0.8"/>
-    </g>
-    <!-- baltiškas saulės ženklas giliai gintare -->
-    <g transform="translate(66 52) rotate(-34) scale(0.8)" fill="none" stroke="#5B2205" stroke-opacity="0.32"
-       stroke-width="1.8" stroke-linecap="round">
-      <circle r="6.5"/>
-      <path d="M0 -10 L0 -14 M0 10 L0 14 M-10 0 L-14 0 M10 0 L14 0 M7 -7 L10 -10 M-7 7 L-10 10 M-7 -7 L-10 -10 M7 7 L10 10"/>
-    </g>
-    <!-- burbuliukai -->
-    <g fill="#FFF0CC">
-      <circle cx="40" cy="78" r="1.4" fill-opacity="0.65"/>
-      <circle cx="43" cy="82" r="0.8" fill-opacity="0.55"/>
-      <circle cx="90" cy="27" r="1.1" fill-opacity="0.5"/>
-      <circle cx="74" cy="64" r="0.9" fill-opacity="0.45"/>
-    </g>
-    <use href="#ga-shape" fill="none" stroke="#3A1402" stroke-opacity="0.5" stroke-width="4.5"/>
+  <!-- švytėjimas aplink lašą -->
+  <use href="#rs-drop" fill="#E9A23B" opacity="0.45" filter="url(#rs-glow)"/>
+  <use href="#rs-drop" fill="url(#rs-body)"/>
+  <g clip-path="url(#rs-clip)">
+    <rect x="0" y="0" width="120" height="120" fill="url(#rs-core)"/>
+    <rect x="0" y="0" width="120" height="120" fill="url(#rs-rim)"/>
+    <!-- blizgesys kairėje viršuje -->
+    <path d="M50 30 C44 42 36 54 33 68 C32 74 36 76 39 71 C43 60 50 48 56 36 C58 31 53 26 50 30 Z"
+          fill="url(#rs-shine)" opacity="0.75"/>
+    <ellipse cx="76" cy="94" rx="10" ry="4" fill="#FFE2A0" opacity="0.35" transform="rotate(-25 76 94)"/>
   </g>
-  <!-- šviesos lūžis ant viršutinės briaunos ir atspindžiai -->
-  <path d="M24 50 Q30 40 40 32 L56 21 L76 13 Q90 8 102 11 L113 21" fill="none" stroke="#FFEBC0"
-        stroke-opacity="0.85" stroke-width="1.2" stroke-linejoin="round"/>
-  <path d="M77 83 Q68 90 58 95 L42 103" fill="none" stroke="#FFB14A" stroke-opacity="0.5" stroke-width="1"/>
-  <path d="M58 25 L76 16 L92 13 L80 24 L64 31 Z" fill="url(#ga-hl)"/>
-  <path d="M103 15 L109 20 L104 22 Z" fill="#FFFFFF" fill-opacity="0.55"/>
+  <use href="#rs-drop" fill="none" stroke="#FFE7B0" stroke-opacity="0.65" stroke-width="1.2"/>
+  <!-- monograma: RS (Reels Studija), įspausta į gintarą -->
+  <text x="60" y="92" text-anchor="middle" font-family="'Playfair Display', Georgia, 'Times New Roman', serif"
+        font-weight="700" font-size="30" letter-spacing="1" fill="#FFE9B8" opacity="0.55" dx="0.6" dy="0.8">RS</text>
+  <text x="60" y="92" text-anchor="middle" font-family="'Playfair Display', Georgia, 'Times New Roman', serif"
+        font-weight="700" font-size="30" letter-spacing="1" fill="url(#rs-ink)">RS</text>
 </svg>
