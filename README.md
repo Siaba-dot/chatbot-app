@@ -41,6 +41,10 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **💎 Prekės ženklo rinkinys** – logotipas ant kiekvieno video ir viršelio (vieta, dydis, matomumas), sava prekės
+  ženklo spalva kaip akcentas ir mygtukas „Išsaugoti mano prekės ženklą“: šablonas, akcentas, filtras, paskyra,
+  kvietimas ir logotipas kitą kartą prisijungus nustatomi automatiškai (saugoma `.data/brand/`; Streamlit Cloud
+  atnaujinus programą gali tekti išsaugoti iš naujo);
 - **📐 Visi formatai vienu paspaudimu** – sukūrus Reels, tas pats montažas, titrai, muzika ir efektai vienu mygtuku
   perkuriami 16:9 (YouTube), 1:1 ir 4:5 formatais (kalbos atpažinimas nekartojamas); visi video su viršeliais – viename ZIP;
 - **✦ Svarbiausi žodžiai** – studija pati parenka svarbiausius žodžius (skaičius, prasminius žodžius) ir titruose juos

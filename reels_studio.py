@@ -34,6 +34,57 @@ ACCENTS = {
     "Rožinė": ("FF2D92", "FFFFFF"),
 }
 
+
+
+def accent_colors(accent):
+    """Akcento (RGB hex, teksto spalva ant jos). Prekės ženklo spalva perduodama kaip „#RRGGBB“."""
+    if isinstance(accent, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", accent):
+        rgb = accent[1:].upper()
+        r, g, b = (int(rgb[i:i + 2], 16) for i in (0, 2, 4))
+        return rgb, "0B0B0C" if 0.299 * r + 0.587 * g + 0.114 * b > 150 else "FFFFFF"
+    return ACCENTS.get(accent, ACCENTS["Auksas"])
+
+
+# Prekės ženklo logotipo vieta kadre
+LOGO_POSITIONS = ("Viršuje dešinėje", "Viršuje kairėje", "Apačioje dešinėje", "Apačioje kairėje")
+
+
+def logo_layer(logo, W, H, out_path):
+    """Paruošia logotipą kadrui: dydis (logo["size"] – kadro pločio dalis), permatomumas (logo["opacity"]).
+    Grąžina (png kelias, x, y)."""
+    from PIL import Image
+    im = Image.open(logo["path"]).convert("RGBA")
+    lw = max(16, round(W * float(logo.get("size", 0.16))))
+    lh = max(8, round(im.height * lw / im.width))
+    if lh > H * 0.25:  # labai aukštas logotipas – ribojamas aukštis
+        lh = round(H * 0.25)
+        lw = max(8, round(im.width * lh / im.height))
+    im = im.resize((lw, lh), Image.LANCZOS)
+    op = max(0.1, min(1.0, float(logo.get("opacity", 0.85))))
+    if op < 1:
+        im.putalpha(im.getchannel("A").point(lambda v: round(v * op)))
+    im.save(out_path)
+    m = round(min(W, H) * 0.045)
+    pos = logo.get("pos", LOGO_POSITIONS[0])
+    x = W - lw - m if "dešinėje" in pos else m
+    # viršuje – žemiau progreso juostos ir @vardo; apačioje – virš Reels mygtukų zonos
+    y = round(H * 0.06) if "Viršuje" in pos else H - lh - round(H * (0.09 if H > W else 0.05))
+    return out_path, x, y
+
+
+def stamp_logo(image_path, logo):
+    """Uždeda logotipą ant paveikslėlio (viršelio)."""
+    from PIL import Image
+    im = Image.open(image_path).convert("RGB")
+    tmp = image_path + ".logo.png"
+    lp, x, y = logo_layer(logo, im.width, im.height, tmp)
+    with Image.open(lp) as lg:
+        im.paste(lg, (x, y), lg)
+    os.unlink(tmp)
+    im.save(image_path, quality=92)
+    return image_path
+
+
 SERIF = "Playfair Display"
 SCRIPT = "Great Vibes"
 
@@ -235,7 +286,7 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
                                           hook_ypos=hook_ypos, size=text_size))
             post.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
         if look:
-            hl = _ass_color(ACCENTS.get(accent, ACCENTS["Auksas"])[0])[4:]
+            hl = _ass_color(accent_colors(accent)[0])[4:]
             a = os.path.join(tmp, "subs.ass")
             with open(a, "w", encoding="utf-8") as f:
                 f.write(video_editor.build_ass(SAMPLE_WORDS, width, height, ypos=subs_ypos, highlight=hl,
@@ -381,7 +432,7 @@ def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="
     kaligrafinis šriftas, „box“ – didelės raidės spalvotoje dėžutėje, kuri „iššoka“.
     mask=True – kaukė gradientui: balta tik ta dalis, kuri turi būti metalinė (be kontūrų ir šešėlių)."""
     kind, hsize, csize, hook_y, cta_y = _overlay_layout(width, height, template, hook_ypos, size)
-    bg, fg = ACCENTS.get(accent, ACCENTS["Auksas"])
+    bg, fg = accent_colors(accent)
     acc = "&H00FFFFFF" if mask else _ass_color(bg)
     margin = round(width * 0.09)
     ref = min(width, height * 0.75)
@@ -469,7 +520,7 @@ def grad_stops(accent):
     """Gradiento spalvų taškai; vienspalviam akcentui – ta pati spalva (blizgesiui ant paprasto teksto)."""
     if accent in GRADIENTS:
         return GRADIENTS[accent]
-    c = ACCENTS.get(accent, ACCENTS["Auksas"])[0]
+    c = accent_colors(accent)[0]
     return [(0.0, c), (1.0, c)]
 
 
@@ -735,7 +786,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
-           music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN, punch=False):
+           music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN, punch=False,
+           logo=None):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
     natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
@@ -819,23 +871,28 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if "Auksinis rėmelis" in (effects or ()):
             graph += frame_chains(vout, "[framed]", W, H, fps, tmp, accent, duration=duration + 1)
             vout = "[framed]"
-        if trimmed:
-            graph.append(f"{vout}fade=t=out:st={duration - 0.5:.3f}:d=0.5[faded]")
-            vout = "[faded]"
-        if progress_bar in ("Viršuje", "Apačioje"):
-            bh = max(6, round(H * 0.006)) // 2 * 2
-            y = 0 if progress_bar == "Viršuje" else H - bh
-            bg = ACCENTS.get(accent, ACCENTS["Auksas"])[0]
-            graph.append(f"color=c=0x{bg}:s={W}x{bh}:r={fps}:d={duration + 1:.3f}[bar]")
-            graph.append(f"{vout}[bar]overlay=x='-w+w*t/{duration:.3f}':y={y}:shortest=1[vout]")
-            vout = "[vout]"
-
         inputs = ["-i", path]
 
         def add_input(*args):
             n = sum(1 for x in inputs if x == "-i")
             inputs.extend(args)
             return n
+
+        if logo and logo.get("path") and os.path.exists(logo["path"]):  # prekės ženklo logotipas
+            lp, lx, ly = logo_layer(logo, W, H, os.path.join(tmp, "logo.png"))
+            k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{duration + 1:.3f}", "-i", lp)
+            graph.append(f"{vout}[{k}:v]overlay=x={lx}:y={ly}:shortest=1:format=auto[branded]")
+            vout = "[branded]"
+        if trimmed:
+            graph.append(f"{vout}fade=t=out:st={duration - 0.5:.3f}:d=0.5[faded]")
+            vout = "[faded]"
+        if progress_bar in ("Viršuje", "Apačioje"):
+            bh = max(6, round(H * 0.006)) // 2 * 2
+            y = 0 if progress_bar == "Viršuje" else H - bh
+            bg = accent_colors(accent)[0]
+            graph.append(f"color=c=0x{bg}:s={W}x{bh}:r={fps}:d={duration + 1:.3f}[bar]")
+            graph.append(f"{vout}[bar]overlay=x='-w+w*t/{duration:.3f}':y={y}:shortest=1[vout]")
+            vout = "[vout]"
 
         speech = []  # kalbos šaltiniai (klipų garsas, įgarsinimas) – pagal juos patyli muzika
         if info["has_audio"] and clip_gain > 0.001:
