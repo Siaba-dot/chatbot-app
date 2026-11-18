@@ -117,7 +117,7 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary p { font-fam
 .lux-empty { border: 1px dashed var(--line); border-radius: 14px; padding: 2.4rem 1rem; text-align: center;
   color: #8EA2BF; }
 /* Baltijos gintaras: logotipas ir lietuviškas ornamentas */
-.lux-logo { display: flex; justify-content: center; margin-bottom: .2rem; }
+.lux-logo { display: flex; justify-content: center; margin: .9rem 0 .2rem; }
 .lux-logo svg { width: 74px; height: 74px; filter: drop-shadow(0 6px 22px rgba(227,155,46,.35)); }
 .lux-orn { width: 230px; height: 14px; margin: .7rem auto 0; opacity: .8;
   background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='14'><g fill='none' stroke='%23E8A846' stroke-width='1'><path d='M1 7 L7 1 L13 7 L7 13 Z'/></g><circle cx='7' cy='7' r='1.5' fill='%23E8A846'/><path d='M17 7 L21 3 L25 7 L21 11 Z' fill='%23E8A846' fill-opacity='.55'/></svg>") repeat-x center;
