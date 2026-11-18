@@ -632,6 +632,16 @@ def gradient_chains(base, out, width, height, fps, duration, accent, masks, tmp,
     return chains
 
 
+def media_duration(path):
+    """Bet kokio garso / video failo trukmė (s)."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                         capture_output=True, text=True).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return 0.0
+
+
 def _run(cmd, total, progress, what, stall=12.0, hard=180.0):
     """Paleidžia ffmpeg ir rodo eigą. Apsauga nuo užstrigimo (kai kurios ffmpeg versijos video pabaigoje laukia
     pagalbinių sluoksnių): jei eiga nebejuda `stall` s, o video jau beveik baigtas – ffmpeg tvarkingai sustabdomas
@@ -687,14 +697,23 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
-           music_blocks=None):
+           music_blocks=None, voiceover=None, clip_gain=1.0):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
+    voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
+    natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
+    Jei įgarsinimas ilgesnis už video – paskutinis kadras prailginamas.
     Gradiento akcentui (GRADIENTS) metalas „įliejamas“ į kabliuką, CTA ir paryškintą titrų žodį
     (subs_words – sumontuoto video titrų žodžiai, subs_look – jų išvaizda)."""
     info = video_editor.probe(path)
     W, H, fps = info["width"], info["height"], info["fps"]
     speed = max(0.5, min(2.0, float(speed or 1.0)))
     duration = info["duration"] / speed
+    extend = 0.0
+    if voiceover:
+        vo_dur = media_duration(voiceover)
+        if vo_dur + 0.3 > duration:
+            extend = vo_dur + 0.3 - duration
+            duration += extend
     trimmed = bool(max_length) and duration > max_length + 0.05
     if trimmed:
         duration = float(max_length)
@@ -707,6 +726,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                                       hook_ypos=hook_ypos, template=template, size=text_size))
 
         pre = [f"setpts=PTS/{speed:.4f}"] if abs(speed - 1) > 0.001 else []
+        if extend > 0.01:  # įgarsinimas ilgesnis – paskutinis kadras palaikomas ilgiau
+            pre.append(f"tpad=stop_mode=clone:stop_duration={extend:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
         graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
         vout = "[base]"
@@ -748,26 +769,47 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             vout = "[vout]"
 
         inputs = ["-i", path]
-        voice = None
-        if info["has_audio"]:
+
+        def add_input(*args):
+            n = sum(1 for x in inputs if x == "-i")
+            inputs.extend(args)
+            return n
+
+        speech = []  # kalbos šaltiniai (klipų garsas, įgarsinimas) – pagal juos patyli muzika
+        if info["has_audio"] and clip_gain > 0.001:
             a = ["aresample=48000", "aformat=sample_fmts=fltp:channel_layouts=stereo"]
             if abs(speed - 1) > 0.001:
                 a.append(f"atempo={speed:.4f}")
-            graph.append("[0:a:0]" + ",".join(a) + "[voice]")
+            if abs(clip_gain - 1) > 0.001:
+                a.append(f"volume={clip_gain:.3f}")
+            graph.append("[0:a:0]" + ",".join(a) + "[clipa]")
+            speech.append("[clipa]")
+        if voiceover:
+            k = add_input("-i", voiceover)
+            # įgarsinimas: nukerpam ūžesį, sumažinam triukšmą, suvienodinam garsumą (telefono įrašai būna tylūs)
+            graph.append(f"[{k}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                         f"highpass=f=80,afftdn=nr=12:nf=-40,loudnorm=I=-15:TP=-1.5:LRA=11,"
+                         f"aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                         f"apad=whole_dur={duration + 1:.3f},atrim=duration={duration + 1:.3f}[vo]")
+            speech.append("[vo]")
+        voice = None
+        if len(speech) == 2:
+            graph.append(f"{speech[0]}{speech[1]}amix=inputs=2:duration=longest:normalize=0[voice]")
             voice = "[voice]"
+        elif speech:
+            voice = speech[0]
         aout = voice
         blocks = [b for b in (music_blocks or []) if b["end"] - b["start"] >= 0.3 and b["start"] < duration]
         if blocks:
             # Muzikos takelis: kiekvienas blokas skamba tik savo vietoje (su švelniu įėjimu / išėjimu)
-            inputs = ["-i", path]
             parts = []
             for j, blk in enumerate(blocks):
-                inputs += ["-stream_loop", "-1", "-i", blk["path"]]
+                k = add_input("-stream_loop", "-1", "-i", blk["path"])
                 start = max(0.0, blk["start"])
                 length = max(0.3, min(blk["end"], duration) - start)
                 fi, fo = min(0.6, length / 3), min(0.9, length / 3)
                 vol = music_volume * blk.get("vol", 100) / 100
-                graph.append(f"[{j + 1}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                graph.append(f"[{k}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
                              f"atrim=duration={length:.3f},asetpts=PTS-STARTPTS,volume={vol:.3f},"
                              f"afade=t=in:st=0:d={fi:.3f},afade=t=out:st={length - fo:.3f}:d={fo:.3f},"
                              f"adelay=delays={round(start * 1000)}:all=1[mb{j}]")
@@ -777,17 +819,19 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             graph.append(f"{mixed}apad=whole_dur={duration + 1:.3f},atrim=duration={duration + 1:.3f}[music]")
             music = True
         elif music:
-            inputs = ["-i", path, "-stream_loop", "-1", "-i", music]
-            graph.append(f"[1:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            k = add_input("-stream_loop", "-1", "-i", music)
+            graph.append(f"[{k}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
                          f"volume={music_volume:.3f},afade=t=in:st=0:d=0.8,atrim=duration={duration + 1:.3f}[music]")
         if music:
             if voice and ducking:
-                graph.append("[voice]asplit=2[v1][v2]")
+                graph.append(f"{voice}asplit=2[v1][v2]")
                 graph.append("[music][v2]sidechaincompress=threshold=0.015:ratio=8:attack=30:release=500[duck]")
-                graph.append("[v1][duck]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[mix]")
+                graph.append(f"[v1][duck]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95,"
+                             f"atrim=duration={duration + 1:.3f}[mix]")
                 aout = "[mix]"
             elif voice:
-                graph.append("[voice][music]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[mix]")
+                graph.append(f"{voice}[music]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95,"
+                             f"atrim=duration={duration + 1:.3f}[mix]")
                 aout = "[mix]"
             else:
                 aout = "[music]"

@@ -1,6 +1,7 @@
 import datetime
 import html
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -286,7 +287,9 @@ with st.container(border=True):
                         on_click=pick_transition, args=(name,))
 
 states = {c["audio"] for c in clips}
-speech = "speech" in states
+# Įgarsinimas (atskiras balso įrašas) – titrams ir garsui naudojamas jis
+has_vo = st.session_state.get(P + "vo_file") is not None
+speech = "speech" in states or has_vo
 
 template = st.session_state[P + "template"]
 accent = st.session_state[P + "accent"]
@@ -455,7 +458,27 @@ with sb.expander("✍️  Tekstai ir titrai"):
                                               "per video.")
 
 # ---------- IV. Garsas ----------
-with sb.expander("🎵  Garsas ir muzika"):
+with sb.expander("🎵  Garsas ir muzika", expanded=has_vo):
+    st.markdown("**🎙️ Įgarsinimas – jūsų balsas**")
+    vo_file = st.file_uploader("Balso įrašas (garso arba video failas)", key=P + "vo_file",
+                               help="Jūsų kalba skambės visu garsumu (sustiprinta ir išvalyta), titrai bus sukurti "
+                                    "iš jos, o muzika patyli, kai kalbate. Iš video failo paimamas tik garsas.")
+    vo_path, clip_gain = None, 1.0
+    if vo_file is not None:
+        _work = st.session_state.setdefault(P + "work", tempfile.mkdtemp(prefix="reels_"))
+        os.makedirs(_work, exist_ok=True)
+        vo_path = os.path.join(_work, f"vo_{vo_file.file_id}" + (os.path.splitext(vo_file.name)[1] or ".m4a"))
+        if not os.path.exists(vo_path):
+            with open(vo_path, "wb") as f:
+                vo_file.seek(0)
+                shutil.copyfileobj(vo_file, f, 1 << 20)
+        vo_dur = reels_studio.media_duration(vo_path)
+        gain_label = st.radio("Video klipų garsas", ["Išjungti", "Patylinti", "Palikti"], horizontal=True,
+                              key=P + "clip_audio", help="Ką daryti su pačių video įrašų garsu, kai yra įgarsinimas.")
+        clip_gain = {"Išjungti": 0.0, "Patylinti": 0.15, "Palikti": 1.0}[gain_label]
+        st.caption(f"🎙️ Įgarsinimas: {vo_dur:.1f} s. Jei jis ilgesnis už video – paskutinis kadras bus "
+                   f"prailgintas. Pauzės video neiškerpamos (vaizdas lieka toks, kokį sudėjote).")
+    st.markdown("**🎵 Foninė muzika**")
     library = reels_studio.music_library()
     options = ["Be muzikos"] + list(library) + ["📁 Įkelti savo muziką"]
     music_choice = st.selectbox("Foninė muzika", options, index=1 if library else 0, key=P + "music_choice",
@@ -514,7 +537,8 @@ highlight = reels_studio._ass_color(reels_studio.ACCENTS[accent][0])[4:]  # BBGG
 work = st.session_state.setdefault(P + "work", tempfile.mkdtemp(prefix="reels_"))
 os.makedirs(work, exist_ok=True)
 signature = (tuple((c["id"], tuple(clips_ui.clip_segments(c) or ())) for c in clips), image_duration, transition, fmt,
-             remove_silence, subtitles, client is not None, subtitle_language, subtitle_text.strip())
+             remove_silence, subtitles, client is not None, subtitle_language, subtitle_text.strip(),
+             vo_file.file_id if vo_file is not None else None)
 prep = st.session_state.get(P + "prep")
 ready = bool(prep) and prep["sig"] == signature and os.path.exists(prep["src"])
 
@@ -530,11 +554,18 @@ def prepare(say, progress):
                                            progress=lambda p: progress(p * 0.5), image_duration=image_duration,
                                            segments=segments, transition=transition)
     protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
-    analysis = video_editor.analyze(src, remove_silence=remove_silence, subtitles=subtitles, client=client,
+    analysis = video_editor.analyze(src, remove_silence=remove_silence and not vo_path,
+                                    subtitles=subtitles and not vo_path, client=client,
                                     subtitle_language=subtitle_language, subtitle_text=subtitle_text,
                                     protect=protect, status=say)
     if analysis["subtitle_mode"] in ("voice", "translated"):
         accounts.add_minutes(analysis["info"]["duration"] / 60)
+    if vo_path:  # titrai iš įgarsinimo (jo laiko skalė = galutinio video laikas)
+        words_vo, mode = video_editor.analyze_voice(vo_path, subtitles, client, None, subtitle_language,
+                                                    subtitle_text, status=say)
+        analysis["words"], analysis["subtitle_mode"] = words_vo, mode
+        if mode in ("voice", "translated"):
+            accounts.add_minutes(reels_studio.media_duration(vo_path) / 60)
     if old and old["src"] != src and old["src"].startswith(work) and os.path.exists(old["src"]):
         os.unlink(old["src"])
     st.session_state.pop(P + "quick_video", None)
@@ -579,6 +610,9 @@ def music_path(tmp):
 def build(prep, words, tmp, out, quick, progress):
     """Montažas + Reels apdaila. quick – greita peržiūra (maža raiška, greitas kodavimas)."""
     edited = os.path.join(tmp, "edited.mp4")
+    words = prep["analysis"]["words"] if words is None else words
+    if vo_path:  # įgarsinimo titrai – galutinio video laiku; montaže jie dar bus pagreitinti kartu su vaizdu
+        words = [(w, a * speed, b * speed) for w, a, b in words]
     res = video_editor.render_edit(
         prep["src"], edited, prep["analysis"], words, fmt=fmt, denoise=denoise and not quick,
         loudnorm=not quick, subtitle_style="modern", highlight=highlight, subtitle_look=look, ypos=subs_y,
@@ -590,8 +624,9 @@ def build(prep, words, tmp, out, quick, progress):
         None if music_block_paths(tmp) is not None else music_path(tmp), music_volume,
         ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
-        subs_words=prep["analysis"]["words"] if words is None else words, subs_look=look, subs_ypos=subs_y,
-        hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp))
+        subs_words=words, subs_look=look, subs_ypos=subs_y,
+        hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
+        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0)
     return res, fin
 
 
@@ -681,6 +716,8 @@ if clips:
         else:
             keep = tuple(tuple(x) for x in prep["analysis"]["keep"])
             final_dur = sum(b_ - a_ for a_, b_ in keep) / speed
+            if vo_path:  # įgarsinimas gali prailginti video
+                final_dur = max(final_dur, reels_studio.media_duration(vo_path) + 0.3)
             if reels_studio.LENGTHS[length]:
                 final_dur = min(final_dur, reels_studio.LENGTHS[length])
             tracks = list(library) + ([OWN_MUSIC] if music_file else [])
