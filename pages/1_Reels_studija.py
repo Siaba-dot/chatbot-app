@@ -266,8 +266,7 @@ st.markdown('<div class="lux-settings-hint">⚙️ <b>Nustatymai</b> – filtrai
 with st.container(border=True):
     step("I", "Medžiaga", "video, nuotraukos arba filmavimas")
     clips, image_duration = clips_ui.clip_picker(P, trim=True)
-    if st.session_state.get(P + "transition") not in video_editor.TRANSITIONS:  # pvz. pašalintas „Lapo vertimas“
-        st.session_state[P + "transition"] = "Be perėjimo"
+    st.session_state.setdefault(P + "transition", "Be perėjimo")
     transition = st.session_state[P + "transition"]
     if len(clips) >= 2:
         st.markdown("**Perėjimai tarp įrašų** · <small>✦ – firminiai studijos</small>", unsafe_allow_html=True)

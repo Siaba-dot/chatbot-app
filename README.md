@@ -52,7 +52,8 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **efektai langeliuose** (galima derinti): Lėtas priartėjimas, Švytėjimas, Kino juostos, Kino grūdeliai, Vinjetė,
   Ryškumas, Šviesos blyksnis;
 - **trukmės riba** (15 / 30 / 60 / 90 s), **greitis**, **progreso juostelė**;
-- **perėjimai tarp įrašų** (langeliai su peržiūra tarp jūsų kadrų): ✦ Kvadratėliai (kadras keičiasi mažais
+- **perėjimai tarp įrašų** (langeliai su peržiūra tarp jūsų kadrų): ✦ Lapo vertimas (kadras persiverčia nuo apatinio
+  dešiniojo kampo kaip knygos lapas – su lapo nugarėle ir šešėliu), ✦ Kvadratėliai (kadras keičiasi mažais
   kvadratėliais atsitiktine tvarka), Švelnus išnykimas, Per šviesą, Slinkimas, Atsivėrimas;
 - **kabliuko ir titrų vieta** – „Kabliuko vieta“ (Viršuje / Aukščiau / Žemiau) ir „Titrų vieta“ (Viduryje / Žemiau /
   Apačioje), kad tekstas neuždengtų veido;

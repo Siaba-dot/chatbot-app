@@ -237,7 +237,7 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
     return out_path
 
 
-SIGNATURE_TRANSITIONS = ("Kvadratėliai",)
+SIGNATURE_TRANSITIONS = ("Lapo vertimas", "Kvadratėliai")
 
 
 def transition_preview(frame_a, frame_b, out_path, transition, width=180, height=320, at=0.45):
