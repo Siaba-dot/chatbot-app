@@ -21,6 +21,10 @@ Reikalinga `ffmpeg` (Streamlit Cloud ją įdiegia iš `packages.txt`).
 Galima naudoti ir be naršyklės: `python3 video_editor.py IN.mp4 OUT.mp4 --format 9:16 --subtitles [--text tekstas.txt]`.
 
 ## ✨ Reels studija
+**Dizainas – „Baltijos gintaras“:** gilus Baltijos nakties mėlynas fonas, šiltas gintaro auksas, logotipas – natūralus
+Baltijos gintaro gabalėlis su subtiliu baltišku saulės ženklu viduje (`assets/gintaras.svg`), lietuviškas rombų
+ornamentas. Šablonas „Baltijos gintaras“ ir akcentas „Gintaro gradientas“ – numatytieji.
+
 **Išdėstymas:** viršuje – peržiūra ir mygtukai (👁 Viršelis · ▶ Peržiūra · ✨ Kurti) bei rezultatas; žemiau – medžiaga ir
 titrų taisymas; visi nustatymai (formatas, stilius, tekstai, garsas, tempas) – šoniniame skydelyje.
 

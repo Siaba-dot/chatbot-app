@@ -191,26 +191,26 @@ def plans_html():
     return f"""
 <style>
 .pl-wrap {{ margin: 2.2rem 0 .5rem; }}
-.pl-title {{ text-align: center; font-family: 'Playfair Display', Georgia, serif; font-size: 1.7rem; color: #F4EEDF; }}
-.pl-note {{ text-align: center; color: #B8AF9C; font-size: .9rem; margin: .3rem 0 1.2rem; }}
+.pl-title {{ text-align: center; font-family: 'Playfair Display', Georgia, serif; font-size: 1.7rem; color: #F7ECDA; }}
+.pl-note {{ text-align: center; color: #C9D3E2; font-size: .9rem; margin: .3rem 0 1.2rem; }}
 .pl-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }}
-.pl-card {{ display: flex; flex-direction: column; position: relative; border: 1px solid rgba(212,175,55,.22); border-radius: 16px; padding: 1.3rem 1.2rem;
+.pl-card {{ display: flex; flex-direction: column; position: relative; border: 1px solid rgba(227,155,46,.22); border-radius: 16px; padding: 1.3rem 1.2rem;
   background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01)); }}
-.pl-prem {{ border-color: rgba(212,175,55,.75); box-shadow: 0 10px 40px rgba(212,175,55,.12);
-  background: linear-gradient(180deg, rgba(212,175,55,.12), rgba(212,175,55,.02)); }}
-.pl-badge {{ position: absolute; top: -.7rem; right: 1rem; background: linear-gradient(100deg, #B8912E, #F3DE9C, #D4AF37);
-  color: #0B0B0C; font-size: .68rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+.pl-prem {{ border-color: rgba(227,155,46,.75); box-shadow: 0 10px 40px rgba(227,155,46,.12);
+  background: linear-gradient(180deg, rgba(227,155,46,.12), rgba(227,155,46,.02)); }}
+.pl-badge {{ position: absolute; top: -.7rem; right: 1rem; background: linear-gradient(100deg, #B85F12, #FFD58A, #E39B2E);
+  color: #061226; font-size: .68rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
   padding: .2rem .6rem; border-radius: 999px; }}
-.pl-name {{ letter-spacing: .3em; text-transform: uppercase; font-size: .75rem; color: #D4AF37; font-weight: 600; }}
-.pl-price {{ font-family: 'Playfair Display', Georgia, serif; font-size: 2rem; color: #F3DE9C; margin: .3rem 0 .7rem; }}
+.pl-name {{ letter-spacing: .3em; text-transform: uppercase; font-size: .75rem; color: #E39B2E; font-weight: 600; }}
+.pl-price {{ font-family: 'Playfair Display', Georgia, serif; font-size: 2rem; color: #FFD58A; margin: .3rem 0 .7rem; }}
 .pl-card ul {{ list-style: none; padding: 0; margin: 0 0 1rem; flex: 1; }}
-.pl-card li {{ color: #E4DCC8; font-size: .9rem; padding: .28rem 0 .28rem 1.4rem; position: relative; }}
-.pl-card li::before {{ content: "✦"; position: absolute; left: 0; color: #D4AF37; font-size: .8rem; top: .35rem; }}
+.pl-card li {{ color: #EADCC4; font-size: .9rem; padding: .28rem 0 .28rem 1.4rem; position: relative; }}
+.pl-card li::before {{ content: "✦"; position: absolute; left: 0; color: #E39B2E; font-size: .8rem; top: .35rem; }}
 .pl-btn {{ display: block; text-align: center; padding: .55rem; border-radius: 10px; text-decoration: none !important;
-  border: 1px solid rgba(212,175,55,.5); color: #F3DE9C !important; font-weight: 500; }}
-.pl-prem .pl-btn {{ background: linear-gradient(100deg, #B8912E, #F3DE9C 45%, #D4AF37 70%, #B8912E); color: #0B0B0C !important;
+  border: 1px solid rgba(227,155,46,.5); color: #FFD58A !important; font-weight: 500; }}
+.pl-prem .pl-btn {{ background: linear-gradient(100deg, #B85F12, #FFD58A 45%, #E39B2E 70%, #B85F12); color: #061226 !important;
   border: 0; font-weight: 600; }}
-.pl-contact {{ text-align: center; color: #B8AF9C; font-size: .85rem; }}
+.pl-contact {{ text-align: center; color: #C9D3E2; font-size: .85rem; }}
 </style>
 <div class="pl-wrap">
   <div class="pl-title">Planai</div>
