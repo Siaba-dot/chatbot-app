@@ -95,7 +95,10 @@ EFFECTS = {
     "Aukso blizgesys": "Firminis: per auksinį ar sidabrinį tekstą periodiškai perbėga šviesos blyksnis.",
     "Auksinės dulkės": "Firminis: vaizde švelniai plaukioja ir mirga auksinės kibirkštėlės.",
     "Auksinis rėmelis": "Firminis: plona dviguba metalinė linija aplink kadrą su deimantėliais (aukso ar sidabro).",
+    "Gintaro akimirka": "Firminis: pasirinktoje vietoje video sustoja, kadras nušvinta gintaro šviesa – akimirka, "
+                        "išsaugota kaip gintare – ir video tęsiasi.",
 }
+MOMENT_LEN = 1.6  # s – kiek trunka „Gintaro akimirka“
 TEXT_EFFECTS = ("Aukso blizgesys",)  # matosi tik ant teksto – peržiūra rodoma su pavyzdiniu tekstu
 
 
@@ -104,6 +107,29 @@ def zoom_filters(W, H, duration):
     d = max(1.0, duration)
     return [f"scale=w='trunc({W}*(1+0.10*t/{d:.3f})/2)*2':h='trunc({H}*(1+0.10*t/{d:.3f})/2)*2':eval=frame",
             f"crop={W}:{H}"]
+
+
+AMBER_LOOK = ["colorbalance=rs=0.16:gs=0.05:bs=-0.2:rm=0.12:gm=0.03:bm=-0.16:rh=0.08:bh=-0.12",
+              "eq=saturation=1.2:contrast=1.08:brightness=0.03", "vignette=PI/4.5"]
+
+
+def moment_chains(inp, out, at, length, fps, speed_filter="null"):
+    """„Gintaro akimirka“: ties `at` s video sustoja `length` s; sustingęs kadras pamažu nušvinta gintaro šviesa
+    (ir vėl atšyla), tada video tęsiasi. Grąžina filtrų grandines inp -> out."""
+    n = max(1, round(length * fps))
+    ramp = min(0.4, length / 3)
+    return [
+        f"{inp}{speed_filter},split=3[mo_a][mo_f][mo_b]",
+        f"[mo_a]trim=end={at:.3f},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[mo_1]",
+        f"[mo_f]trim=start={at:.3f},setpts=PTS-STARTPTS,trim=end_frame=1,loop=loop={n - 1}:size=1:start=0,"
+        f"setpts=N/({fps}*TB),format=yuv420p,setsar=1,split[mo_n][mo_x]",
+        # gintaro šviesa įsilieja ir vėl atšyla (permatomumo perėjimas – greitas)
+        f"[mo_x]{','.join(AMBER_LOOK)},format=yuva420p,fade=t=in:st=0:d={ramp:.3f}:alpha=1,"
+        f"fade=t=out:st={length - ramp:.3f}:d={ramp:.3f}:alpha=1[mo_am]",
+        "[mo_n][mo_am]overlay=format=auto,format=yuv420p[mo_2]",
+        f"[mo_b]trim=start={at:.3f},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[mo_3]",
+        f"[mo_1][mo_2][mo_3]concat=n=3:v=1:a=0{out}",
+    ]
 
 
 def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, duration=10.0, still=False,
@@ -127,6 +153,8 @@ def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, durati
     if "Šviesos blyksnis" in effects:
         b.append("lutrgb=r='val+(255-val)*0.55':g='val+(255-val)*0.55':b='val+(255-val)*0.55'" if still
                  else "fade=t=in:st=0:d=0.7:color=white")
+    if "Gintaro akimirka" in effects and still:  # langelio peržiūra: kaip atrodo „sustingęs“ kadras
+        b += AMBER_LOOK
     b += list(post)
     if "Švytėjimas" in effects:
         sigma = max(4, round(W / 45))
@@ -290,7 +318,7 @@ def music_library():
 
 
 SIGNATURE_FILTERS = ("Paryžiaus rytas", "Milano naktis", "Baltijos auksas")
-SIGNATURE_EFFECTS = ("Aukso blizgesys", "Auksinės dulkės", "Auksinis rėmelis")
+SIGNATURE_EFFECTS = ("Gintaro akimirka", "Aukso blizgesys", "Auksinės dulkės", "Auksinis rėmelis")
 
 LENGTHS = {"Be ribos": None, "15 s": 15, "30 s": 30, "60 s": 60, "90 s": 90}
 
@@ -697,7 +725,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
-           music_blocks=None, voiceover=None, clip_gain=1.0):
+           music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
     natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
@@ -708,6 +736,13 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
     W, H, fps = info["width"], info["height"], info["fps"]
     speed = max(0.5, min(2.0, float(speed or 1.0)))
     duration = info["duration"] / speed
+    # „Gintaro akimirka“ – sustabdymas galutinio video laike (ne per arti pradžios / pabaigos)
+    moment = "Gintaro akimirka" in (effects or ()) and moment_at is not None and duration > 1.0
+    if moment:  # per toli nurodyta vieta – priartinama prie pabaigos
+        lim = min(duration, max_length) if max_length else duration
+        moment_at = max(0.3, min(float(moment_at), lim - 0.3))
+    if moment:
+        duration += moment_len
     extend = 0.0
     if voiceover:
         vo_dur = media_duration(voiceover)
@@ -729,13 +764,21 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if extend > 0.01:  # įgarsinimas ilgesnis – paskutinis kadras palaikomas ilgiau
             pre.append(f"tpad=stop_mode=clone:stop_duration={extend:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
-        graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
+        if moment:
+            sp = pre.pop(0) if pre and pre[0].startswith("setpts") else "null"
+            graph = moment_chains("[0:v]", "[mv]", moment_at, moment_len, fps, sp)
+            graph.append(look_graph("[mv]", "[base]", color, effects, W, H, duration, pre=pre, post=post))
+        else:
+            graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
         vout = "[base]"
         shine = "Aukso blizgesys" in (effects or ())
         if accent in GRADIENTS or shine:
             masks = []
             if subs_words:
                 sw = [(w, a0 / speed, b0 / speed) for w, a0, b0 in subs_words]
+                if moment:  # po sustabdymo titrai pasislenka
+                    sw = [(w, a0 + moment_len, b0 + moment_len) if a0 >= moment_at else (w, a0, b0)
+                          for w, a0, b0 in sw]
                 sm = os.path.join(tmp, "subs_mask.ass")
                 with open(sm, "w", encoding="utf-8") as f:
                     f.write(video_editor.build_ass(sw, W, H, ypos=subs_ypos, look=subs_look, mask=True,
@@ -782,7 +825,14 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 a.append(f"atempo={speed:.4f}")
             if abs(clip_gain - 1) > 0.001:
                 a.append(f"volume={clip_gain:.3f}")
-            graph.append("[0:a:0]" + ",".join(a) + "[clipa]")
+            if moment:  # sustabdymo metu – tyla, paskui garsas tęsiasi kartu su vaizdu
+                graph.append("[0:a:0]" + ",".join(a) + ",asplit[mo_aa][mo_ab]")
+                graph += [f"[mo_aa]atrim=end={moment_at:.3f},asetpts=PTS-STARTPTS[mo_a1]",
+                          f"aevalsrc=0|0:c=stereo:s=48000:d={moment_len:.3f}[mo_as]",
+                          f"[mo_ab]atrim=start={moment_at:.3f},asetpts=PTS-STARTPTS[mo_a3]",
+                          "[mo_a1][mo_as][mo_a3]concat=n=3:v=0:a=1[clipa]"]
+            else:
+                graph.append("[0:a:0]" + ",".join(a) + "[clipa]")
             speech.append("[clipa]")
         if voiceover:
             k = add_input("-i", voiceover)

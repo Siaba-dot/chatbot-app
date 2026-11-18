@@ -355,6 +355,11 @@ with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True)
                     width="stretch", help=desc, on_click=toggle_effect, args=(name,))
     if effects:
         st.caption("Pasirinkta: " + " · ".join(effects))
+    if "Gintaro akimirka" in effects:
+        st.slider("✦ Gintaro akimirka – kurią sekundę sustabdyti", 0.5, 60.0, 3.0, 0.1, key=P + "moment_at",
+                  format="%.1f s", help=f"Šioje vietoje kadras sustoja {reels_studio.MOMENT_LEN:.1f} s, nušvinta "
+                  "gintaro šviesa ir video tęsiasi. Vieta skaičiuojama galutiniame video "
+                  "(jei per toli – priartinama prie pabaigos).")
 
 # ---------- III. Tekstai ----------
 with sb.expander("✍️  Tekstai ir titrai"):
@@ -626,7 +631,8 @@ def build(prep, words, tmp, out, quick, progress):
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
         subs_words=words, subs_look=look, subs_ypos=subs_y,
         hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
-        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0)
+        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0,
+        moment_at=st.session_state.get(P + "moment_at", 3.0) if "Gintaro akimirka" in effects else None)
     return res, fin
 
 
@@ -720,6 +726,8 @@ if clips:
                 final_dur = max(final_dur, reels_studio.media_duration(vo_path) + 0.3)
             if reels_studio.LENGTHS[length]:
                 final_dur = min(final_dur, reels_studio.LENGTHS[length])
+            if "Gintaro akimirka" in effects:  # sustabdymas prailgina video
+                final_dur += reels_studio.MOMENT_LEN
             tracks = list(library) + ([OWN_MUSIC] if music_file else [])
             if P + "mblocks" not in st.session_state:  # pradžia – pasirinkta muzika per visą video
                 st.session_state[P + "mblocks"] = ([{"name": music_choice, "start": 0.0, "end": round(final_dur, 2),

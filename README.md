@@ -41,6 +41,7 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **✦ „Gintaro akimirka“** – firminis efektas: pasirinktoje vietoje (slankiklis „kurią sekundę sustabdyti“) video sustoja 1,6 s, kadras nušvinta gintaro šviesa ir video tęsiasi; sustojimo metu klipo garsas nutyla, titrai pasislenka;
 - **firminiai efektai**: „Aukso blizgesys“ (per metalinį tekstą kas 2,6 s perbėga šviesos ruožas), „Auksinės dulkės“
   (plaukiojančios, mirgančios kibirkštėlės, kartojasi be sandūros) ir titrų stilius „Rašomi ranka“ (frazė rašoma
   rašikliu iš kairės į dešinę, kol ištariama);
