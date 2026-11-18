@@ -318,20 +318,13 @@ AMBER_LOOK = ["colorbalance=rs=0.16:gs=0.05:bs=-0.2:rm=0.12:gm=0.03:bm=-0.16:rh=
               "eq=saturation=1.2:contrast=1.08:brightness=0.03", "vignette=PI/4.5"]
 
 
-def moment_chains(inp, out, at, length):
-    """„Gintaro akimirka“: ties `at` s kadras švelniai nušvinta šilta gintaro šviesa (su švytėjimu) ir vėl atšyla.
-    Video ir garsas nesustoja; apdorojamas tik tas trumpas langas. Grąžina filtrų grandines inp -> out."""
-    ramp = min(0.5, length / 3)
-    return [
-        f"{inp}split[mo_v][mo_w]",
-        f"[mo_w]trim=start={at:.3f}:end={at + length:.3f},setpts=PTS-STARTPTS,{','.join(AMBER_LOOK)},"
-        "format=gbrp,split[mo_s][mo_g]",  # švytėjimas maišomas RGB erdvėje (kitaip atspalvis nukrypsta)
-        "[mo_g]gblur=sigma=18[mo_bl]",
-        "[mo_s][mo_bl]blend=all_mode=screen:all_opacity=0.45,"
-        f"format=yuva420p,fade=t=in:st=0:d={ramp:.3f}:alpha=1,"
-        f"fade=t=out:st={length - ramp:.3f}:d={ramp:.3f}:alpha=1,setpts=PTS+{at:.3f}/TB[mo_x]",
-        f"[mo_v][mo_x]overlay=eof_action=pass:format=auto{out}",
-    ]
+def moment_filter(at, length):
+    """„Gintaro akimirka“: ties `at` s kadras švelniai nušvinta šilta gintaro šviesa ir vėl atšyla.
+    Vienas paprastas filtras (be skaidymo ir sluoksnių) – greita ir patikima visose ffmpeg versijose."""
+    a, b = at, at + length
+    k = f"(between(t,{a:.3f},{b:.3f})*min(1,2.2*sin(PI*(t-{a:.3f})/{length:.3f})))"
+    return (f"eq=brightness='0.06*{k}':contrast='1+0.06*{k}':saturation='1+0.28*{k}':"
+            f"gamma_r='1+0.16*{k}':gamma_g='1+0.05*{k}':gamma_b='1-0.18*{k}':eval=frame")
 
 
 def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, duration=10.0, still=False,
@@ -872,12 +865,27 @@ def media_duration(path):
         return 0.0
 
 
+CRASH_SIGNS = ("corrupted", "double free", "free()", "malloc", "segmentation", "aborted", "core dumped")
+
+
 def _run(cmd, total, progress, what, stall=12.0, hard=180.0):
+    """Kaip _run_once; jei ffmpeg nulūžta (vidinė atminties klaida – pasitaiko kai kuriose versijose su keliomis
+    gijomis), automatiškai kartojama viena gija."""
+    try:
+        return _run_once(cmd, total, progress, what, stall, hard)
+    except RuntimeError as e:
+        msg = str(e).lower()
+        if "užstrigo" in msg or not any(x in msg for x in CRASH_SIGNS):
+            raise
+        return _run_once(cmd, total, progress, what, stall, hard, threads="1")
+
+
+def _run_once(cmd, total, progress, what, stall=12.0, hard=180.0, threads=None):
     """Paleidžia ffmpeg ir rodo eigą. Apsauga nuo užstrigimo (kai kurios ffmpeg versijos video pabaigoje laukia
     pagalbinių sluoksnių): jei eiga nebejuda `stall` s, o video jau beveik baigtas – ffmpeg tvarkingai sustabdomas
     (q, failas išsaugomas); jei nejuda `hard` s – nutraukiamas su aiškia klaida."""
     import threading
-    proc = subprocess.Popen(video_editor.limit_threads(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    proc = subprocess.Popen(video_editor.limit_threads(cmd, threads), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True)
     state = {"t": 0.0, "seen": time.time()}
     errbuf = []
@@ -919,6 +927,8 @@ def _run(cmd, total, progress, what, stall=12.0, hard=180.0):
     if killed:
         raise RuntimeError(f"{what}: ffmpeg užstrigo ir buvo nutrauktas (pasiekta {state['t']:.1f} iš {total:.1f} s).")
     if proc.returncode != 0 and not (stopped_at and proc.returncode in (0, 255)):
+        if proc.returncode < 0 and not err.strip():  # nulūžo be pranešimo (signalas)
+            err = f"ffmpeg aborted (signal {-proc.returncode})"
         raise RuntimeError(f"{what}:\n{err[-2000:]}")
     return {"stopped_early": bool(stopped_at), "reached": state["t"]}
 
@@ -984,7 +994,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
         vout = "[base]"
         if moment:
-            graph += moment_chains("[base]", "[mbase]", moment_at, moment_len)
+            graph.append(f"[base]{moment_filter(moment_at, moment_len)}[mbase]")
             vout = "[mbase]"
         shine = "Aukso blizgesys" in (effects or ())
         if accent in GRADIENTS or shine:
