@@ -4,6 +4,7 @@ prefix atskiria puslapių būsenas (session_state), kad perėjus į kitą puslap
 nedingtų ir nesimaišytų."""
 import base64
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -25,7 +26,11 @@ def add_clip(prefix, clip_id, ext, data, name, kind):
         return
     fd, path = tempfile.mkstemp(suffix=ext)
     with os.fdopen(fd, "wb") as f:
-        f.write(data())
+        if hasattr(data, "read"):  # įkeltas failas – rašom į diską dalimis, be papildomos kopijos atmintyje
+            data.seek(0)
+            shutil.copyfileobj(data, f, 1 << 20)
+        else:
+            f.write(data())
     if kind == "rec":
         # Naršyklės įrašuose (ypač WebM) dažnai trūksta trukmės – perpakuojam į MKV be perkodavimo.
         mkv = path + ".mkv"
@@ -34,8 +39,23 @@ def add_clip(prefix, clip_id, ext, data, name, kind):
             path = mkv
     with st.spinner(f"Tikrinu „{name}“…"):
         try:
-            duration = video_editor.probe(path)["duration"]
+            info = video_editor.probe(path)
+            duration = info["duration"]
             image = video_editor.is_image(path)
+            if not image and max(info["width"], info["height"]) > 1920:
+                # 4K telefono video – darbinė 1080p kopija: Reels'ui pakanka, o serveriui reikia daug mažiau atminties
+                with st.spinner(f"Optimizuoju „{name}“ (4K → 1080p)…"):
+                    small = path + ".1080.mp4"
+                    w, h = info["width"], info["height"]
+                    scale = "scale=-2:1920" if h >= w else "scale=1920:-2"
+                    cmd = video_editor.limit_threads(
+                        ["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vf", scale + ",format=yuv420p",
+                         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-b:a", "192k",
+                         "-map_metadata", "0", small])
+                    if subprocess.run(cmd).returncode == 0:
+                        os.unlink(path)
+                        path = small
+                        duration = video_editor.probe(path)["duration"]
             state, an = ("none", None) if image else video_editor.audio_status(path)
         except Exception:
             os.unlink(path)
@@ -139,8 +159,9 @@ def clip_picker(prefix="", trim=False):
     if source.startswith("📁"):
         # Be failų tipų apribojimo: telefonuose (ypač iPhone) apribojimas neleidžia pasirinkti
         # video iš galerijos. Ar tai tikrai video, patikrinama po įkėlimo.
+        upk = st.session_state.setdefault(prefix + "upk", 0)
         files = st.file_uploader("Įkelkite video ar nuotraukas (galima kelis)", accept_multiple_files=True,
-                                 key=prefix + "uploader" if prefix else None,
+                                 key=f"{prefix}uploader{upk}" if prefix else None,
                                  help="Telefone galite pasirinkti kelis video ar nuotraukas iš galerijos iš karto. "
                                       "Nuotraukos rodomos po kelias sekundes.")
         current = {f.file_id for f in files}
@@ -150,7 +171,13 @@ def clip_picker(prefix="", trim=False):
             move_clip(prefix, i, 0)
         st.session_state[ids_key] = current
         for f in files:
-            add_clip(prefix, f.file_id, os.path.splitext(f.name)[1].lower() or ".mp4", f.getvalue, f.name, "upload")
+            add_clip(prefix, f.file_id, os.path.splitext(f.name)[1].lower() or ".mp4", f, f.name, "upload")
+        if prefix and files:
+            # Failai jau diske: išvalom įkėlimo lauką, kad Streamlit nebelaikytų jų atmintyje
+            # (įrašai lieka sąraše žemiau, juos šalinti – ✖).
+            st.session_state[prefix + "upk"] = upk + 1
+            st.session_state[ids_key] = set()
+            st.rerun()
     else:
         st.session_state[ids_key] = set()  # įkėlimo laukas paslėptas – jo būsena išsivalo
         rec = video_recorder(key=prefix + "recorder", default=None)

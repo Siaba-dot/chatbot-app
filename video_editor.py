@@ -20,6 +20,24 @@ FONT_NAME = "Montserrat Black"
 TRAINING_FONT = "Montserrat SemiBold"
 SUBTITLE_STYLES = ("modern", "training")
 
+# Streamlit Cloud turi ~1 GB atminties, o ffmpeg mato visus serverio procesorius ir paleidžia dešimtis gijų
+# (kiekviena – su savo kadrų buferiais). Ribojam gijas, kad programa nenulūžtų dėl atminties.
+FFMPEG_THREADS = os.environ.get("REELS_FFMPEG_THREADS", "2")
+
+
+def limit_threads(cmd):
+    """Prideda gijų ribas ffmpeg komandai: filtrams, kiekvieno įėjimo dekoderiui ir koduotojui."""
+    t = FFMPEG_THREADS
+    out = [cmd[0], "-filter_threads", t, "-filter_complex_threads", t]
+    for i, x in enumerate(cmd[1:-1], 1):
+        if x == "-i":
+            out += ["-threads", t]
+        out.append(x)
+        if x == "libx264":  # trumpesnė „žiūra į priekį“ – ~15 % mažiau atminties, kokybė beveik ta pati
+            out += ["-x264-params", "rc-lookahead=5:sync-lookahead=0", "-bf", "1"]
+    return out + ["-threads", t, cmd[-1]]
+
+
 FORMATS = {"original": None, "9:16": 9 / 16, "1:1": 1.0, "16:9": 16 / 9}
 
 
@@ -551,7 +569,7 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
     cmd += ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
             "-movflags", "+faststart", "-t", f"{total:.3f}", out_path]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in proc.stdout:
             m = re.match(r"out_time_us=(\d+)", line)
             if m and progress and total > 0:
@@ -638,7 +656,7 @@ def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, seg
             cmd += ["-r", str(fps), "-i", part]
         cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
                 "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in proc.stdout:
             m = re.match(r"out_time_us=(\d+)", line)
             if m and progress and t > 0:
@@ -729,7 +747,7 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
     cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
             "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in proc.stdout:
             m = re.match(r"out_time_us=(\d+)", line)
             if m and progress and total > 0:
