@@ -50,7 +50,7 @@ st.markdown("""
 .lux-step { display: flex; align-items: baseline; gap: .8rem; margin: .2rem 0 .6rem; }
 .lux-step .n { font-family: 'Playfair Display', serif; font-style: italic; color: var(--gold); font-size: 1.5rem; }
 .lux-step .t { font-family: 'Playfair Display', serif; font-size: 1.35rem; color: #F7ECDA; font-weight: 500; }
-.lux-step .d { color: #8EA2BF; font-size: .85rem; margin-left: auto; }
+.lux-step .d { color: #A9B9D0; font-size: .85rem; margin-left: auto; }
 div[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--line) !important;
   background: linear-gradient(180deg, rgba(20,48,92,.35), rgba(8,22,46,.25)); border-radius: 14px;
   backdrop-filter: blur(2px); }
@@ -60,8 +60,12 @@ button[data-testid="stBaseButton-primary"] {
   color: #061226; border: 0; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   box-shadow: 0 8px 30px rgba(227,155,46,.18); }
 .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button:hover { filter: brightness(1.07); color: #061226; }
-.stButton > button[kind="secondary"], .stDownloadButton > button[kind="secondary"] {
-  border-color: var(--line); }
+.stButton > button[kind="secondary"], .stDownloadButton > button[kind="secondary"],
+button[data-testid="stBaseButton-secondary"] {
+  border-color: rgba(227,155,46,.45); background: rgba(14,34,66,.55); }
+button[data-testid="stBaseButton-secondary"]:hover { border-color: #E39B2E; color: #FFD58A; }
+/* prislopintas tekstas – šviesesnis, kad gerai matytųsi ant mėlyno fono */
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p { color: #B4C3D8 !important; }
 [data-testid="stMetricValue"] { font-family: 'Playfair Display', serif; color: var(--gold-2); }
 .lux-caption { white-space: pre-wrap; border-left: 2px solid var(--gold); padding: .2rem 0 .2rem 1rem;
   color: #F3E7D3; }

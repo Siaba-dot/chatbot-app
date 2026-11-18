@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 
 import video_editor
 from video_editor import FONT_DIR, FONT_NAME, TRAINING_FONT, _ass_escape, _ass_time, _filter_path
@@ -539,17 +540,23 @@ def frame_image(path, width, height, accent="Aukso gradientas"):
     return path
 
 
-def frame_chains(inp, out, width, height, fps, tmp, accent="Aukso gradientas"):
+def _until(duration, fps):
+    """Baigtinė trukmė pagalbiniams sluoksniams: be jos naujesnės ffmpeg versijos gali laukti be galo."""
+    return f",fps={fps},trim=duration={duration:.3f}" if duration else ""
+
+
+def frame_chains(inp, out, width, height, fps, tmp, accent="Aukso gradientas", duration=None):
     """Uždeda auksinį rėmelį (inp -> out)."""
     p = frame_image(os.path.join(tmp, "frame.png"), width, height, accent)
-    return [f"movie='{_filter_path(p)}',loop=loop=-1:size=1:start=0,format=rgba[frm]",
+    return [f"movie='{_filter_path(p)}',loop=loop=-1:size=1:start=0{_until(duration, fps)},format=rgba[frm]",
             f"{inp}[frm]overlay=shortest=1:format=auto{out}"]
 
 
-def dust_chains(inp, out, width, height, fps, tmp, still=False):
+def dust_chains(inp, out, width, height, fps, tmp, still=False, duration=None):
     """Uždeda auksines dulkes ant vaizdo (inp -> out)."""
     p = dust_media(os.path.join(tmp, "dust.png" if still else "dust.mov"), fps=fps, still=still)
-    src = f"movie='{_filter_path(p)}'" + ("" if still else ":loop=0,setpts=N/(FRAME_RATE*TB)")
+    src = f"movie='{_filter_path(p)}'" + ("" if still else ":loop=0,setpts=N/(FRAME_RATE*TB)" +
+                                          _until(duration, fps))
     loop = ",loop=loop=-1:size=1:start=0" if still else ""
     return [f"{src}{loop},scale={width}:{height},format=rgba[dust]",
             f"{inp}[dust]overlay=shortest=1:format=auto{out}"]
@@ -610,14 +617,14 @@ def gradient_chains(base, out, width, height, fps, duration, accent, masks, tmp,
     mask_chain = ",".join(list(mask_pre) + list(masks))
     chains = [
         f"color=c=black:s={width}x{height}:r={fps}:d={duration:.3f},format=yuv420p,{mask_chain},format=gbrp[{name}m]",
-        f"movie='{_filter_path(grad)}',loop=loop=-1:size=1:start=0,fps={fps},format=gbrp[{name}g0]",
+        f"movie='{_filter_path(grad)}',loop=loop=-1:size=1:start=0{_until(duration, fps)},format=gbrp[{name}g0]",
         f"{base}format=gbrp[{name}b]",
     ]
     if shine:
         sh = shine_image(os.path.join(tmp, f"{name}_shine.png"), width, height)
         # Pirmas perbėgimas – kai kabliukas jau ryškus (~1 s), vėliau kas 2,6 s.
         x = "-W*0.08" if still else "if(lt(mod(t+1.6,2.6),1.1),-W+2*W*mod(t+1.6,2.6)/1.1,W)"
-        chains += [f"movie='{_filter_path(sh)}',loop=loop=-1:size=1:start=0,fps={fps},format=rgba[{name}s]",
+        chains += [f"movie='{_filter_path(sh)}',loop=loop=-1:size=1:start=0{_until(duration, fps)},format=rgba[{name}s]",
                    f"[{name}g0][{name}s]overlay=x='{x}':y=0:eval=frame:format=gbrp[{name}g]"]
     else:
         chains.append(f"[{name}g0]null[{name}g]")
@@ -625,16 +632,55 @@ def gradient_chains(base, out, width, height, fps, duration, accent, masks, tmp,
     return chains
 
 
-def _run(cmd, total, progress, what):
-    proc = subprocess.Popen(video_editor.limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True)
-    for line in proc.stdout:
-        m = re.match(r"out_time_us=(\d+)", line)
-        if m and progress and total > 0:
-            progress(min(1.0, int(m.group(1)) / 1e6 / total))
-    err = proc.stderr.read()
-    if proc.wait() != 0:
+def _run(cmd, total, progress, what, stall=12.0, hard=180.0):
+    """Paleidžia ffmpeg ir rodo eigą. Apsauga nuo užstrigimo (kai kurios ffmpeg versijos video pabaigoje laukia
+    pagalbinių sluoksnių): jei eiga nebejuda `stall` s, o video jau beveik baigtas – ffmpeg tvarkingai sustabdomas
+    (q, failas išsaugomas); jei nejuda `hard` s – nutraukiamas su aiškia klaida."""
+    import threading
+    proc = subprocess.Popen(video_editor.limit_threads(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+    state = {"t": 0.0, "seen": time.time()}
+    errbuf = []
+    threading.Thread(target=lambda: errbuf.append(proc.stderr.read()), daemon=True).start()
+
+    def reader():
+        for line in proc.stdout:
+            m = re.match(r"out_time_us=(\d+)", line)
+            if m:
+                t = int(m.group(1)) / 1e6
+                if t > state["t"]:
+                    state["t"], state["seen"] = t, time.time()
+    th = threading.Thread(target=reader, daemon=True)
+    th.start()
+    stopped_at, killed = None, False
+    while proc.poll() is None:
+        time.sleep(0.25)
+        if progress and total > 0:
+            progress(min(1.0, state["t"] / total))
+        idle = time.time() - state["seen"]
+        # koduotojas laiko kelias sekundes kadrų „žiūrai į priekį“, todėl „beveik baigtas“ – su atsarga
+        near_end = total > 0 and state["t"] >= min(total - 1.5, total * 0.85)
+        if stopped_at is None and ((near_end and idle > stall) or idle > hard):
+            try:
+                proc.stdin.write("q")
+                proc.stdin.flush()
+                proc.stdin.close()
+            except Exception:
+                pass
+            stopped_at = time.time()
+        elif stopped_at is not None and time.time() - stopped_at > 10:
+            proc.kill()
+            killed = True
+            break
+    proc.wait()
+    th.join(timeout=2)
+    time.sleep(0.1)
+    err = "".join(errbuf)
+    if killed:
+        raise RuntimeError(f"{what}: ffmpeg užstrigo ir buvo nutrauktas (pasiekta {state['t']:.1f} iš {total:.1f} s).")
+    if proc.returncode != 0 and not (stopped_at and proc.returncode in (0, 255)):
         raise RuntimeError(f"{what}:\n{err[-2000:]}")
+    return {"stopped_early": bool(stopped_at), "reached": state["t"]}
 
 
 def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5, handle="",
@@ -684,10 +730,10 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                                      hook_ypos=hook_ypos, shine=shine, size=text_size)
             vout = "[gold]"
         if "Auksinės dulkės" in (effects or ()):
-            graph += dust_chains(vout, "[dusty]", W, H, fps, tmp)
+            graph += dust_chains(vout, "[dusty]", W, H, fps, tmp, duration=duration + 1)
             vout = "[dusty]"
         if "Auksinis rėmelis" in (effects or ()):
-            graph += frame_chains(vout, "[framed]", W, H, fps, tmp, accent)
+            graph += frame_chains(vout, "[framed]", W, H, fps, tmp, accent, duration=duration + 1)
             vout = "[framed]"
         if trimmed:
             graph.append(f"{vout}fade=t=out:st={duration - 0.5:.3f}:d=0.5[faded]")
@@ -696,7 +742,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             bh = max(6, round(H * 0.006)) // 2 * 2
             y = 0 if progress_bar == "Viršuje" else H - bh
             bg = ACCENTS.get(accent, ACCENTS["Auksas"])[0]
-            graph.append(f"color=c=0x{bg}:s={W}x{bh}:r={fps}[bar]")
+            graph.append(f"color=c=0x{bg}:s={W}x{bh}:r={fps}:d={duration + 1:.3f}[bar]")
             graph.append(f"{vout}[bar]overlay=x='-w+w*t/{duration:.3f}':y={y}:shortest=1[vout]")
             vout = "[vout]"
 
@@ -712,7 +758,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if music:
             inputs = ["-i", path, "-stream_loop", "-1", "-i", music]
             graph.append(f"[1:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                         f"volume={music_volume:.3f},afade=t=in:st=0:d=0.8[music]")
+                         f"volume={music_volume:.3f},afade=t=in:st=0:d=0.8,atrim=duration={duration + 1:.3f}[music]")
             if voice and ducking:
                 graph.append("[voice]asplit=2[v1][v2]")
                 graph.append("[music][v2]sidechaincompress=threshold=0.015:ratio=8:attack=30:release=500[duck]")
