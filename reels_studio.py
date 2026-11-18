@@ -290,10 +290,10 @@ EFFECTS = {
     "Aukso blizgesys": "Firminis: per auksinį ar sidabrinį tekstą periodiškai perbėga šviesos blyksnis.",
     "Auksinės dulkės": "Firminis: vaizde švelniai plaukioja ir mirga auksinės kibirkštėlės.",
     "Auksinis rėmelis": "Firminis: plona dviguba metalinė linija aplink kadrą su deimantėliais (aukso ar sidabro).",
-    "Gintaro akimirka": "Firminis: pasirinktoje vietoje video sustoja, kadras nušvinta gintaro šviesa – akimirka, "
-                        "išsaugota kaip gintare – ir video tęsiasi.",
+    "Gintaro akimirka": "Firminis: pasirinktoje vietoje kadras švelniai nušvinta šilta gintaro šviesa ir truputį "
+                        "priartėja – akcentas svarbiausiam žodžiui. Video ir kalba nesustoja."
 }
-MOMENT_LEN = 1.6  # s – kiek trunka „Gintaro akimirka“
+MOMENT_LEN = 1.6  # s – kiek trunka „Gintaro akimirka“ (švytėjimas)
 TEXT_EFFECTS = ("Aukso blizgesys",)  # matosi tik ant teksto – peržiūra rodoma su pavyzdiniu tekstu
 
 
@@ -318,22 +318,19 @@ AMBER_LOOK = ["colorbalance=rs=0.16:gs=0.05:bs=-0.2:rm=0.12:gm=0.03:bm=-0.16:rh=
               "eq=saturation=1.2:contrast=1.08:brightness=0.03", "vignette=PI/4.5"]
 
 
-def moment_chains(inp, out, at, length, fps, speed_filter="null"):
-    """„Gintaro akimirka“: ties `at` s video sustoja `length` s; sustingęs kadras pamažu nušvinta gintaro šviesa
-    (ir vėl atšyla), tada video tęsiasi. Grąžina filtrų grandines inp -> out."""
-    n = max(1, round(length * fps))
-    ramp = min(0.4, length / 3)
+def moment_chains(inp, out, at, length):
+    """„Gintaro akimirka“: ties `at` s kadras švelniai nušvinta šilta gintaro šviesa (su švytėjimu) ir vėl atšyla.
+    Video ir garsas nesustoja; apdorojamas tik tas trumpas langas. Grąžina filtrų grandines inp -> out."""
+    ramp = min(0.5, length / 3)
     return [
-        f"{inp}{speed_filter},split=3[mo_a][mo_f][mo_b]",
-        f"[mo_a]trim=end={at:.3f},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[mo_1]",
-        f"[mo_f]trim=start={at:.3f},setpts=PTS-STARTPTS,trim=end_frame=1,loop=loop={n - 1}:size=1:start=0,"
-        f"setpts=N/({fps}*TB),format=yuv420p,setsar=1,split[mo_n][mo_x]",
-        # gintaro šviesa įsilieja ir vėl atšyla (permatomumo perėjimas – greitas)
-        f"[mo_x]{','.join(AMBER_LOOK)},format=yuva420p,fade=t=in:st=0:d={ramp:.3f}:alpha=1,"
-        f"fade=t=out:st={length - ramp:.3f}:d={ramp:.3f}:alpha=1[mo_am]",
-        "[mo_n][mo_am]overlay=format=auto,format=yuv420p[mo_2]",
-        f"[mo_b]trim=start={at:.3f},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[mo_3]",
-        f"[mo_1][mo_2][mo_3]concat=n=3:v=1:a=0{out}",
+        f"{inp}split[mo_v][mo_w]",
+        f"[mo_w]trim=start={at:.3f}:end={at + length:.3f},setpts=PTS-STARTPTS,{','.join(AMBER_LOOK)},"
+        "format=gbrp,split[mo_s][mo_g]",  # švytėjimas maišomas RGB erdvėje (kitaip atspalvis nukrypsta)
+        "[mo_g]gblur=sigma=18[mo_bl]",
+        "[mo_s][mo_bl]blend=all_mode=screen:all_opacity=0.45,"
+        f"format=yuva420p,fade=t=in:st=0:d={ramp:.3f}:alpha=1,"
+        f"fade=t=out:st={length - ramp:.3f}:d={ramp:.3f}:alpha=1,setpts=PTS+{at:.3f}/TB[mo_x]",
+        f"[mo_v][mo_x]overlay=eof_action=pass:format=auto{out}",
     ]
 
 
@@ -942,13 +939,11 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
     W, H, fps = info["width"], info["height"], info["fps"]
     speed = max(0.5, min(2.0, float(speed or 1.0)))
     duration = info["duration"] / speed
-    # „Gintaro akimirka“ – sustabdymas galutinio video laike (ne per arti pradžios / pabaigos)
+    # „Gintaro akimirka“ – švytėjimas galutinio video laike (ne per arti pradžios / pabaigos)
     moment = "Gintaro akimirka" in (effects or ()) and moment_at is not None and duration > 1.0
     if moment:  # per toli nurodyta vieta – priartinama prie pabaigos
         lim = min(duration, max_length) if max_length else duration
-        moment_at = max(0.3, min(float(moment_at), lim - 0.3))
-    if moment:
-        duration += moment_len
+        moment_at = max(0.1, min(float(moment_at), lim - moment_len - 0.1))
     extend = 0.0
     if voiceover:
         vo_dur = media_duration(voiceover)
@@ -982,25 +977,20 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         punches = []
         if punch and subs_words:
             punches = [a0 / speed for w, a0, _ in subs_words if video_editor.is_key(w)]
-            if moment:
-                punches = [a0 + moment_len if a0 >= moment_at else a0 for a0 in punches]
         punch_f = punch_filters(W, H, punches)
+        if moment:  # akimirkos metu kadras švelniai priartėja (titrai – kartu su vaizdu)
+            punch_f += punch_filters(W, H, [moment_at], amp=0.06, length=moment_len)
         pre += punch_f
-        if moment:
-            sp = pre.pop(0) if pre and pre[0].startswith("setpts") else "null"
-            graph = moment_chains("[0:v]", "[mv]", moment_at, moment_len, fps, sp)
-            graph.append(look_graph("[mv]", "[base]", color, effects, W, H, duration, pre=pre, post=post))
-        else:
-            graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
+        graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
         vout = "[base]"
+        if moment:
+            graph += moment_chains("[base]", "[mbase]", moment_at, moment_len)
+            vout = "[mbase]"
         shine = "Aukso blizgesys" in (effects or ())
         if accent in GRADIENTS or shine:
             masks = []
             if subs_words:
                 sw = [(w, a0 / speed, b0 / speed) for w, a0, b0 in subs_words]
-                if moment:  # po sustabdymo titrai pasislenka
-                    sw = [(w, a0 + moment_len, b0 + moment_len) if a0 >= moment_at else (w, a0, b0)
-                          for w, a0, b0 in sw]
                 sm = os.path.join(tmp, "subs_mask.ass")
                 with open(sm, "w", encoding="utf-8") as f:
                     f.write(video_editor.build_ass(sw, W, H, ypos=subs_ypos, look=subs_look, mask=True,
@@ -1014,7 +1004,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, "", accent,
                                           hook_ypos=hook_ypos, template=template, mask=True, size=text_size))
             masks.append(f"ass=filename='{_filter_path(om)}':fontsdir='{_filter_path(FONT_DIR)}'")
-            graph += gradient_chains("[base]", "[gold]", W, H, fps, total + 1, accent, masks, tmp, template,
+            graph += gradient_chains(vout, "[gold]", W, H, fps, total + 1, accent, masks, tmp, template,
                                      hook_ypos=hook_ypos, shine=shine, size=text_size)
             vout = "[gold]"
         inputs = ["-i", path]
@@ -1061,14 +1051,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 a.append(f"atempo={speed:.4f}")
             if abs(clip_gain - 1) > 0.001:
                 a.append(f"volume={clip_gain:.3f}")
-            if moment:  # sustabdymo metu – tyla, paskui garsas tęsiasi kartu su vaizdu
-                graph.append("[0:a:0]" + ",".join(a) + ",asplit[mo_aa][mo_ab]")
-                graph += [f"[mo_aa]atrim=end={moment_at:.3f},asetpts=PTS-STARTPTS[mo_a1]",
-                          f"aevalsrc=0|0:c=stereo:s=48000:d={moment_len:.3f}[mo_as]",
-                          f"[mo_ab]atrim=start={moment_at:.3f},asetpts=PTS-STARTPTS[mo_a3]",
-                          "[mo_a1][mo_as][mo_a3]concat=n=3:v=0:a=1[clipa]"]
-            else:
-                graph.append("[0:a:0]" + ",".join(a) + "[clipa]")
+            graph.append("[0:a:0]" + ",".join(a) + "[clipa]")
             speech.append("[clipa]")
         if voiceover:
             k = add_input("-i", voiceover)
@@ -1219,7 +1202,7 @@ def ai_direct(client, request, settings, options, words=(), speed=1.0):
         "Lithuanian (or another language) how the video should change. Change ONLY the settings needed to "
         "fulfil the request, using ONLY the allowed values listed in `options` (copy them exactly). "
         "Numbers must be within the given ranges. `effects` is the complete new list of effects. "
-        "To freeze the frame at a moment (\"Gintaro akimirka\"), add that effect and set `moment_at` in seconds "
+        "To highlight a moment with a warm amber glow (\"Gintaro akimirka\"), add that effect and set `moment_at` in seconds "
         "of the final video – use the transcript times ([seconds] word) to find words the user mentions. "
         "Texts (hook, cta) must be short, catchy, in the language of the transcript (default Lithuanian) "
         "with correct diacritics. If something cannot be done with these settings, say so in the summary. "
@@ -1282,7 +1265,7 @@ def mark_indices(words, indices, min_gap=1.2):
 def ai_moment(client, words, speed=1.0):
     """Svarbiausia video akimirka (s galutiniame video) – „Gintaro akimirkai“."""
     system = ("Find the single most impactful moment in this short video's speech – the key reveal, number, "
-              "result or emotional peak – where freezing the frame for 1.6 s would add drama. Times are in "
+              "result or emotional peak – where a 1.6 s warm amber glow with a gentle zoom would add emphasis. Times are in "
               "[seconds]. Reply only with JSON: {\"time\": seconds, \"word\": \"the word\", \"why\": "
               "\"short reason in Lithuanian\"}")
     j = _ai_json(client, system, {"transcript": transcript_lines(words, speed)}, temperature=0.2)

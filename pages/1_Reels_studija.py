@@ -567,10 +567,10 @@ with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True)
         st.caption("Pasirinkta: " + " · ".join(effects))
     if "Gintaro akimirka" in effects:
         st.session_state.setdefault(P + "moment_at", 3.0)
-        st.slider("✦ Gintaro akimirka – kurią sekundę sustabdyti", 0.5, 60.0, step=0.1, key=P + "moment_at",
-                  format="%.1f s", help=f"Šioje vietoje kadras sustoja {reels_studio.MOMENT_LEN:.1f} s, nušvinta "
-                  "gintaro šviesa ir video tęsiasi. Vieta skaičiuojama galutiniame video "
-                  "(jei per toli – priartinama prie pabaigos).")
+        st.slider("✦ Gintaro akimirka – kurioje sekundėje nušvinta", 0.5, 60.0, step=0.1, key=P + "moment_at",
+                  format="%.1f s", help=f"Šioje vietoje {reels_studio.MOMENT_LEN:.1f} s kadras švelniai nušvinta gintaro "
+                  "šviesa ir truputį priartėja – video ir kalba nesustoja. Vieta skaičiuojama galutiniame "
+                  "video (jei per toli – priartinama prie pabaigos).")
 
 # ---------- III. Tekstai ----------
 with sb.expander("✍️  Tekstai ir titrai"):
@@ -910,7 +910,7 @@ def ai_director_ui():
     if words:
         row.button("✦ Akimirka svarbiausioje vietoje", key=P + "ai_moment", on_click=run_ai_director,
                    args=(client, words, "moment"),
-                   help="AI suras svarbiausią kalbos vietą ir ten sustabdys kadrą (Gintaro akimirka).")
+                   help="AI suras svarbiausią kalbos vietą – ten kadras nušvis gintaro šviesa (Gintaro akimirka).")
     res = st.session_state.get(P + "ai_result")
     if res:
         if res.get("error"):
@@ -1193,8 +1193,6 @@ if clips:
             if reels_studio.LENGTHS[length]:
                 final_dur = min(final_dur, reels_studio.LENGTHS[length])
             final_dur += reels_studio.end_card_len(end_card, *cover_size)  # pabaigos kortelė
-            if "Gintaro akimirka" in effects:  # sustabdymas prailgina video
-                final_dur += reels_studio.MOMENT_LEN
             tracks = list(library) + ([OWN_MUSIC] if music_file else [])
             if P + "mblocks" not in st.session_state:  # pradžia – pasirinkta muzika per visą video
                 st.session_state[P + "mblocks"] = ([{"name": music_choice, "start": 0.0, "end": round(final_dur, 2),
