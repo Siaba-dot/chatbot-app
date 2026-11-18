@@ -162,6 +162,14 @@ def thumbnail(frame, out_path, color="Natūralios", effects=(), width=180, heigh
     return out_path
 
 
+# Studijos formatai: pavadinimas -> (video_editor formatas, viršelio dydis)
+STUDIO_FORMATS = {
+    "9:16 · Reels, TikTok, Shorts": ("9:16", (1080, 1920)),
+    "16:9 · YouTube": ("16:9", (1280, 720)),
+    "1:1 · Kvadratas": ("1:1", (1080, 1080)),
+    "4:5 · Instagram įrašas": ("4:5", (1080, 1350)),
+}
+
 SUBTITLE_POSITIONS = {"Viduryje": 0.62, "Žemiau": 0.72, "Apačioje": 0.78}
 HOOK_POSITIONS = {"Viršuje": 0.12, "Aukščiau": 0.2, "Žemiau": 0.3}
 
@@ -169,7 +177,8 @@ SAMPLE_WORDS = [("Taip", 0.2, 0.6), ("atrodo", 0.6, 1.5), ("titrai", 1.5, 2.2)]
 
 
 def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas", color="Natūralios", effects=(),
-                  hook="", look=None, width=270, height=480, subs_ypos=0.72, hook_ypos=0.2):
+                  hook="", look=None, width=270, height=480, subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0,
+                  text_size=1.0):
     """Šablono / titrų stiliaus peržiūra ant kadro: kabliukas (jei hook) ir titrų pavyzdys (jei look)
     taip, kaip atrodys video ~1 s (animacijos jau pasibaigusios, paryškintas antras žodis)."""
     tmp = tempfile.mkdtemp()
@@ -179,14 +188,14 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
             a = os.path.join(tmp, "hook.ass")
             with open(a, "w", encoding="utf-8") as f:
                 f.write(build_overlay_ass(width, height, 10, hook, 10, accent=accent, template=template,
-                                          hook_ypos=hook_ypos))
+                                          hook_ypos=hook_ypos, size=text_size))
             post.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
         if look:
             hl = _ass_color(ACCENTS.get(accent, ACCENTS["Auksas"])[0])[4:]
             a = os.path.join(tmp, "subs.ass")
             with open(a, "w", encoding="utf-8") as f:
                 f.write(video_editor.build_ass(SAMPLE_WORDS, width, height, ypos=subs_ypos, highlight=hl,
-                                               look=look))
+                                               look=look, size=subs_size))
             post.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
         pre = [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}", "setsar=1"]
         shine = "Aukso blizgesys" in (effects or ())
@@ -196,15 +205,15 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
                 a = os.path.join(tmp, "subs_mask.ass")
                 with open(a, "w", encoding="utf-8") as f:
                     f.write(video_editor.build_ass(SAMPLE_WORDS, width, height, ypos=subs_ypos, look=look,
-                                                   mask=True))
+                                                   mask=True, size=subs_size))
                 masks.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
             if hook.strip():
-                masks.append(_cover_mask(tmp, width, height, hook, accent, template, hook_ypos))
+                masks.append(_cover_mask(tmp, width, height, hook, accent, template, hook_ypos, text_size))
             g = ";".join([look_graph("[0:v]", "[base]", color, effects, width, height, still=True, pre=pre,
                                      post=post)]
                          + gradient_chains("[base]", "[gl]", width, height, 10, 1.3, accent, masks, tmp, template,
                                            hook_ypos,
-                                           shine=shine, still=True)
+                                           shine=shine, still=True, size=text_size)
                          + ["[gl]select='gte(t,1.0)'[sel]"])
         else:
             g = look_graph("[0:v]", "[sel]", color, effects, width, height, still=True, pre=pre,
@@ -305,31 +314,34 @@ def _rule(cx, y, length, thick, color, start_ms=0):
             f"m 0 0 l {length} 0 l {length} {thick} l 0 {thick}{{\\p0}}")
 
 
-def _overlay_layout(width, height, template, hook_ypos=0.2):
-    """Kabliuko ir CTA išdėstymas (bendras tekstui, kaukei ir gradientui)."""
+def _overlay_layout(width, height, template, hook_ypos=0.2, size=1.0):
+    """Kabliuko ir CTA išdėstymas (bendras tekstui, kaukei ir gradientui). Dydžiai – nuo trumpesnės kraštinės,
+    kad tiktų ir horizontaliam (YouTube) video; size – naudotojo mastelis."""
     kind = TEMPLATES.get(template, TEMPLATES["Prabangus auksas"])["kind"]
+    ref = min(width, height * 0.75) * size
     if kind == "box":
-        hsize, csize = round(width * 0.074), round(width * 0.07)
+        hsize, csize = round(ref * 0.074), round(ref * 0.07)
     elif kind == "script":
-        hsize, csize = round(width * 0.15), round(width * 0.12)
+        hsize, csize = round(ref * 0.15), round(ref * 0.12)
     else:
-        hsize, csize = round(width * 0.088), round(width * 0.075)
+        hsize, csize = round(ref * 0.088), round(ref * 0.075)
     hook_y = round(height * hook_ypos) + (0 if kind == "box" else round(hsize * 0.9))
     cta_y = round(height * 0.44)
     return kind, hsize, csize, hook_y, cta_y
 
 
 def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
-                      handle="", accent="Auksas", hook_ypos=0.2, template="Prabangus auksas", mask=False):
+                      handle="", accent="Auksas", hook_ypos=0.2, template="Prabangus auksas", mask=False, size=1.0):
     """Kabliukas pradžioje, kvietimas veikti (CTA) pabaigoje ir @vardas viršuje.
     Šablonas „elegant“ – serifinis šriftas su plona linija ir švelniu ryškėjimu, „script“ – ranka rašytas
     kaligrafinis šriftas, „box“ – didelės raidės spalvotoje dėžutėje, kuri „iššoka“.
     mask=True – kaukė gradientui: balta tik ta dalis, kuri turi būti metalinė (be kontūrų ir šešėlių)."""
-    kind, hsize, csize, hook_y, cta_y = _overlay_layout(width, height, template, hook_ypos)
+    kind, hsize, csize, hook_y, cta_y = _overlay_layout(width, height, template, hook_ypos, size)
     bg, fg = ACCENTS.get(accent, ACCENTS["Auksas"])
     acc = "&H00FFFFFF" if mask else _ass_color(bg)
     margin = round(width * 0.09)
-    nsize = round(width * 0.03)
+    ref = min(width, height * 0.75)
+    nsize = round(ref * 0.03)
     cx = width // 2
     hook, cta = hook.strip(), cta.strip()
     handle = "" if mask else handle.strip()
@@ -381,7 +393,7 @@ def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="
                 f"\\t(0,700,\\blur0)\\t(0,{round(end * 1000)},\\fscx100\\fscy100)}}" + text(hook, False))
             lines.append(f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(end)},Hook,,0,0,0,,{{\\fad(0,350)}}"
                          + _rule(cx, hook_y + round(hsize * (0.3 if kind == "script" else 0.45)),
-                                 round(width * 0.22), max(2, width // 400), acc, 200))
+                                 round(ref * 0.22 * size), max(2, round(ref) // 400), acc, 200))
     if cta and duration > cta_duration + 1:
         a = duration - cta_duration
         if kind == "box":
@@ -395,7 +407,7 @@ def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="
                 f"{{\\an2\\pos({cx},{cta_y})\\fad(500,0)\\blur6\\t(0,600,\\blur0)}}" + text(cta, False))
             lines.append(f"Dialogue: 1,{_ass_time(a + 0.2)},{_ass_time(duration + 1)},Cta,,0,0,0,,"
                          + _rule(cx, cta_y + round(csize * (0.3 if kind == "script" else 0.45)),
-                                 round(width * 0.16), max(2, width // 400), acc, 0))
+                                 round(ref * 0.16 * size), max(2, round(ref) // 400), acc, 0))
     if handle:
         label = handle.upper() if kind != "box" else handle
         lines.append(f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration + 1)},Handle,,0,0,0,,"
@@ -498,11 +510,12 @@ def frame_image(path, width, height, accent="Aukso gradientas"):
         d = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
         return np.clip(thick / 2 + 0.5 - np.abs(d), 0, 1)
 
-    m = width * 0.035
-    alpha = np.maximum(alpha, rounded(m, width * 0.03, max(2.0, width * 0.0042)))
-    alpha = np.maximum(alpha, rounded(m + width * 0.014, width * 0.02, max(1.0, width * 0.0018)) * 0.9)
+    u = min(width, height)  # vienodi atstumai ir horizontaliame, ir vertikaliame kadre
+    m = u * 0.035
+    alpha = np.maximum(alpha, rounded(m, u * 0.03, max(2.0, u * 0.0042)))
+    alpha = np.maximum(alpha, rounded(m + u * 0.014, u * 0.02, max(1.0, u * 0.0018)) * 0.9)
     # deimantėliai viršuje ir apačioje (linija aplink juos „pertraukiama“)
-    sz = width * 0.016
+    sz = u * 0.016
     for cy in (m, height - m):
         dd = np.abs(x - width / 2) + np.abs(y - cy)
         alpha = np.where(dd < sz * 1.9, 0, alpha)
@@ -537,7 +550,7 @@ def dust_chains(inp, out, width, height, fps, tmp, still=False):
             f"{inp}[dust]overlay=shortest=1:format=auto{out}"]
 
 
-def gradient_image(path, width, height, accent, template="Prabangus auksas", hook_ypos=0.2):
+def gradient_image(path, width, height, accent, template="Prabangus auksas", hook_ypos=0.2, size=1.0):
     """Gradiento paveikslėlis (PPM). Kabliuko ir CTA srityse – metalinės juostos, sutapdintos su teksto
     eilutėmis (šviesus viršus, tamsesnė vidurio linija, blizgi apačia); likusiame kadre (titrams) – įstrižas
     blizgesys."""
@@ -545,7 +558,7 @@ def gradient_image(path, width, height, accent, template="Prabangus auksas", hoo
     stops = grad_stops(accent)
     pos = np.array([p for p, _ in stops])
     cols = np.array([_hex(c) for _, c in stops], dtype=float)
-    kind, hsize, csize, hook_y, cta_y = _overlay_layout(width, height, template, hook_ypos)
+    kind, hsize, csize, hook_y, cta_y = _overlay_layout(width, height, template, hook_ypos, size)
     # Piešiama per pusę mažesne raiška (gradientas švelnus) – ffmpeg padidina; taip mažiau atminties.
     full_w, full_h = width, height
     k = 2 if width >= 720 else 1
@@ -584,11 +597,11 @@ def gradient_image(path, width, height, accent, template="Prabangus auksas", hoo
 
 
 def gradient_chains(base, out, width, height, fps, duration, accent, masks, tmp, template="Prabangus auksas",
-                    hook_ypos=0.2, mask_pre=(), name="g", shine=False, still=False):
+                    hook_ypos=0.2, mask_pre=(), name="g", shine=False, still=False, size=1.0):
     """Filtrų grandinės, kurios „įlieja“ gradientą į tekstą: masks – ass filtrai, piešiantys baltą kaukę
     ant juodo fono (mask_pre – filtrai prieš juos, pvz. laiko poslinkis ar priartėjimas).
     shine – „Aukso blizgesys“: per tekstą kas 2,6 s perbėga šviesos ruožas (still – sustabdytas viduryje)."""
-    grad = gradient_image(os.path.join(tmp, f"{name}.ppm"), width, height, accent, template, hook_ypos)
+    grad = gradient_image(os.path.join(tmp, f"{name}.ppm"), width, height, accent, template, hook_ypos, size)
     mask_chain = ",".join(list(mask_pre) + list(masks))
     chains = [
         f"color=c=black:s={width}x{height}:r={fps}:d={duration:.3f},format=yuv420p,{mask_chain},format=gbrp[{name}m]",
@@ -622,7 +635,7 @@ def _run(cmd, total, progress, what):
 def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5, handle="",
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
-           subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2):
+           subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     Gradiento akcentui (GRADIENTS) metalas „įliejamas“ į kabliuką, CTA ir paryškintą titrų žodį
     (subs_words – sumontuoto video titrų žodžiai, subs_look – jų išvaizda)."""
@@ -639,7 +652,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         ass = os.path.join(tmp, "reels.ass")
         with open(ass, "w", encoding="utf-8") as f:
             f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, handle, accent,
-                                      hook_ypos=hook_ypos, template=template))
+                                      hook_ypos=hook_ypos, template=template, size=text_size))
 
         pre = [f"setpts=PTS/{speed:.4f}"] if abs(speed - 1) > 0.001 else []
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
@@ -652,17 +665,18 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 sw = [(w, a0 / speed, b0 / speed) for w, a0, b0 in subs_words]
                 sm = os.path.join(tmp, "subs_mask.ass")
                 with open(sm, "w", encoding="utf-8") as f:
-                    f.write(video_editor.build_ass(sw, W, H, ypos=subs_ypos, look=subs_look, mask=True))
+                    f.write(video_editor.build_ass(sw, W, H, ypos=subs_ypos, look=subs_look, mask=True,
+                                                   size=subs_size))
                 masks.append(f"ass=filename='{_filter_path(sm)}':fontsdir='{_filter_path(FONT_DIR)}'")
                 if "Lėtas priartėjimas" in (effects or ()):  # titrai sumontuoti anksčiau – priartėja kartu su vaizdu
                     masks += zoom_filters(W, H, duration)
             om = os.path.join(tmp, "overlay_mask.ass")
             with open(om, "w", encoding="utf-8") as f:
                 f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, "", accent,
-                                          hook_ypos=hook_ypos, template=template, mask=True))
+                                          hook_ypos=hook_ypos, template=template, mask=True, size=text_size))
             masks.append(f"ass=filename='{_filter_path(om)}':fontsdir='{_filter_path(FONT_DIR)}'")
             graph += gradient_chains("[base]", "[gold]", W, H, fps, duration + 1, accent, masks, tmp, template,
-                                     hook_ypos=hook_ypos, shine=shine)
+                                     hook_ypos=hook_ypos, shine=shine, size=text_size)
             vout = "[gold]"
         if "Auksinės dulkės" in (effects or ()):
             graph += dust_chains(vout, "[dusty]", W, H, fps, tmp)
@@ -726,17 +740,17 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
     return {"duration": duration, "width": W, "height": H, "trimmed": trimmed}
 
 
-def _cover_mask(tmp, width, height, hook, accent, template, ypos=0.42):
+def _cover_mask(tmp, width, height, hook, accent, template, ypos=0.42, size=1.0):
     p = os.path.join(tmp, "cover_mask.ass")
     with open(p, "w", encoding="utf-8") as f:
         f.write(build_overlay_ass(width, height, 10, hook, 10, accent=accent, hook_ypos=ypos, template=template,
-                                  mask=True))
+                                  mask=True, size=size))
     return f"ass=filename='{_filter_path(p)}':fontsdir='{_filter_path(FONT_DIR)}'"
 
 
 def make_cover(path, out_path, at=0.5, hook="", accent="Auksas", template="Prabangus auksas",
-               handle="", width=1080, height=1920, color=None, effects=()):
-    """Viršelis (JPG 1080×1920): kadras iš video (arba nuotrauka) su filtru, efektais ir kabliuku per vidurį."""
+               handle="", width=1080, height=1920, color=None, effects=(), text_size=1.0):
+    """Viršelis (JPG, numatytai 1080×1920): kadras iš video (arba nuotrauka) su filtru, efektais ir kabliuku per vidurį."""
     if color is None:
         color = TEMPLATES.get(template, {}).get("color", "Natūralios")
     tmp = tempfile.mkdtemp()
@@ -749,15 +763,15 @@ def make_cover(path, out_path, at=0.5, hook="", accent="Auksas", template="Praba
             ass = os.path.join(tmp, "cover.ass")
             with open(ass, "w", encoding="utf-8") as f:
                 f.write(build_overlay_ass(width, height, 10, hook, 10, handle=handle, accent=accent,
-                                          hook_ypos=0.42, template=template))
+                                          hook_ypos=0.42, template=template, size=text_size))
             post.append(f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'")
         fx = [e for e in effects if e != "Šviesos blyksnis"]
         shine = "Aukso blizgesys" in fx
         if (accent in GRADIENTS or shine) and post and hook.strip():
             g = ";".join([look_graph("[0:v]", "[base]", color, fx, width, height, still=True, pre=pre, post=post)]
                          + gradient_chains("[base]", "[cv]", width, height, 25, 10, accent, [_cover_mask(
-                             tmp, width, height, hook, accent, template)], tmp, template, 0.42,
-                             mask_pre=["setpts=PTS+5/TB"], shine=shine, still=True))
+                             tmp, width, height, hook, accent, template, 0.42, text_size)], tmp, template, 0.42,
+                             mask_pre=["setpts=PTS+5/TB"], shine=shine, still=True, size=text_size))
         else:
             g = look_graph("[0:v]", "[cv]", color, fx, width, height, still=True, pre=pre, post=post)
         g += ";" + ";".join(still_extras("[cv]", "[out]", width, height, fx, tmp, accent))

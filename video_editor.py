@@ -8,6 +8,7 @@ paleisti ir iš komandinės eilutės:
   python3 video_editor.py IN.mp4 OUT.mp4 --format 9:16 --subtitles [--text tekstas.txt]
 """
 import json
+import math
 import os
 import re
 import subprocess
@@ -38,7 +39,8 @@ def limit_threads(cmd):
     return out + ["-threads", t, cmd[-1]]
 
 
-FORMATS = {"original": None, "9:16": 9 / 16, "1:1": 1.0, "16:9": 16 / 9}
+STANDARD_SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080), "4:5": (1080, 1350)}
+FORMATS = {"original": None, "9:16": 9 / 16, "1:1": 1.0, "16:9": 16 / 9, "4:5": 4 / 5}
 
 
 # ---------- Analizė ----------
@@ -337,7 +339,7 @@ SUBTITLE_LOOKS = {
 }
 
 
-def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern", mask=False):
+def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern", mask=False, size=1.0):
     """Animuoti titrai. look: "modern" – Montserrat Black, DIDŽIOSIOS, balta su juodu kontūru, frazė „iššoka“;
     "elegant" – Playfair Display, šampano spalva, švelniai išryškėja; "box" – didelės raidės permatomoje juodoje
     dėžutėje; "script" – ranka rašytas šriftas; "minimal" – ramus, mažesnis šriftas žemiau. Sakomas žodis
@@ -345,7 +347,9 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
     L = SUBTITLE_LOOKS.get(look, SUBTITLE_LOOKS["modern"])
     if L["ypos"] and ypos == 0.67:
         ypos = L["ypos"]
-    fsize = round(width * L["size"])
+    # Dydis – nuo trumpesnės kraštinės (horizontaliame video tekstas nebūna milžiniškas); size – naudotojo mastelis.
+    ref = min(width, height * 0.75)
+    fsize = max(12, round(ref * L["size"] * size))
     outline = max(1 if not L["box"] else 4, round(fsize * L["outline"]))
     shadow = round(outline * L["shadow"]) if not L["box"] else 0
     margin = round(width * 0.065)
@@ -686,8 +690,8 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
             inf.update(duration=float(image_duration), has_audio=False)
     ratio = FORMATS.get(fmt)
     sizes = [_out_size(i["width"], i["height"], ratio) for i in infos]
-    if ratio:
-        W, H = max(sizes, key=lambda wh: wh[0] * wh[1])
+    if ratio:  # standartinis platformų dydis (pvz. YouTube 1920×1080, Reels 1080×1920)
+        W, H = STANDARD_SIZES.get(fmt) or max(sizes, key=lambda wh: wh[0] * wh[1])
     else:  # kadro forma – pagal pirmą įrašą, raiška – pagal didžiausią (iki 1920)
         W, H = sizes[0]
         k = min(1920, max(max(wh) for wh in sizes)) / max(W, H)
@@ -718,12 +722,23 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
         a0 = spans[k][0] if spans[k] else total
         spans[k] = (a0, total + d)
         total += d
-        if ratio:  # fiksuotas formatas – užpildom kadrą (kraštai apkarpomi)
-            fit = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
-        else:  # originalus – kitokios orientacijos įrašai įtalpinami su juodais kraštais
-            fit = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black"
-        parts.append(f"[{i}:v]{fit},setsar=1,fps={fps},format=yuv420p,trim=duration={d:.3f},"
-                     f"setpts=PTS-STARTPTS[v{i}]")
+        src_ar = infos[k]["width"] / max(1, infos[k]["height"])
+        tail = f"setsar=1,fps={fps},format=yuv420p,trim=duration={d:.3f},setpts=PTS-STARTPTS[v{i}]"
+        if ratio and abs(math.log(src_ar / ratio)) > math.log(1.3):
+            # Labai kitokia orientacija (pvz. vertikalus video YouTube'ui): vaizdas per vidurį, o fone –
+            # tas pats vaizdas, išplėstas ir sulietas (užuot nukirpus galvą ir kojas).
+            bw, bh = max(2, W // 8) // 2 * 2, max(2, H // 8) // 2 * 2
+            parts += [f"[{i}:v]split[s{i}a][s{i}b]",
+                      f"[s{i}a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},gblur=sigma=4,"
+                      f"eq=brightness=-0.06:saturation=1.1,scale={W}:{H}[bg{i}]",
+                      f"[s{i}b]scale={W}:{H}:force_original_aspect_ratio=decrease[fg{i}]",
+                      f"[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,{tail}"]
+        else:
+            if ratio:  # fiksuotas formatas – užpildom kadrą (kraštai apkarpomi)
+                fit = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
+            else:  # originalus – kitokios orientacijos įrašai įtalpinami su juodais kraštais
+                fit = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black"
+            parts.append(f"[{i}:v]{fit},{tail}")
         if p not in audio_ok:
             audio_ok[p] = infos[k]["has_audio"] and len(_frame_levels(p)) > 0
         if audio_ok[p]:
@@ -835,7 +850,7 @@ def apply_line_edits(words, lines):
 
 def render_edit(path, out_path, analysis, words=None, fmt="original", loudnorm=True, fades=True,
                 denoise=True, subtitle_style="modern", ypos=0.67, highlight="0AD6FF", status=None,
-                progress=None, max_side=1920, preset="veryfast", crf=20, subtitle_look="modern"):
+                progress=None, max_side=1920, preset="veryfast", crf=20, subtitle_look="modern", subtitle_size=1.0):
     """2-as žingsnis: sumontuoja video pagal analyze() rezultatą su (galbūt pataisytais) titrais.
     max_side / preset / crf – mažesnė raiška ir greitesnis kodavimas greitai peržiūrai."""
     say = status or (lambda msg: None)
@@ -847,7 +862,7 @@ def render_edit(path, out_path, analysis, words=None, fmt="original", loudnorm=T
         w, h, bh = frame_size(info["width"], info["height"], fmt, training, max_side)
         with tempfile.NamedTemporaryFile("w", suffix=".ass", delete=False, encoding="utf-8") as f:
             f.write(build_ass_training(words, w, h, bh) if training
-                    else build_ass(words, w, h, ypos, highlight, subtitle_look))
+                    else build_ass(words, w, h, ypos, highlight, subtitle_look, size=subtitle_size))
             ass_file = f.name
 
     say("Montuoju video…")

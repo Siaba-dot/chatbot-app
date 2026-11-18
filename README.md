@@ -21,6 +21,13 @@ Reikalinga `ffmpeg` (Streamlit Cloud ją įdiegia iš `packages.txt`).
 Galima naudoti ir be naršyklės: `python3 video_editor.py IN.mp4 OUT.mp4 --format 9:16 --subtitles [--text tekstas.txt]`.
 
 ## ✨ Reels studija
+**Išdėstymas:** viršuje – peržiūra ir mygtukai (👁 Viršelis · ▶ Peržiūra · ✨ Kurti) bei rezultatas; žemiau – medžiaga ir
+titrų taisymas; visi nustatymai (formatas, stilius, tekstai, garsas, tempas) – šoniniame skydelyje.
+
+**Formatai:** 9:16 (Reels, TikTok, Shorts – 1080×1920), 16:9 (YouTube – 1920×1080), 1:1 ir 4:5 (Instagram įrašai).
+Kitokios orientacijos vaizdas dedamas per vidurį su sulietu fonu; teksto dydžiai pritaikomi kadrui.
+**Titrų ir kabliuko dydis** reguliuojamas slankikliais (60–150 %).
+
 Prabangi (tamsi su auksu) studija Instagram Reels / TikTok / Shorts vaizdo įrašams – šoniniame meniu **Reels studija**.
 Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, titrai), plius:
 - **šablonai** (langeliai su peržiūra ant jūsų kadro): „Prabangus auksas“, „Ranka rašytas“ (Great Vibes kaligrafija),
