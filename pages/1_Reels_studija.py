@@ -21,6 +21,9 @@ import reels_studio
 import video_editor
 
 P = "reels_"  # šio puslapio būsenos raktų priešdėlis
+# Langelių tinklelis su skirtukais (šablonai, filtrai, efektai, titrai, perėjimai) – components/tiles/index.html
+tile_grid = components.declare_component(
+    "tile_grid", path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "components", "tiles"))
 # Muzikos takelis: muzikos blokai pasirinktose video vietose (components/musictrack/index.html)
 music_track = components.declare_component(
     "music_track", path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "components",
@@ -182,6 +185,39 @@ def transition_tile(fa, fb, name):
         out = reels_studio.transition_preview(a, b, os.path.join(tmp, "x.jpg"), name)
         with open(out, "rb") as f:
             return f.read()
+
+
+@st.cache_data(max_entries=800, show_spinner=False)
+def square(img, cy=0.5, frac=1.0, size=144):
+    """Kvadratinė miniatiūra langeliui (data URI): iškerpama aplink aukštį cy (0–1), frac – kvadrato dalis pločio."""
+    import base64
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(img)).convert("RGB")
+    w, h = im.size
+    side = max(8, min(h, round(min(w, h) * frac)))
+    top = round(min(max(cy * h - side / 2, 0), h - side))
+    left = (w - side) // 2
+    im = im.crop((left, top, left + side, top + side)).resize((size, size), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=78)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def tiles(key, items, selected, tabs=None, size=64):
+    """Langelių tinklelis. items: {id: {label, img, sig, group | multi, help}}. Grąžina nieko – paspaudimą
+    apdoroja tile_click() kitame perpiešime."""
+    ver = hash(tuple(it.get("img", "")[-64:] for it in items.values()))
+    tile_grid(items=items, selected=list(selected), tabs=tabs or [], size=size, ver=ver, key=key, default=None)
+
+
+def tile_click(key):
+    """Naujas langelio paspaudimas (id) arba None. Skaitoma PRIEŠ piešiant – kad pasirinkimas būtų iškart."""
+    v = st.session_state.get(key)
+    if v and v.get("t") != st.session_state.get(key + "_t"):
+        st.session_state[key + "_t"] = v["t"]
+        return v.get("pick")
+    return None
 
 
 SPEEDS = [1.0, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -472,6 +508,9 @@ with st.container(border=True):
     step("I", "Medžiaga", "video, nuotraukos arba filmavimas")
     clips, image_duration = clips_ui.clip_picker(P, trim=True)
     st.session_state.setdefault(P + "transition", "Be perėjimo")
+    pick = tile_click(P + "x_tiles")
+    if pick and pick[2:] in video_editor.TRANSITIONS:
+        pick_transition(pick[2:])
     transition = st.session_state[P + "transition"]
     if len(clips) >= 2:
         st.markdown("**Perėjimai tarp įrašų** · <small>✦ – firminiai studijos</small>", unsafe_allow_html=True)
@@ -480,20 +519,29 @@ with st.container(border=True):
             fb = base_frame(clips[1]["path"], 0.0 if clips[1].get("image") else min(1.0, clips[1]["duration"] / 2))
         except Exception:
             fa = fb = None
-        grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "xgrid")
-        for i, name in enumerate(video_editor.TRANSITIONS):
-            sel = name == transition
-            tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_x{i}")
-            if fa and fb:
-                tile.image(transition_tile(fa, fb, name), width="stretch")
-            mark = "✦ " if name in reels_studio.SIGNATURE_TRANSITIONS else ""
-            tile.button(mark + name, key=f"{P}xbtn{i}", type="primary" if sel else "secondary", width="stretch",
-                        on_click=pick_transition, args=(name,))
+        xitems = {}
+        for name in video_editor.TRANSITIONS:
+            xitems["x:" + name] = {"label": name, "group": "x", "sig": name in reels_studio.SIGNATURE_TRANSITIONS,
+                                   "img": square(transition_tile(fa, fb, name)) if fa and fb else ""}
+        tiles(P + "x_tiles", xitems, ["x:" + transition], size=64)
 
 states = {c["audio"] for c in clips}
 # Įgarsinimas (atskiras balso įrašas) – titrams ir garsui naudojamas jis
 has_vo = st.session_state.get(P + "vo_file") is not None
 speech = "speech" in states or has_vo
+
+pick = tile_click(P + "style_tiles")  # Stiliaus langelių paspaudimas
+if pick:
+    kind, name = pick.split(":", 1)
+    if kind == "t" and name in reels_studio.TEMPLATES:
+        pick_template(name)
+    elif kind == "c" and name in reels_studio.COLOR_FILTERS:
+        pick_color(name)
+    elif kind == "e" and name in reels_studio.EFFECTS:
+        toggle_effect(name)
+pick = tile_click(P + "look_tiles")
+if pick and pick[2:] in video_editor.SUBTITLE_LOOKS:
+    pick_look(pick[2:])
 
 template = st.session_state[P + "template"]
 accent = st.session_state[P + "accent"]
@@ -518,17 +566,35 @@ sb.selectbox("Formatas", list(reels_studio.STUDIO_FORMATS), key=P + "format",
 # ---------- II. Stilius ----------
 with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True):
     sample_hook = st.session_state.get(P + "hook") or "Jūsų antraštė čia"
-    st.markdown("**Šablonas** · <small>kabliuko ir kvietimo stilius</small>"
-                + ("" if clips else " · <small>įkėlus video matysite savo kadrą</small>"), unsafe_allow_html=True)
-    grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "tgrid")
-    for i, (name, t) in enumerate(reels_studio.TEMPLATES.items()):
-        sel = name == template
-        tile = grid.container(width=124, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_t{i}")
-        tile.image(style_tile(base, name, t["accent"], t["color"], sample_hook, None, hook_y=hook_y,
-                              text_size=text_size), width="stretch")
-        tile.button(name, key=f"{P}tbtn{i}", type="primary" if sel else "secondary", width="stretch",
-                    on_click=pick_template, args=(name,))
-
+    color = st.session_state[P + "color"]
+    effects = st.session_state[P + "effects"]
+    items = {}
+    for name, t in reels_studio.TEMPLATES.items():
+        img = style_tile(base, name, t["accent"], t["color"], sample_hook, None, hook_y=hook_y, text_size=text_size)
+        items["t:" + name] = {"label": name, "img": square(img, hook_y, 1.0), "group": "t",
+                              "help": f"Šablonas: {name}"}
+    for name in reels_studio.COLOR_FILTERS:
+        items["c:" + name] = {"label": name, "img": square(thumb(base, name, ())), "group": "c",
+                              "sig": name in reels_studio.SIGNATURE_FILTERS,
+                              "help": "Firminis studijos filtras" if name in reels_studio.SIGNATURE_FILTERS else name}
+    for name, desc in reels_studio.EFFECTS.items():
+        if name in reels_studio.TEXT_EFFECTS:
+            img = square(style_tile(base, template, accent, color, sample_hook, None, (name,), hook_y=hook_y),
+                         hook_y, 1.0)
+        else:
+            img = square(thumb(base, color, (name,), accent))
+        items["e:" + name] = {"label": name, "img": img, "multi": True, "help": desc,
+                              "sig": name in reels_studio.SIGNATURE_EFFECTS}
+    signature = ["c:" + n for n in reels_studio.SIGNATURE_FILTERS] + ["e:" + n for n in reels_studio.SIGNATURE_EFFECTS]
+    tiles(P + "style_tiles", items,
+          ["t:" + template, "c:" + color] + ["e:" + e for e in effects],
+          tabs=[{"name": "Šablonai", "items": ["t:" + n for n in reels_studio.TEMPLATES]},
+                {"name": "Filtrai", "items": ["c:" + n for n in reels_studio.COLOR_FILTERS]},
+                {"name": "Efektai", "items": ["e:" + n for n in reels_studio.EFFECTS], "multi": True},
+                {"name": "✦ Firminiai", "items": signature}])
+    st.caption(f"Šablonas: **{template}** · filtras: **{color}**"
+               + (" · efektai: " + ", ".join(effects) if effects else " · efektų galima rinktis kelis")
+               + ("" if clips else " · įkėlus video matysite savo kadrą"))
     accent_opts = list(reels_studio.ACCENTS)
     for extra in (st.session_state.get(P + "accent"), (st.session_state.get(P + "brand_color") or "").upper()):
         if extra and extra.startswith("#") and extra not in accent_opts:
@@ -539,32 +605,6 @@ with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True)
                       "Savo spalvą nustatysite skiltyje „Prekės ženklas“.")
     accent = st.session_state[P + "accent"]
 
-    st.markdown("**Filtrai** · <small>✦ – firminiai studijos</small>", unsafe_allow_html=True)
-    color = st.session_state[P + "color"]
-    grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "fgrid")
-    for i, name in enumerate(reels_studio.COLOR_FILTERS):
-        sel = name == color
-        tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_f{i}")
-        tile.image(thumb(base, name, ()), width="stretch")
-        sig = name in reels_studio.SIGNATURE_FILTERS
-        tile.button(("✦ " if sig else "") + name, key=f"{P}fbtn{i}", type="primary" if sel else "secondary",
-                    width="stretch", on_click=pick_color, args=(name,),
-                    help="Firminis studijos filtras" if sig else None)
-
-    effects = st.session_state[P + "effects"]
-    st.markdown("**Efektai** · <small>galima rinktis kelis</small>", unsafe_allow_html=True)
-    grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "egrid")
-    for i, (name, desc) in enumerate(reels_studio.EFFECTS.items()):
-        sel = name in effects
-        tile = grid.container(width=96, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_e{i}")
-        img = (style_tile(base, template, accent, color, sample_hook, None, (name,), hook_y=hook_y)
-               if name in reels_studio.TEXT_EFFECTS else thumb(base, color, (name,), accent))
-        tile.image(img, width="stretch")
-        mark = "✓ " if sel else "✦ " if name in reels_studio.SIGNATURE_EFFECTS else ""
-        tile.button(mark + name, key=f"{P}ebtn{i}", type="primary" if sel else "secondary",
-                    width="stretch", help=desc, on_click=toggle_effect, args=(name,))
-    if effects:
-        st.caption("Pasirinkta: " + " · ".join(effects))
     if "Gintaro akimirka" in effects:
         st.session_state.setdefault(P + "moment_at", 3.0)
         st.slider("✦ Gintaro akimirka – kurioje sekundėje nušvinta", 0.5, 60.0, step=0.1, key=P + "moment_at",
@@ -608,14 +648,11 @@ with sb.expander("✍️  Tekstai ir titrai"):
     look = st.session_state[P + "look"]
     if subtitles:
         st.markdown("**Titrų stilius**", unsafe_allow_html=True)
-        grid = st.container(horizontal=True, wrap=True, gap="small", key=P + "lgrid")
-        for i, (key, L) in enumerate(video_editor.SUBTITLE_LOOKS.items()):
-            sel = key == look
-            tile = grid.container(width=110, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_l{i}")
-            tile.image(style_tile(base, template, accent, color, "", key, subs_y=subs_y, subs_size=subs_size),
-                       width="stretch")
-            tile.button(L["title"], key=f"{P}lbtn{i}", type="primary" if sel else "secondary", width="stretch",
-                        on_click=pick_look, args=(key,))
+        litems = {}
+        for key, L in video_editor.SUBTITLE_LOOKS.items():
+            img = style_tile(base, template, accent, color, "", key, subs_y=0.5, subs_size=1.5)  # tikras pavyzdys
+            litems["l:" + key] = {"label": L["title"], "img": square(img, 0.5, 0.85), "group": "l"}
+        tiles(P + "look_tiles", litems, ["l:" + look], size=64)
         for k in ("key_words", "punch"):
             st.session_state.setdefault(P + k, True)
         key_words = st.toggle("✦ Svarbiausi žodžiai – didesni ir auksiniai", key=P + "key_words",

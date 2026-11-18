@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --amber: #E39B2E; --honey: #FFD58A; --ink: #061226; --text: #F3E7D3; --muted: #9FB0C8; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--text); background: transparent;
+         user-select: none; -webkit-user-select: none; }
+  .tabs { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid rgba(180,195,216,.18);
+          margin-bottom: 10px; padding: 0 2px; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; padding: 6px 0 8px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer;
+         border-bottom: 2px solid transparent; white-space: nowrap; }
+  .tab.on { color: var(--text); border-bottom-color: var(--amber); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--size, 64px), 1fr)); gap: 10px 8px;
+          padding: 2px; }
+  .tile { display: flex; flex-direction: column; align-items: center; cursor: pointer; min-width: 0; }
+  .img { position: relative; width: 100%; aspect-ratio: 1; border-radius: 14px; overflow: hidden; background: #0E2242;
+         border: 2px solid transparent; box-shadow: 0 2px 8px rgba(0,0,0,.35); transition: transform .12s; }
+  .img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile:active .img { transform: scale(.95); }
+  .tile.on .img { border-color: var(--honey); box-shadow: 0 0 0 2px var(--ink), 0 0 14px rgba(255,213,138,.55); }
+  .sig { position: absolute; top: 3px; left: 5px; font-size: 11px; color: var(--honey);
+         text-shadow: 0 0 4px rgba(0,0,0,.9); }
+  .tick { position: absolute; right: 4px; bottom: 4px; width: 17px; height: 17px; border-radius: 50%;
+          background: var(--honey); color: var(--ink); font-size: 11px; font-weight: 800; display: none;
+          align-items: center; justify-content: center; }
+  .multi .tile.on .tick { display: flex; }
+  .name { margin-top: 5px; font-size: 11px; line-height: 1.25; color: var(--muted); text-align: center; width: 100%;
+          overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+          word-break: break-word; hyphens: auto; min-height: 2.5em; }
+  .tile.on .name { color: var(--text); font-weight: 600; }
+  .empty { font-size: 13px; color: var(--muted); padding: 8px 2px; }
+</style>
+</head>
+<body>
+<div id="tabs" class="tabs"></div>
+<div id="grid" class="grid"></div>
+<script>
+const $ = id => document.getElementById(id);
+let A = {tabs: [], items: {}, selected: []}, tab = 0, lastKey = "";
+
+function send(type, extra) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, extra), "*"); }
+function resize() { send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 4}); }
+
+function render() {
+  const tabs = A.tabs || [];
+  if (tab >= tabs.length) tab = 0;
+  $("tabs").style.display = tabs.length > 1 ? "flex" : "none";
+  $("tabs").innerHTML = "";
+  tabs.forEach((t, i) => {
+    const d = document.createElement("div");
+    d.className = "tab" + (i === tab ? " on" : ""); d.textContent = t.name;
+    d.onclick = () => { tab = i; render(); };
+    $("tabs").appendChild(d);
+  });
+  const g = $("grid"); g.innerHTML = "";
+  g.style.setProperty("--size", (A.size || 64) + "px");
+  const ids = tabs.length ? tabs[tab].items : Object.keys(A.items);
+  document.body.classList.toggle("multi", !!(tabs.length ? tabs[tab].multi : A.multi));
+  if (!ids.length) g.innerHTML = '<div class="empty">Nėra</div>';
+  const sel = new Set(A.selected || []);
+  ids.forEach(id => {
+    const it = A.items[id]; if (!it) return;
+    const t = document.createElement("div");
+    t.className = "tile" + (sel.has(id) ? " on" : ""); t.title = it.help || it.label;
+    t.innerHTML = `<div class="img">${it.img ? `<img src="${it.img}" alt="">` : ""}` +
+                  `${it.sig ? '<span class="sig">✦</span>' : ""}<span class="tick">✓</span></div>` +
+                  `<div class="name"></div>`;
+    t.querySelector(".name").textContent = it.label;
+    t.onclick = () => {
+      // iškart parodom pasirinkimą (Python patvirtins kitu perpiešimu)
+      if (it.multi) { sel.has(id) ? sel.delete(id) : sel.add(id); }
+      else { (it.group ? Object.keys(A.items).filter(k => A.items[k].group === it.group) : []).forEach(k => sel.delete(k)); sel.add(id); }
+      A.selected = [...sel]; render();
+      send("streamlit:setComponentValue", {dataType: "json", value: {pick: id, t: Date.now()}});
+    };
+    g.appendChild(t);
+  });
+  resize();
+}
+
+window.addEventListener("message", e => {
+  if (!e.data || e.data.type !== "streamlit:render") return;
+  const a = e.data.args || {};
+  const key = JSON.stringify([Object.keys(a.items || {}), a.selected, (a.tabs || []).map(t => t.name), a.ver]);
+  if (key === lastKey) { resize(); return; }
+  lastKey = key; A = a; render();
+});
+new ResizeObserver(() => resize()).observe(document.body);
+send("streamlit:componentReady", {apiVersion: 1});
+</script>
+</body>
+</html>
