@@ -596,12 +596,9 @@ def is_image(path):
     return out == "image2" or out.endswith("_pipe")
 
 
-# Perėjimai tarp įrašų (ffmpeg xfade). "page" – lapo vertimas (savas perėjimas): įstrižas lenkimas eina nuo
-# dešiniojo apatinio kampo į kairę, už jo matosi šviesi lapo nugarėlė, ant kito kadro krenta šešėlis;
-# "tiles" – kvadratėliai.
+# Perėjimai tarp įrašų (ffmpeg xfade); "tiles" – savas perėjimas „Kvadratėliai“.
 TRANSITIONS = {
     "Be perėjimo": None,
-    "Lapo vertimas": "page",
     "Kvadratėliai": "tiles",
     "Švelnus išnykimas": "fade",
     "Per šviesą": "fadewhite",
@@ -610,15 +607,14 @@ TRANSITIONS = {
 }
 TRANSITION_DURATION = 0.8
 # Be st()/ld(): xfade skaičiuoja keliomis gijomis, o bendri kintamieji tada „susimaišo“.
-PAGE_EXPR = "if(lt((X+0.35*Y),((W*1.13+0.35*H)*P)-(0.13*W)),A,if(lt((X+0.35*Y),((W*1.13+0.35*H)*P)),A*0.2+255*0.8*(0.78+0.22*((X+0.35*Y)-((W*1.13+0.35*H)*P)+(0.13*W))/(0.13*W)),B*(1-0.55*exp(-((X+0.35*Y)-((W*1.13+0.35*H)*P))/(0.05*W)))))"
 # Kvadratėliai: kadras keičiasi mažais kvadratėliais atsitiktine tvarka (pseudoatsitiktinis kiekvieno kvadrato laikas).
 TILES_EXPR = "if(lt(((sin(floor(X/(W/18))*12.9898+floor(Y/(W/18))*78.233)*43758.5453)-floor((sin(floor(X/(W/18))*12.9898+floor(Y/(W/18))*78.233)*43758.5453))),(1-P)*1.08-0.04),B,A)"
 
 
 def xfade_filter(transition, duration, offset):
     kind = TRANSITIONS.get(transition, transition)
-    if kind in ("page", "tiles"):
-        expr = PAGE_EXPR if kind == "page" else TILES_EXPR
+    if kind == "tiles":
+        expr = TILES_EXPR
         return f"xfade=transition=custom:duration={duration:.3f}:offset={offset:.3f}:expr='{expr}'"
     return f"xfade=transition={kind}:duration={duration:.3f}:offset={offset:.3f}"
 
