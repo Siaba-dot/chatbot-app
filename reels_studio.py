@@ -686,7 +686,8 @@ def _run(cmd, total, progress, what, stall=12.0, hard=180.0):
 def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5, handle="",
            accent="Auksas", template="Prabangus auksas", music=None, music_volume=0.25, ducking=True, max_length=None, speed=1.0,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
-           subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0):
+           subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
+           music_blocks=None):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     Gradiento akcentui (GRADIENTS) metalas „įliejamas“ į kabliuką, CTA ir paryškintą titrų žodį
     (subs_words – sumontuoto video titrų žodžiai, subs_look – jų išvaizda)."""
@@ -755,10 +756,31 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             graph.append("[0:a:0]" + ",".join(a) + "[voice]")
             voice = "[voice]"
         aout = voice
-        if music:
+        blocks = [b for b in (music_blocks or []) if b["end"] - b["start"] >= 0.3 and b["start"] < duration]
+        if blocks:
+            # Muzikos takelis: kiekvienas blokas skamba tik savo vietoje (su švelniu įėjimu / išėjimu)
+            inputs = ["-i", path]
+            parts = []
+            for j, blk in enumerate(blocks):
+                inputs += ["-stream_loop", "-1", "-i", blk["path"]]
+                start = max(0.0, blk["start"])
+                length = max(0.3, min(blk["end"], duration) - start)
+                fi, fo = min(0.6, length / 3), min(0.9, length / 3)
+                vol = music_volume * blk.get("vol", 100) / 100
+                graph.append(f"[{j + 1}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                             f"atrim=duration={length:.3f},asetpts=PTS-STARTPTS,volume={vol:.3f},"
+                             f"afade=t=in:st=0:d={fi:.3f},afade=t=out:st={length - fo:.3f}:d={fo:.3f},"
+                             f"adelay=delays={round(start * 1000)}:all=1[mb{j}]")
+                parts.append(f"[mb{j}]")
+            mixed = "".join(parts) + (f"amix=inputs={len(parts)}:duration=longest:normalize=0," if len(parts) > 1
+                                      else "anull,")
+            graph.append(f"{mixed}apad=whole_dur={duration + 1:.3f},atrim=duration={duration + 1:.3f}[music]")
+            music = True
+        elif music:
             inputs = ["-i", path, "-stream_loop", "-1", "-i", music]
             graph.append(f"[1:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
                          f"volume={music_volume:.3f},afade=t=in:st=0:d=0.8,atrim=duration={duration + 1:.3f}[music]")
+        if music:
             if voice and ducking:
                 graph.append("[voice]asplit=2[v1][v2]")
                 graph.append("[music][v2]sidechaincompress=threshold=0.015:ratio=8:attack=30:release=500[duck]")

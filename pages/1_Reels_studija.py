@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # Kad puslapis veiktų ir paleistas kaip atskira programa (pagrindinis failas – šis puslapis)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,6 +17,10 @@ import reels_studio
 import video_editor
 
 P = "reels_"  # šio puslapio būsenos raktų priešdėlis
+# Muzikos takelis: muzikos blokai pasirinktose video vietose (components/musictrack/index.html)
+music_track = components.declare_component(
+    "music_track", path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "components",
+                                     "musictrack"))
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 st.set_page_config(page_title="Gintaro Reels studija", page_icon=os.path.join(ASSETS, "gintaras_icon.png"),
@@ -464,7 +469,10 @@ with sb.expander("🎵  Garsas ir muzika"):
         music_file = st.file_uploader("Jūsų muzika (MP3, M4A, WAV)", key=P + "music")
         st.caption("Instagram gali nutildyti video su autorių teisių saugoma muzika – "
                    "populiarią dainą geriau pridėti pačiame Instagram.")
-    has_music = music_choice in library or music_file is not None
+    if st.session_state.get(P + "mblocks") is not None:
+        st.caption("🎵 Muzika sudėliota **muzikos takelyje** (žemiau, pagrindiniame lange) – ten pasirinkite, "
+                   "kokia muzika kurioje vietoje.")
+    has_music = music_choice in library or music_file is not None or bool(st.session_state.get(P + "mblocks"))
     c1, c2 = st.columns(2)
     music_volume = c1.slider("Muzikos garsumas", 0, 100, 22, 1, format="%d%%", disabled=not has_music) / 100
     ducking = c2.toggle("Muzika patyli, kai kalbama", value=True, disabled=not has_music)
@@ -536,6 +544,29 @@ def prepare(say, progress):
     return st.session_state[P + "prep"]
 
 
+OWN_MUSIC = "📁 Jūsų muzika"
+
+
+def music_block_paths(tmp):
+    """Muzikos takelio blokai su failų keliais (None – takelis nenaudojamas, veikia įprasta muzika)."""
+    blocks = st.session_state.get(P + "mblocks")
+    if blocks is None:
+        return None
+    out = []
+    for b in blocks:
+        if b["name"] in library:
+            path = library[b["name"]]["path"]
+        elif b["name"] == OWN_MUSIC and music_file:
+            path = os.path.join(tmp, "own" + (os.path.splitext(music_file.name)[1] or ".mp3"))
+            if not os.path.exists(path):
+                with open(path, "wb") as f:
+                    f.write(music_file.getvalue())
+        else:
+            continue
+        out.append({"path": path, "start": float(b["start"]), "end": float(b["end"]), "vol": b.get("vol", 100)})
+    return out
+
+
 def music_path(tmp):
     if music_file:
         path = os.path.join(tmp, "music" + (os.path.splitext(music_file.name)[1] or ".mp3"))
@@ -555,11 +586,12 @@ def build(prep, words, tmp, out, quick, progress):
         progress=lambda p: progress(p * 0.6), max_side=640 if quick else 1920,
         preset="ultrafast" if quick else "veryfast", crf=30 if quick else 20)
     fin = reels_studio.finish(
-        edited, out, hook, hook_duration, cta, 2.5, handle, accent, template, music_path(tmp), music_volume,
+        edited, out, hook, hook_duration, cta, 2.5, handle, accent, template,
+        None if music_block_paths(tmp) is not None else music_path(tmp), music_volume,
         ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
         subs_words=prep["analysis"]["words"] if words is None else words, subs_look=look, subs_ypos=subs_y,
-        hook_ypos=hook_y, subs_size=subs_size, text_size=text_size)
+        hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp))
     return res, fin
 
 
@@ -607,6 +639,70 @@ if clips and subtitles:
             cut = a["info"]["duration"] - sum(y - x for x, y in a["keep"])
             st.caption(f"Medžiaga: {a['info']['duration']:.1f} s · iškirpta pauzių: {cut:.1f} s · "
                        f"kirpimų: {len(a['keep']) - 1}")
+
+# ---------- III. Muzikos takelis ----------
+@st.cache_data(max_entries=20, show_spinner=False)
+def edited_filmstrip(src, keep, speed, final_dur, n=12, height=160):
+    """Kadrų miniatiūros galutinio (iškirptų pauzių, pagreitinto) video laiko juostai."""
+    out = []
+    starts, acc = [], 0.0
+    for a_, b_ in keep:
+        starts.append(acc)
+        acc += b_ - a_
+    for i in range(n):
+        te = min(acc - 0.05, (i + 0.5) * final_dur / n * speed)  # laikas iškirptame video
+        k = max(j for j in range(len(keep)) if starts[j] <= te) if keep else 0
+        ts = keep[k][0] + (te - starts[k]) if keep else te
+        r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, ts):.2f}", "-i", src, "-frames:v", "1",
+                            "-vf", f"scale=-2:{height}", "-q:v", "6", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
+                           capture_output=True)
+        if r.stdout:
+            import base64
+            out.append("data:image/jpeg;base64," + base64.b64encode(r.stdout).decode())
+    return out
+
+
+if clips:
+    with st.container(border=True):
+        step("III", "Muzikos takelis", "kokia muzika – kurioje vietoje")
+        if not ready:
+            st.caption("Muzikos takelis rodomas pagal jau paruoštą video (iškirptos pauzės, pritaikytas greitis), "
+                       "kad muzika skambėtų tiksliai ten, kur ją padėsite.")
+            if st.button("🎵  Paruošti muzikos takelį", width="stretch", key=P + "prepare_music"):
+                box = st.status("Ruošiama…", expanded=True)
+                pbar = st.progress(0.0)
+                try:
+                    prepare(box.write, lambda p: pbar.progress(min(1.0, p)))
+                except Exception as e:
+                    box.update(label="Nepavyko paruošti", state="error")
+                    st.error(str(e))
+                    st.stop()
+                st.rerun()
+        else:
+            keep = tuple(tuple(x) for x in prep["analysis"]["keep"])
+            final_dur = sum(b_ - a_ for a_, b_ in keep) / speed
+            if reels_studio.LENGTHS[length]:
+                final_dur = min(final_dur, reels_studio.LENGTHS[length])
+            tracks = list(library) + ([OWN_MUSIC] if music_file else [])
+            if P + "mblocks" not in st.session_state:  # pradžia – pasirinkta muzika per visą video
+                st.session_state[P + "mblocks"] = ([{"name": music_choice, "start": 0.0, "end": round(final_dur, 2),
+                                                     "vol": 100}] if music_choice in library else [])
+            # Naujausia takelio reikšmė perskaitoma PRIEŠ jį piešiant – kitaip takelis būtų perpieštas pagal
+            # pasenusį sąrašą ir ką tik pridėtas blokas „dingtų“.
+            mval = st.session_state.get(f"{P}mtrack")
+            if mval and mval.get("t") != st.session_state.get(P + "mblocks_t"):
+                st.session_state[P + "mblocks"] = mval["blocks"]
+                st.session_state[P + "mblocks_t"] = mval["t"]
+            music_track(duration=round(final_dur, 2), blocks=st.session_state[P + "mblocks"], tracks=tracks,
+                        thumbs=edited_filmstrip(prep["src"], keep, speed, round(final_dur, 2)),
+                        key=f"{P}mtrack", default=None)
+            mb = st.session_state[P + "mblocks"]
+            st.caption((f"🎵 Muzikos blokų: {len(mb)} · " if mb else "🔇 Muzikos nėra · ")
+                       + "garsumas ir „patyli kalbant“ – šoniniame skydelyje (Garsas). Pakeitę – spauskite „Peržiūra“.")
+            if st.button("↺  Atstatyti takelį pagal pasirinktą muziką", key=P + "mreset"):
+                st.session_state.pop(P + "mblocks", None)
+                st.session_state[P + "mblocks_t"] = (st.session_state.get(f"{P}mtrack") or {}).get("t")
+                st.rerun()
 
 # ---------- Peržiūra ir rezultatas (viršuje) ----------
 portrait = cover_size[1] > cover_size[0]

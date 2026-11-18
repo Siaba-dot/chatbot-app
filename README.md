@@ -57,6 +57,9 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
   kvadratėliais atsitiktine tvarka), Švelnus išnykimas, Per šviesą, Slinkimas, Atsivėrimas;
 - **kabliuko ir titrų vieta** – „Kabliuko vieta“ (Viršuje / Aukščiau / Žemiau) ir „Titrų vieta“ (Viduryje / Žemiau /
   Apačioje), kad tekstas neuždengtų veido;
+- **muzikos takelis** – „III Muzikos takelis“: pagal paruoštą video (iškirptos pauzės, greitis) – kadrų juosta ir muzikos
+  juosta; „+ Pridėti“ deda pasirinktą kūrinį padėties linijos vietoje, blokus galima tempti, keisti jų ilgį kraštais,
+  kiekvienam – atskiras garsumas; tarp blokų – tyla, bloko pradžia ir pabaiga švelniai įsilieja / užgęsta;
 - **kadrų takelis apkarpymui** – kiekvienam video „✂️ Apkarpyti – kadrų takelis“: juosta su kadrų miniatiūromis,
   tempiamos geltonos rankenėlės (pradžia / pabaiga), padėties linija su kadro peržiūra, „✂ Skelti“ (padalinti toje
   vietoje), „🗑 Ištrinti“ (pažymėtą dalį) ir „↺ Iš naujo“; veikia ir liečiant telefone;
