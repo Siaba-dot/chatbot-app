@@ -261,7 +261,7 @@ hook_y = reels_studio.HOOK_POSITIONS[st.session_state[P + "hook_pos"]]
 # ---------- Prekės ženklo rinkinys: išsaugoti numatytieji nustatymai ----------
 BRAND_DIR = os.path.join(accounts.DATA_DIR, "brand")
 BRAND_KEYS = ("template", "accent", "color", "handle", "cta", "brand_color", "logo_on", "logo_pos", "logo_size",
-              "logo_opacity")
+              "logo_opacity", "link", "end_card", "yt_end")
 
 
 def brand_file():
@@ -420,6 +420,17 @@ with sb.expander("✍️  Tekstai ir titrai"):
     hook_duration = c1.slider("Kabliuko trukmė (s)", 1.5, 6.0, 3.0, 0.5)
     handle = c2.text_input("Paskyra", placeholder="@jusu.paskyra", key=P + "handle")
     cta = st.text_input("Kvietimas veikti pabaigoje", placeholder="Pvz.: Išsaugok vėlesniam", key=P + "cta")
+    link = st.text_input("🔗 Nuoroda – svetainė, parduotuvė, registracija", key=P + "link",
+                         placeholder="manosvetaine.lt",
+                         help="Rodoma pabaigos kortelėje (su QR kodu) ir pridedama prie aprašymo.").strip()
+    for k in ("end_card", "yt_end"):
+        st.session_state.setdefault(P + k, False)
+    end_on = st.toggle("✦ Pabaigos kortelė su nuoroda ir QR", key=P + "end_card",
+                       help=f"Video pabaigoje – gintarinė kortelė ({reels_studio.END_CARD_LEN:.1f} s): kvietimas, "
+                            "nuoroda, QR kodas ir paskyra. Kvietimas veikti tada rodomas joje.")
+    yt_on = st.toggle("▶ YouTube pabaigos ekranas (16:9)", key=P + "yt_end", disabled=not end_on,
+                      help=f"Tik 16:9 video: kortelė {reels_studio.YT_END_LEN:.0f} s su auksinėmis vietomis, ant kurių "
+                           "YouTube Studio uždėsite paspaudžiamus elementus „Video“ ir „Prenumeruoti“.")
     c1, c2 = st.columns(2)
     c1.select_slider("Kabliuko vieta", list(reels_studio.HOOK_POSITIONS), key=P + "hook_pos",
                      help="Jei kabliukas uždengia veidą ar galvą – nuleiskite žemiau arba pakelkite.")
@@ -567,6 +578,8 @@ logo = ({"path": logo_path, "pos": st.session_state.get(P + "logo_pos", reels_st
          "size": st.session_state.get(P + "logo_size", 16) / 100,
          "opacity": st.session_state.get(P + "logo_opacity", 85) / 100}
         if logo_path and st.session_state.get(P + "logo_on", True) else None)
+end_card = ({"link": link, "handle": handle, "youtube": yt_on, "qr": True,
+             "logo": logo["path"] if logo else None} if end_on else None)
 
 with sb.expander("🎵  Garsas ir muzika", expanded=has_vo):
     st.markdown("**🎙️ Įgarsinimas – jūsų balsas**")
@@ -659,6 +672,36 @@ def other_format(fmt_name, tmp, progress):
     if logo:
         reels_studio.stamp_logo(cover, logo)
     return out, cover
+
+
+def link_url(link):
+    link = (link or "").strip()
+    return link if not link or re.match(r"^[a-z]+://", link, re.I) else "https://" + link
+
+
+def link_help(result):
+    """Kaip padaryti nuorodą paspaudžiamą: video faile ji nepaspaudžiama, todėl dedama platformose."""
+    full = link_url(result.get("link"))
+    if not full:
+        return
+    st.markdown("**🔗 Nuoroda** – nukopijuokite ir įdėkite platformoje:")
+    st.code(full, language=None)
+    with st.expander("📌 Kaip padaryti nuorodą paspaudžiamą"):
+        st.markdown(
+            "Video faile nuoroda **nepaspaudžiama** – paspaudžiamą ją padaro pati platforma:\n\n"
+            "- **Instagram istorija** – įkelkite video į istoriją → lipdukų mygtukas → **„Nuoroda“** → "
+            "įklijuokite nuorodą.\n"
+            "- **Instagram / TikTok Reels** – nuorodą įdėkite į **profilio aprašymą** (Redaguoti profilį → "
+            "Nuorodos); aprašyme parašykite „Nuoroda profilyje 👆“.\n"
+            "- **Facebook** – įklijuokite nuorodą į įrašo aprašymą – ji bus paspaudžiama.\n"
+            "- **YouTube** – nuorodą įdėkite į video aprašymą (įprastuose video ji paspaudžiama; Shorts – ne).\n"
+            "- **QR kodas** pabaigos kortelėje – žiūrovai nuskenuoja telefonu, kai video rodomas kitame ekrane.")
+        if result.get("yt_end"):
+            st.markdown(
+                "**YouTube pabaigos ekranas (16:9 video):** YouTube Studio → jūsų video → **Redaguoti** → "
+                "**Pabaigos ekranas** (End screen) → pridėkite **„Video“** (pvz. „Naujausias įkėlimas“ arba "
+                "„Tinkamiausias žiūrovui“) ir **„Prenumeruoti“** → nutempkite juos ant auksinio stačiakampio ir "
+                "apskritimo → **Išsaugoti**. Elementai rodomi paskutines sekundes, video turi būti bent 25 s.")
 
 
 def all_formats_ui(result):
@@ -830,7 +873,7 @@ def build(prep, words, tmp, out, quick, progress, fmt=fmt):
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
         subs_words=words, subs_look=look, subs_ypos=subs_y,
         hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
-        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch, logo=logo,
+        voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch, logo=logo, end_card=end_card,
         moment_at=st.session_state.get(P + "moment_at", 3.0) if "Gintaro akimirka" in effects else None)
     return res, fin
 
@@ -929,6 +972,7 @@ if clips:
                 final_dur = max(final_dur, reels_studio.media_duration(vo_path) + 0.3)
             if reels_studio.LENGTHS[length]:
                 final_dur = min(final_dur, reels_studio.LENGTHS[length])
+            final_dur += reels_studio.end_card_len(end_card, *cover_size)  # pabaigos kortelė
             if "Gintaro akimirka" in effects:  # sustabdymas prailgina video
                 final_dur += reels_studio.MOMENT_LEN
             tracks = list(library) + ([OWN_MUSIC] if music_file else [])
@@ -1053,7 +1097,8 @@ with top:
                 "video": video, "cover": cover_bytes, "caption": caption, "portrait": portrait,
                 "before": res["original_duration"], "after": fin["duration"], "cuts": res["cuts"],
                 "name": "reels_" + datetime.datetime.now().strftime("%Y%m%d_%H%M"),
-                "fmt_name": st.session_state[P + "format"]}
+                "fmt_name": st.session_state[P + "format"], "link": link,
+                "yt_end": bool(end_on and yt_on)}
             st.session_state[P + "view"] = "result"
 
     result = st.session_state.get(P + "result")
@@ -1092,11 +1137,14 @@ with top:
                 st.markdown(f'<div class="lux-caption">{html.escape(cap["caption"])}</div>'
                             f'<div class="lux-tags">{html.escape(" ".join(cap["hashtags"]))}</div>',
                             unsafe_allow_html=True)
-                st.code(cap["caption"] + "\n\n" + " ".join(cap["hashtags"]), language=None)
+                full_link = link_url(result.get("link"))
+                st.code(cap["caption"] + (f"\n\n🔗 {full_link}" if full_link else "") + "\n\n"
+                        + " ".join(cap["hashtags"]), language=None)
                 if cap.get("hooks"):
                     st.markdown("**Kabliukų idėjos kitam kartui:** " + " · ".join(f"„{h}“" for h in cap["hooks"]))
             elif client is None and plan != "basic":
                 st.caption("Aprašymui ir grotažymėms sugeneruoti reikia OpenAI rakto.")
+            link_help(result)
         with st.container(border=True):
             all_formats_ui(result)
 

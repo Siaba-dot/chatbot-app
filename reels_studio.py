@@ -85,6 +85,150 @@ def stamp_logo(image_path, logo):
     return image_path
 
 
+# ---------- Pabaigos kortelė: nuoroda, QR kodas, YouTube pabaigos ekrano vietos ----------
+END_CARD_LEN = 3.5       # vertikaliai / kvadratu
+YT_END_LEN = 10.0        # YouTube pabaigos ekranui (elementai rodomi paskutines 5–20 s)
+AMBER_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "gintaras_512.png")
+
+
+def end_card_len(card, W, H):
+    if not card:
+        return 0.0
+    return YT_END_LEN if card.get("youtube") and W > H else END_CARD_LEN
+
+
+def short_link(link):
+    """Nuoroda rodymui: be https:// ir galinio /."""
+    return re.sub(r"^https?://", "", (link or "").strip()).rstrip("/")
+
+
+def qr_matrix(link):
+    """QR kodo moduliai (sąrašas eilučių iš 0/1) arba None, jei QR bibliotekos nėra."""
+    try:
+        import segno
+    except ImportError:
+        return None
+    url = link.strip()
+    if not re.match(r"^[a-z]+://", url, re.I):
+        url = "https://" + url
+    try:
+        return [list(row) for row in segno.make(url, error="m", micro=False).matrix]
+    except Exception:
+        return None
+
+
+def end_card_image(card, W, H, out_path, accent="Gintaro gradientas", _shift=None):
+    """Gintarinė pabaigos kortelė (PNG, W×H): logotipas, antraštė, nuoroda ir QR kodas;
+    YouTube režimu (horizontaliai) – auksiniai rėmeliai pabaigos ekrano elementams (video ir prenumeratai)."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+    def font(name, size):
+        return ImageFont.truetype(os.path.join(FONT_DIR, name), max(8, round(size)))
+
+    u = min(W, H) / 720 * (1.2 if H > W * 1.3 else 1.0)  # mastelis
+    y, x = np.mgrid[0:H, 0:W]
+    t = (y / H)[..., None]
+    bg = np.array([6, 18, 38]) * (1 - t) + np.array([14, 34, 66]) * t
+    glow = np.exp(-(((x - W * 0.5) / (W * 0.5)) ** 2 + ((y - H * 0.2) / (H * 0.38)) ** 2))[..., None]
+    bg = bg + glow * np.array([120, 70, 10]) * 0.55
+    img = Image.fromarray(np.clip(bg, 0, 255).astype("uint8")).convert("RGBA")
+    d = ImageDraw.Draw(img)
+    rgb = accent_colors(accent)[0]
+    acc = tuple(int(rgb[i:i + 2], 16) for i in (0, 2, 4))
+    honey, muted = (255, 213, 138), (180, 195, 216)
+    title_col = honey if accent in GRADIENTS else acc
+    m = round(18 * u)
+    d.rounded_rectangle((m, m, W - m, H - m), round(18 * u), outline=acc + (210,), width=max(2, round(2 * u)))
+    d.rounded_rectangle((m + round(10 * u), m + round(10 * u), W - m - round(10 * u), H - m - round(10 * u)),
+                        round(14 * u), outline=honey + (90,), width=1)
+
+    def centered(txt, f, yy, fill, max_w=None):
+        size = f.size
+        while max_w and d.textlength(txt, font=f) > max_w and size > 10:
+            size -= 2
+            f = font(os.path.basename(f.path), size)
+        w = d.textlength(txt, font=f)
+        d.text((W / 2 - w / 2, yy), txt, font=f, fill=fill)
+        return yy + f.size * 1.25
+
+    youtube = card.get("youtube") and W > H
+    title = (card.get("title") or "").strip() or ("Ačiū, kad žiūrėjote" if youtube else "Ačiū, kad žiūrėjote!")
+    link = short_link(card.get("link"))
+    # logotipas: prekės ženklo arba gintaras
+    lpath = card.get("logo") if card.get("logo") and os.path.exists(card.get("logo")) else AMBER_LOGO
+    lg = Image.open(lpath).convert("RGBA")
+    lh = round((95 if youtube else 120) * u)
+    lw = round(lg.width * lh / lg.height)
+    if lw > W * 0.5:
+        lw = round(W * 0.5)
+        lh = round(lg.height * lw / lg.width)
+    lg = lg.resize((lw, lh), Image.LANCZOS)
+    top = round((45 if youtube else 70) * u) + (_shift or 0)
+    img.alpha_composite(lg, (W // 2 - lw // 2, top))
+    yy = top + lh + round(18 * u)
+    serif = "PlayfairDisplay_700Bold.ttf"
+    sans = "Montserrat_600SemiBold.ttf"
+    yy = centered(title, font(serif, 56 * u), yy, title_col, W * 0.86)
+    if youtube:
+        centered("Ž I Ū R Ė K I T E   T O L I A U", font(sans, 18 * u), yy + round(10 * u), muted)
+        # vietos YouTube pabaigos ekrano elementams: video (16:9) kairėje, prenumerata (apskritimas) dešinėje
+        vw = round(W * 0.405)
+        vh = round(vw * 9 / 16)
+        vy = round(H * 0.40)
+        V = (round(W * 0.117), vy, round(W * 0.117) + vw, vy + vh)
+        r = round(vh * 0.36)
+        cx, cy = round(W * 0.73), vy + vh // 2
+        C = (cx - r, cy - r, cx + r, cy + r)
+        gl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(gl)
+        gd.rounded_rectangle(V, round(16 * u), outline=acc + (255,), width=round(6 * u))
+        gd.ellipse(C, outline=acc + (255,), width=round(6 * u))
+        img.alpha_composite(gl.filter(ImageFilter.GaussianBlur(10 * u)))
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle(V, round(14 * u), fill=(4, 12, 27, 215), outline=acc + (255,), width=max(2, round(3 * u)))
+        d.ellipse(C, fill=(4, 12, 27, 215), outline=acc + (255,), width=max(2, round(3 * u)))
+        for px, py in ((V[0], V[1]), (V[2], V[1]), (V[0], V[3]), (V[2], V[3])):
+            d.regular_polygon((px, py, round(9 * u)), 4, fill=honey)
+        if link:
+            centered(link, font(sans, 26 * u), H - m - round(62 * u), honey, W * 0.8)
+    else:
+        qr = qr_matrix(card["link"]) if link and card.get("qr", True) else None
+        if qr:
+            n = len(qr)
+            side = round(min(W * 0.46, H * 0.3))
+            q = max(2, side // (n + 4))
+            side = q * (n + 4)
+            qx, qy = W // 2 - side // 2, round(yy + 34 * u)
+            pad = round(10 * u)
+            gl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(gl).rounded_rectangle((qx - pad, qy - pad, qx + side + pad, qy + side + pad), round(22 * u),
+                                                 outline=acc + (255,), width=round(8 * u))
+            img.alpha_composite(gl.filter(ImageFilter.GaussianBlur(12 * u)))
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle((qx - pad, qy - pad, qx + side + pad, qy + side + pad), round(20 * u),
+                                fill=(255, 248, 236), outline=acc, width=max(2, round(4 * u)))
+            for r_, row in enumerate(qr):
+                for c_, v in enumerate(row):
+                    if v:
+                        x0, y0 = qx + (c_ + 2) * q, qy + (r_ + 2) * q
+                        d.rectangle((x0, y0, x0 + q - 1, y0 + q - 1), fill=(6, 18, 38))
+            yy = qy + side + pad + round(28 * u)
+            yy = centered("Nuskenuokite telefonu", font(sans, 20 * u), yy, muted)
+        else:
+            yy += round(30 * u)
+        if link:
+            yy = centered(link, font(sans, 34 * u), yy + round(6 * u), honey, W * 0.86)
+        if card.get("handle"):
+            yy = centered(card["handle"].strip(), font(sans, 24 * u), yy + round(8 * u), muted, W * 0.8)
+        if _shift is None:  # turinys – kortelės viduryje (šiek tiek aukščiau centro)
+            shift = round((H - (yy - top)) * 0.45) - top
+            if abs(shift) > 4:
+                return end_card_image(card, W, H, out_path, accent, _shift=shift)
+    img.convert("RGB").save(out_path)
+    return out_path
+
+
 SERIF = "Playfair Display"
 SCRIPT = "Great Vibes"
 
@@ -787,7 +931,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
            music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN, punch=False,
-           logo=None):
+           logo=None, end_card=None):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
     natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
@@ -814,6 +958,12 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
     trimmed = bool(max_length) and duration > max_length + 0.05
     if trimmed:
         duration = float(max_length)
+    # Pabaigos kortelė prisideda po video (trukmės riba jai netaikoma); kvietimas veikti tada rodomas kortelėje
+    card_len = end_card_len(end_card, W, H)
+    if card_len:
+        end_card = dict(end_card, title=end_card.get("title") or cta)
+        cta = ""
+    total = duration + card_len
 
     tmp = tempfile.mkdtemp()
     try:
@@ -825,6 +975,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         pre = [f"setpts=PTS/{speed:.4f}"] if abs(speed - 1) > 0.001 else []
         if extend > 0.01:  # įgarsinimas ilgesnis – paskutinis kadras palaikomas ilgiau
             pre.append(f"tpad=stop_mode=clone:stop_duration={extend:.3f}")
+        if card_len:  # vieta kortelei (po ja – sustingęs paskutinis kadras)
+            pre.append(f"tpad=stop_mode=clone:stop_duration={card_len + 0.5:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
         # svarbiausių žodžių (*žodis*) laikai galutiniame video – akcentų priartėjimui
         punches = []
@@ -862,15 +1014,9 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, "", accent,
                                           hook_ypos=hook_ypos, template=template, mask=True, size=text_size))
             masks.append(f"ass=filename='{_filter_path(om)}':fontsdir='{_filter_path(FONT_DIR)}'")
-            graph += gradient_chains("[base]", "[gold]", W, H, fps, duration + 1, accent, masks, tmp, template,
+            graph += gradient_chains("[base]", "[gold]", W, H, fps, total + 1, accent, masks, tmp, template,
                                      hook_ypos=hook_ypos, shine=shine, size=text_size)
             vout = "[gold]"
-        if "Auksinės dulkės" in (effects or ()):
-            graph += dust_chains(vout, "[dusty]", W, H, fps, tmp, duration=duration + 1)
-            vout = "[dusty]"
-        if "Auksinis rėmelis" in (effects or ()):
-            graph += frame_chains(vout, "[framed]", W, H, fps, tmp, accent, duration=duration + 1)
-            vout = "[framed]"
         inputs = ["-i", path]
 
         def add_input(*args):
@@ -878,20 +1024,34 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             inputs.extend(args)
             return n
 
+        if card_len:  # pabaigos kortelė: švelniai išryškėja ties video pabaiga; dulkės ir rėmelis – virš jos
+            cp = end_card_image(end_card, W, H, os.path.join(tmp, "end_card.png"), accent)
+            k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{card_len + 1:.3f}", "-i", cp)
+            graph.append(f"[{k}:v]format=yuva420p,fade=t=in:st=0:d=0.6:alpha=1,"
+                         f"setpts=PTS-STARTPTS+{duration:.3f}/TB[card]")
+            graph.append(f"{vout}[card]overlay=eof_action=pass:format=auto[carded]")
+            vout = "[carded]"
+        if "Auksinės dulkės" in (effects or ()):
+            graph += dust_chains(vout, "[dusty]", W, H, fps, tmp, duration=total + 1)
+            vout = "[dusty]"
+        if "Auksinis rėmelis" in (effects or ()):
+            graph += frame_chains(vout, "[framed]", W, H, fps, tmp, accent, duration=total + 1)
+            vout = "[framed]"
         if logo and logo.get("path") and os.path.exists(logo["path"]):  # prekės ženklo logotipas
             lp, lx, ly = logo_layer(logo, W, H, os.path.join(tmp, "logo.png"))
-            k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{duration + 1:.3f}", "-i", lp)
-            graph.append(f"{vout}[{k}:v]overlay=x={lx}:y={ly}:shortest=1:format=auto[branded]")
+            k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{total + 1:.3f}", "-i", lp)
+            graph.append(f"{vout}[{k}:v]overlay=x={lx}:y={ly}:shortest=1:format=auto"
+                         + (f":enable='lt(t,{duration:.3f})'" if card_len else "") + "[branded]")
             vout = "[branded]"
-        if trimmed:
-            graph.append(f"{vout}fade=t=out:st={duration - 0.5:.3f}:d=0.5[faded]")
+        if trimmed and not card_len:
+            graph.append(f"{vout}fade=t=out:st={total - 0.5:.3f}:d=0.5[faded]")
             vout = "[faded]"
         if progress_bar in ("Viršuje", "Apačioje"):
             bh = max(6, round(H * 0.006)) // 2 * 2
             y = 0 if progress_bar == "Viršuje" else H - bh
             bg = accent_colors(accent)[0]
-            graph.append(f"color=c=0x{bg}:s={W}x{bh}:r={fps}:d={duration + 1:.3f}[bar]")
-            graph.append(f"{vout}[bar]overlay=x='-w+w*t/{duration:.3f}':y={y}:shortest=1[vout]")
+            graph.append(f"color=c=0x{bg}:s={W}x{bh}:r={fps}:d={total + 1:.3f}[bar]")
+            graph.append(f"{vout}[bar]overlay=x='-w+w*t/{total:.3f}':y={y}:shortest=1[vout]")
             vout = "[vout]"
 
         speech = []  # kalbos šaltiniai (klipų garsas, įgarsinimas) – pagal juos patyli muzika
@@ -916,7 +1076,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             graph.append(f"[{k}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
                          f"highpass=f=80,afftdn=nr=12:nf=-40,loudnorm=I=-15:TP=-1.5:LRA=11,"
                          f"aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                         f"apad=whole_dur={duration + 1:.3f},atrim=duration={duration + 1:.3f}[vo]")
+                         f"apad=whole_dur={total + 1:.3f},atrim=duration={total + 1:.3f}[vo]")
             speech.append("[vo]")
         voice = None
         if len(speech) == 2:
@@ -925,14 +1085,14 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         elif speech:
             voice = speech[0]
         aout = voice
-        blocks = [b for b in (music_blocks or []) if b["end"] - b["start"] >= 0.3 and b["start"] < duration]
+        blocks = [b for b in (music_blocks or []) if b["end"] - b["start"] >= 0.3 and b["start"] < total]
         if blocks:
             # Muzikos takelis: kiekvienas blokas skamba tik savo vietoje (su švelniu įėjimu / išėjimu)
             parts = []
             for j, blk in enumerate(blocks):
                 k = add_input("-stream_loop", "-1", "-i", blk["path"])
                 start = max(0.0, blk["start"])
-                length = max(0.3, min(blk["end"], duration) - start)
+                length = max(0.3, min(blk["end"], total) - start)
                 fi, fo = min(0.6, length / 3), min(0.9, length / 3)
                 vol = music_volume * blk.get("vol", 100) / 100
                 graph.append(f"[{k}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
@@ -942,27 +1102,27 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 parts.append(f"[mb{j}]")
             mixed = "".join(parts) + (f"amix=inputs={len(parts)}:duration=longest:normalize=0," if len(parts) > 1
                                       else "anull,")
-            graph.append(f"{mixed}apad=whole_dur={duration + 1:.3f},atrim=duration={duration + 1:.3f}[music]")
+            graph.append(f"{mixed}apad=whole_dur={total + 1:.3f},atrim=duration={total + 1:.3f}[music]")
             music = True
         elif music:
             k = add_input("-stream_loop", "-1", "-i", music)
             graph.append(f"[{k}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                         f"volume={music_volume:.3f},afade=t=in:st=0:d=0.8,atrim=duration={duration + 1:.3f}[music]")
+                         f"volume={music_volume:.3f},afade=t=in:st=0:d=0.8,atrim=duration={total + 1:.3f}[music]")
         if music:
             if voice and ducking:
                 graph.append(f"{voice}asplit=2[v1][v2]")
                 graph.append("[music][v2]sidechaincompress=threshold=0.015:ratio=8:attack=30:release=500[duck]")
                 graph.append(f"[v1][duck]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95,"
-                             f"atrim=duration={duration + 1:.3f}[mix]")
+                             f"atrim=duration={total + 1:.3f}[mix]")
                 aout = "[mix]"
             elif voice:
                 graph.append(f"{voice}[music]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95,"
-                             f"atrim=duration={duration + 1:.3f}[mix]")
+                             f"atrim=duration={total + 1:.3f}[mix]")
                 aout = "[mix]"
             else:
                 aout = "[music]"
-        if aout and (music or trimmed) and duration > 2:
-            graph.append(f"{aout}afade=t=out:st={duration - 0.8:.3f}:d=0.8[aend]")
+        if aout and (music or trimmed) and total > 2:
+            graph.append(f"{aout}afade=t=out:st={total - 0.8:.3f}:d=0.8[aend]")
             aout = "[aend]"
 
         script = os.path.join(tmp, "graph.txt")
@@ -974,13 +1134,13 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             cmd += ["-map", aout, "-c:a", "aac", "-b:a", "192k"]
         cmd += ["-c:v", "libx264", "-preset", "ultrafast" if preview else "veryfast", "-crf", "28" if preview else "19",
                 "-pix_fmt", "yuv420p",
-                "-r", str(fps), "-movflags", "+faststart", "-t", f"{duration:.3f}", out_path]
-        _run(cmd, duration, progress, "Nepavyko paruošti Reels")
+                "-r", str(fps), "-movflags", "+faststart", "-t", f"{total:.3f}", out_path]
+        _run(cmd, total, progress, "Nepavyko paruošti Reels")
     finally:
         for name in os.listdir(tmp):
             os.unlink(os.path.join(tmp, name))
         os.rmdir(tmp)
-    return {"duration": duration, "width": W, "height": H, "trimmed": trimmed}
+    return {"duration": total, "width": W, "height": H, "trimmed": trimmed}
 
 
 def _cover_mask(tmp, width, height, hook, accent, template, ypos=0.42, size=1.0):
