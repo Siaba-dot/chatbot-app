@@ -420,20 +420,23 @@ def grad_stops(accent):
 def shine_image(path, width, height):
     """Šviesos ruožas (RGBA PNG): švelnus įstrižas blyksnis, kuris perbėga per metalinį tekstą."""
     import numpy as np
+    full_w, full_h = width, height
+    width, height = max(2, width // 2), max(2, height // 2)  # švelnus – užtenka pusės raiškos
     bw = width * 0.16
-    y = np.arange(height)[:, None]
-    x = np.arange(width)[None, :]
+    y = np.arange(height, dtype=np.float32)[:, None]
+    x = np.arange(width, dtype=np.float32)[None, :]
     d = (x - width / 2 + 0.45 * (y - height / 2)) / bw
     a = np.exp(-d ** 2 * 2.2) * 0.85 + np.exp(-(d * 4) ** 2) * 0.15
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[..., 0], rgba[..., 1], rgba[..., 2] = 255, 252, 236
     rgba[..., 3] = np.clip(a * 255, 0, 255).astype(np.uint8)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
-                    f"{width}x{height}", "-i", "-", "-frames:v", "1", path], input=rgba.tobytes(), check=True)
+                    f"{width}x{height}", "-i", "-", "-vf", f"scale={full_w}:{full_h}:flags=bicubic", "-frames:v", "1",
+                    path], input=rgba.tobytes(), check=True)
     return path
 
 
-def dust_media(path, width=540, height=960, fps=30, seconds=4.0, still=False, seed=11):
+def dust_media(path, width=360, height=640, fps=30, seconds=4.0, still=False, seed=11):
     """Auksinės dulkės: permatomas, be sandūros kartojamas kibirkštėlių sluoksnis (MOV qtrle) arba vienas kadras (PNG)."""
     import numpy as np
     rng = np.random.default_rng(seed)
@@ -448,7 +451,11 @@ def dust_media(path, width=540, height=960, fps=30, seconds=4.0, still=False, se
     yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
     window = np.clip(1 - (xx ** 2 + yy ** 2) / r ** 2, 0, 1) ** 2  # apvalūs, švelnūs kraštai
     frames = 1 if still else int(round(fps * seconds))
-    out = []
+    codec = [] if still else ["-c:v", "qtrle"]
+    # Kadrai siunčiami ffmpeg po vieną (ne kaupiami atmintyje).
+    proc = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
+                             f"{width}x{height}", "-r", str(fps), "-i", "-", *codec, path],
+                            stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     for f in range(frames):
         ph = 0.37 if still else f / frames
         img = np.zeros((height, width, 4), dtype=np.float32)
@@ -465,10 +472,11 @@ def dust_media(path, width=540, height=960, fps=30, seconds=4.0, still=False, se
             img[ys, xs, 3] = np.maximum(img[ys, xs, 3], gs)
             img[ys, xs, :3] = np.where(gs[..., None] > 0.02, gold[i], img[ys, xs, :3])
         img[..., 3] = np.clip(img[..., 3], 0, 1) * 255
-        out.append(np.clip(img, 0, 255).astype(np.uint8).tobytes())
-    codec = [] if still else ["-c:v", "qtrle"]
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
-                    f"{width}x{height}", "-r", str(fps), "-i", "-", *codec, path], input=b"".join(out), check=True)
+        proc.stdin.write(np.clip(img, 0, 255).astype(np.uint8).tobytes())
+    proc.stdin.close()
+    err = proc.stderr.read()
+    if proc.wait() != 0:
+        raise RuntimeError(f"Nepavyko sukurti auksinių dulkių: {err[-500:]}")
     return path
 
 
@@ -480,8 +488,8 @@ def frame_image(path, width, height, accent="Aukso gradientas"):
                                       else GRADIENTS["Aukso gradientas"])
     pos = np.array([p for p, _ in stops])
     cols = np.array([_hex(c) for _, c in stops], dtype=float)
-    y, x = np.mgrid[0:height, 0:width].astype(float)
-    alpha = np.zeros((height, width))
+    y, x = np.mgrid[0:height, 0:width].astype(np.float32)
+    alpha = np.zeros((height, width), dtype=np.float32)
 
     def rounded(m, r, thick):
         cx, cy = width / 2, height / 2
@@ -503,8 +511,11 @@ def frame_image(path, width, height, accent="Aukso gradientas"):
     period = width * 0.6
     d = ((x + 0.6 * y) % period) / period
     t = 1 - np.abs(2 * d - 1)
-    rgb = np.stack([np.interp(t, pos, cols[:, k]) for k in range(3)], axis=-1)
-    rgba = np.concatenate([rgb, alpha[..., None] * 255], axis=-1).clip(0, 255).astype(np.uint8)
+    del d
+    rgba = np.empty((height, width, 4), dtype=np.uint8)
+    for c in range(3):
+        rgba[..., c] = np.clip(np.interp(t, pos, cols[:, c]), 0, 255)
+    rgba[..., 3] = np.clip(alpha * 255, 0, 255)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
                     f"{width}x{height}", "-i", "-", "-frames:v", "1", path], input=rgba.tobytes(), check=True)
     return path
@@ -535,27 +546,40 @@ def gradient_image(path, width, height, accent, template="Prabangus auksas", hoo
     pos = np.array([p for p, _ in stops])
     cols = np.array([_hex(c) for _, c in stops], dtype=float)
     kind, hsize, csize, hook_y, cta_y = _overlay_layout(width, height, template, hook_ypos)
-    y = np.arange(height)[:, None].astype(float)
-    x = np.arange(width)[None, :].astype(float)
+    # Piešiama per pusę mažesne raiška (gradientas švelnus) – ffmpeg padidina; taip mažiau atminties.
+    full_w, full_h = width, height
+    k = 2 if width >= 720 else 1
+    width, height = width // k, height // k
+    hook_y, cta_y, hsize, csize = hook_y / k, cta_y / k, hsize / k, csize / k
+    y = np.arange(height, dtype=np.float32)[:, None]
+    x = np.arange(width, dtype=np.float32)[None, :]
     # įstrižas blizgesys (trikampė banga – be ryškių sandūrų)
     period = width * 0.55
     d = ((x + 0.5 * y) % period) / period
-    t = 1 - np.abs(2 * d - 1)
+    t = (1 - np.abs(2 * d - 1)).astype(np.float32)
+    del d
     t = np.broadcast_to(t, (height, width)).copy()
     if kind != "box":  # eilutėmis sutapdintos juostos kabliukui ir CTA
         for yb, size, lo, hi in ((hook_y, hsize, 0, (hook_y + cta_y) // 2),
                                  (cta_y, csize, (hook_y + cta_y) // 2, round(height * 0.55))):
             pitch = size * (1.3 if kind == "script" else 1.18)
             top = yb - pitch * (0.88 if kind == "script" else 0.95)
-            rows = slice(max(0, lo), min(height, hi))
+            rows = slice(max(0, int(lo)), min(height, int(hi)))
             yy = y[rows]
             band = ((yy - top) % pitch) / pitch
             t[rows] = np.broadcast_to(band, (yy.shape[0], width))
-    img = np.stack([np.interp(t, pos, cols[:, k]) for k in range(3)], axis=-1)
-    img = np.clip(img, 0, 255).astype(np.uint8)
-    with open(path, "wb") as f:
+    img = np.empty((height, width, 3), dtype=np.uint8)
+    for c in range(3):
+        img[..., c] = np.clip(np.interp(t, pos, cols[:, c]), 0, 255)
+    del t
+    small = path + ".small.ppm"
+    with open(small, "wb") as f:
         f.write(f"P6 {width} {height} 255\n".encode())
         f.write(img.tobytes())
+    del img
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", small, "-vf", f"scale={full_w}:{full_h}:flags=bicubic",
+                    "-f", "image2", "-c:v", "ppm", path], check=True)
+    os.unlink(small)
     return path
 
 
@@ -584,7 +608,8 @@ def gradient_chains(base, out, width, height, fps, duration, accent, masks, tmp,
 
 
 def _run(cmd, total, progress, what):
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(video_editor.limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True)
     for line in proc.stdout:
         m = re.match(r"out_time_us=(\d+)", line)
         if m and progress and total > 0:
