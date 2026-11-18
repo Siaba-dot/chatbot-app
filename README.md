@@ -41,6 +41,10 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **✦ Pabaigos kortelė** – video pabaigoje gintarinė kortelė (3,5 s): kvietimas veikti, nuoroda, **QR kodas** ir paskyra;
+  **YouTube pabaigos ekranas** (16:9) – 10 s kortelė su auksinėmis vietomis, ant kurių YouTube Studio uždedami
+  paspaudžiami elementai „Video“ ir „Prenumeruoti“. Prie rezultato – nuoroda kopijavimui, ji pridedama ir prie AI
+  aprašymo, bei instrukcija, kaip padaryti nuorodą paspaudžiamą kiekvienoje platformoje;
 - **💎 Prekės ženklo rinkinys** – logotipas ant kiekvieno video ir viršelio (vieta, dydis, matomumas), sava prekės
   ženklo spalva kaip akcentas ir mygtukas „Išsaugoti mano prekės ženklą“: šablonas, akcentas, filtras, paskyra,
   kvietimas ir logotipas kitą kartą prisijungus nustatomi automatiškai (saugoma `.data/brand/`; Streamlit Cloud
