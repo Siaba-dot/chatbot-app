@@ -21,6 +21,7 @@ from video_editor import FONT_DIR, FONT_NAME, TRAINING_FONT, _ass_escape, _ass_t
 
 # Akcento spalvos: pavadinimas -> (RGB hex, teksto spalva ant jos)
 ACCENTS = {
+    "Gintaro gradientas": ("E9A23B", "071326"),
     "Aukso gradientas": ("D9B24C", "0B0B0C"),
     "Sidabro gradientas": ("C9CBD1", "0B0B0C"),
     "Auksas": ("E3C16F", "0B0B0C"),
@@ -37,6 +38,9 @@ SCRIPT = "Great Vibes"
 
 # Metaliniai gradientai (spalvų taškai nuo raidės viršaus iki apačios): akcento pavadinimas -> [(vieta, RGB)]
 GRADIENTS = {
+    # Baltijos gintaras: medaus šviesa viršuje, konjako tamsa per vidurį, šiltas atšvaitas apačioje
+    "Gintaro gradientas": [(0.0, "FFEBB5"), (0.26, "FFC25E"), (0.46, "DB7E1F"), (0.56, "A9500E"),
+                           (0.68, "EE9A35"), (0.86, "FFD488"), (1.0, "8A3A0A")],
     "Aukso gradientas": [(0.0, "FFF4C8"), (0.28, "F3D67E"), (0.48, "C99A30"), (0.56, "B07F1C"),
                          (0.68, "E9C964"), (0.86, "FBE7A2"), (1.0, "A47A1E")],
     "Sidabro gradientas": [(0.0, "FFFFFF"), (0.28, "E2E4E9"), (0.48, "9A9DA5"), (0.56, "80838C"),
@@ -45,6 +49,7 @@ GRADIENTS = {
 
 # Teksto šablonai. elegant – serifinis šriftas be dėžutės su plona linija, box – ryški dėžutė.
 TEMPLATES = {
+    "Baltijos gintaras": {"kind": "elegant", "accent": "Gintaro gradientas", "color": "Baltijos auksas"},
     "Prabangus auksas": {"kind": "elegant", "accent": "Aukso gradientas", "color": "Auksinė valanda"},
     "Ranka rašytas": {"kind": "script", "accent": "Aukso gradientas", "color": "Auksinė valanda"},
     "Elegantiškas minimalizmas": {"kind": "elegant", "accent": "Sidabro gradientas", "color": "Kino"},

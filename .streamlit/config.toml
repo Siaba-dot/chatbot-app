@@ -10,9 +10,9 @@ maxUploadSize = 400
 gatherUsageStats = false
 
 [theme]
-# Prabangi tamsi tema su auksu (Reels studija ir montažas)
+# Prabangi tamsi Baltijos gintaro tema (Reels studija ir montažas)
 base = "dark"
-primaryColor = "#D4AF37"
-backgroundColor = "#0B0B0C"
-secondaryBackgroundColor = "#17161A"
-textColor = "#EDE6D6"
+primaryColor = "#E39B2E"
+backgroundColor = "#061226"
+secondaryBackgroundColor = "#0E2242"
+textColor = "#F3E7D3"
