@@ -17,7 +17,7 @@ import video_editor
 
 P = "reels_"  # šio puslapio būsenos raktų priešdėlis
 
-st.set_page_config(page_title="Reels studija", page_icon="✨", layout="centered")
+st.set_page_config(page_title="Reels studija", page_icon="✨", layout="wide", initial_sidebar_state="auto")
 
 st.markdown("""
 <style>
@@ -70,16 +70,30 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--line) !imp
   border-radius: 10px 10px 0 0; transition: transform .15s; }
 [class*="st-key-reels_tile"] img { opacity: .82; }
 [class*="st-key-reels_tsel"] img { outline: 2px solid var(--gold); outline-offset: -2px; }
+/* Šoninis nustatymų skydelis */
+section[data-testid="stSidebar"] { background: linear-gradient(180deg, #121114, #0B0B0C);
+  border-right: 1px solid var(--line); }
+@media (min-width: 900px) { section[data-testid="stSidebar"] { width: 430px !important; } }
+section[data-testid="stSidebar"] [data-testid="stExpander"] details { border-color: var(--line); border-radius: 12px; }
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary p { font-family: 'Playfair Display', serif;
+  font-size: 1.08rem; color: #F4EEDF; }
+.lux-side-title { font-family: 'Playfair Display', serif; font-size: 1.5rem; color: var(--gold-2); margin: .2rem 0 .6rem; }
+.block-container { max-width: 1100px; padding-top: 2.2rem; }
+.lux-hint { color: #8F8778; font-size: .85rem; text-align: center; margin: -.4rem 0 .8rem; }
+[class*="st-key-reels_actions"] button { padding-left: .3rem; padding-right: .3rem; }
+[class*="st-key-reels_actions"] button p { font-size: .9rem; white-space: nowrap; }
+[class*="st-key-reels_view"] video, [class*="st-key-reels_view"] img { max-height: 56vh; object-fit: contain; }
+[class*="st-key-reels_view"] [data-testid="stImage"], [class*="st-key-reels_view"] [data-testid="stVideo"] {
+  display: flex; justify-content: center; }
+.lux-empty { border: 1px dashed var(--line); border-radius: 14px; padding: 2.4rem 1rem; text-align: center;
+  color: #8F8778; }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
-<div class="lux-hero">
-  <div class="lux-kicker">Instagram · TikTok · Shorts</div>
-  <div class="lux-title">Reels montavimo studija</div>
-  <div class="lux-sub">Įkelkite medžiagą – studija iškirps pauzes, išvalys garsą, suspalvins vaizdą,
-  uždės titrus, kabliuką, muziką ir paruoš viršelį bei aprašymą.</div>
-  <div class="lux-rule"></div>
+<div class="lux-hero" style="padding:.2rem 0 .9rem">
+  <div class="lux-kicker">Reels · TikTok · Shorts · YouTube</div>
+  <div class="lux-title" style="font-size:clamp(1.8rem,5vw,2.6rem)">Reels montavimo studija</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -125,13 +139,15 @@ def pick_look(name):
 
 
 @st.cache_data(max_entries=200, show_spinner=False)
-def style_tile(base, template, accent, color, hook, look, effects=(), subs_y=0.72, hook_y=0.2):
+def style_tile(base, template, accent, color, hook, look, effects=(), subs_y=0.72, hook_y=0.2, subs_size=1.0,
+               text_size=1.0):
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "b.jpg")
         with open(src, "wb") as f:
             f.write(base)
         out = reels_studio.style_preview(src, os.path.join(tmp, "s.jpg"), template, accent, color, effects,
-                                         hook, look, subs_ypos=subs_y, hook_ypos=hook_y)
+                                         hook, look, subs_ypos=subs_y, hook_ypos=hook_y, subs_size=subs_size,
+                                         text_size=text_size)
         with open(out, "rb") as f:
             return f.read()
 
@@ -182,6 +198,12 @@ def thumb(base, color, effects, accent="Aukso gradientas"):
             return f.read()
 
 
+st.session_state.setdefault(P + "format", list(reels_studio.STUDIO_FORMATS)[0])
+fmt, cover_size = reels_studio.STUDIO_FORMATS[st.session_state[P + "format"]]
+st.session_state.setdefault(P + "subs_size", 100)
+st.session_state.setdefault(P + "text_size", 100)
+subs_size = st.session_state[P + "subs_size"] / 100
+text_size = st.session_state[P + "text_size"] / 100
 st.session_state.setdefault(P + "subs_pos", "Žemiau")
 st.session_state.setdefault(P + "hook_pos", "Aukščiau")
 subs_y = reels_studio.SUBTITLE_POSITIONS[st.session_state[P + "subs_pos"]]
@@ -189,6 +211,10 @@ hook_y = reels_studio.HOOK_POSITIONS[st.session_state[P + "hook_pos"]]
 st.session_state.setdefault(P + "template", "Prabangus auksas")
 if P + "accent" not in st.session_state:
     apply_template()
+
+top = st.container()  # peržiūra, mygtukai ir rezultatas – viršuje (užpildoma puslapio gale)
+st.markdown('<div class="lux-hint">⚙️ Stilius, tekstai, muzika ir formatas – šoniniame skydelyje '
+            '(telefone – mygtukas » viršuje kairėje)</div>', unsafe_allow_html=True)
 
 # ---------- I. Medžiaga ----------
 with st.container(border=True):
@@ -216,23 +242,27 @@ with st.container(border=True):
 states = {c["audio"] for c in clips}
 speech = "speech" in states
 
+template = st.session_state[P + "template"]
+accent = st.session_state[P + "accent"]
+st.session_state.setdefault(P + "effects", [])
+base = None
+if clips:
+    c0 = clips[0]
+    try:
+        base = base_frame(c0["path"], 0.0 if c0.get("image") else min(1.0, c0["duration"] / 2))
+    except Exception:
+        base = None
+if base is None:
+    base = sample_frame()
+
+sb = st.sidebar
+sb.markdown('<div class="lux-side-title">Nustatymai</div>', unsafe_allow_html=True)
+sb.selectbox("Formatas", list(reels_studio.STUDIO_FORMATS), key=P + "format",
+             help="9:16 – Reels, TikTok, Shorts; 16:9 – YouTube; 1:1 ir 4:5 – Instagram įrašai. "
+                  "Kitokios orientacijos vaizdas dedamas per vidurį su sulietu fonu.")
+
 # ---------- II. Stilius ----------
-with st.container(border=True):
-    step("II", "Stilius", "šablonas, spalvos, akcentas")
-    template = st.session_state[P + "template"]
-    accent = st.session_state[P + "accent"]
-
-    st.session_state.setdefault(P + "effects", [])
-    base = None
-    if clips:
-        c0 = clips[0]
-        try:
-            base = base_frame(c0["path"], 0.0 if c0.get("image") else min(1.0, c0["duration"] / 2))
-        except Exception:
-            base = None
-    if base is None:
-        base = sample_frame()
-
+with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True):
     sample_hook = st.session_state.get(P + "hook") or "Jūsų antraštė čia"
     st.markdown("**Šablonas** · <small>kabliuko ir kvietimo stilius</small>"
                 + ("" if clips else " · <small>įkėlus video matysite savo kadrą</small>"), unsafe_allow_html=True)
@@ -240,8 +270,8 @@ with st.container(border=True):
     for i, (name, t) in enumerate(reels_studio.TEMPLATES.items()):
         sel = name == template
         tile = grid.container(width=124, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_t{i}")
-        tile.image(style_tile(base, name, t["accent"], t["color"], sample_hook, None, hook_y=hook_y),
-                   width="stretch")
+        tile.image(style_tile(base, name, t["accent"], t["color"], sample_hook, None, hook_y=hook_y,
+                              text_size=text_size), width="stretch")
         tile.button(name, key=f"{P}tbtn{i}", type="primary" if sel else "secondary", width="stretch",
                     on_click=pick_template, args=(name,))
 
@@ -277,8 +307,7 @@ with st.container(border=True):
         st.caption("Pasirinkta: " + " · ".join(effects))
 
 # ---------- III. Tekstai ----------
-with st.container(border=True):
-    step("III", "Tekstai", "kabliukas, titrai, kvietimas")
+with sb.expander("✍️  Tekstai ir titrai"):
     hook = st.text_input("Kabliukas – pirmų sekundžių antraštė", key=P + "hook",
                          placeholder="Pvz.: Kaip atrodyti brangiai be didelio biudžeto",
                          help="Trumpa intriguojanti frazė (iki ~8 žodžių) – sustabdo slinkimą.")
@@ -291,6 +320,10 @@ with st.container(border=True):
                      help="Jei kabliukas uždengia veidą ar galvą – nuleiskite žemiau arba pakelkite.")
     c2.select_slider("Titrų vieta", list(reels_studio.SUBTITLE_POSITIONS), key=P + "subs_pos",
                      help="„Apačioje“ titrus gali dalinai uždengti Instagram aprašymas ir mygtukai.")
+    c1, c2 = st.columns(2)
+    c1.slider("Kabliuko dydis", 60, 150, step=5, format="%d%%", key=P + "text_size",
+              help="Kabliuko ir kvietimo veikti teksto dydis.")
+    c2.slider("Titrų dydis", 60, 150, step=5, format="%d%%", key=P + "subs_size")
 
     subtitles = st.toggle("Animuoti titrai", value=True,
                           help="Sakomas žodis paryškinamas akcento spalva.")
@@ -302,7 +335,8 @@ with st.container(border=True):
         for i, (key, L) in enumerate(video_editor.SUBTITLE_LOOKS.items()):
             sel = key == look
             tile = grid.container(width=110, gap=None, key=f"{P}{'tsel' if sel else 'tile'}_l{i}")
-            tile.image(style_tile(base, template, accent, color, "", key, subs_y=subs_y), width="stretch")
+            tile.image(style_tile(base, template, accent, color, "", key, subs_y=subs_y, subs_size=subs_size),
+                       width="stretch")
             tile.button(L["title"], key=f"{P}lbtn{i}", type="primary" if sel else "secondary", width="stretch",
                         on_click=pick_look, args=(key,))
 
@@ -374,8 +408,7 @@ with st.container(border=True):
                                               "per video.")
 
 # ---------- IV. Garsas ----------
-with st.container(border=True):
-    step("IV", "Garsas", "muzika ir švarus balsas")
+with sb.expander("🎵  Garsas ir muzika"):
     library = reels_studio.music_library()
     options = ["Be muzikos"] + list(library) + ["📁 Įkelti savo muziką"]
     music_choice = st.selectbox("Foninė muzika", options, index=1 if library else 0, key=P + "music_choice",
@@ -398,8 +431,7 @@ with st.container(border=True):
     denoise = c2.toggle("Išvalyti foninį triukšmą", value=True)
 
 # ---------- V. Tempas ----------
-with st.container(border=True):
-    step("V", "Tempas ir trukmė")
+with sb.expander("⏱  Tempas, trukmė, viršelis"):
     c1, c2 = st.columns(2)
     length = c1.select_slider("Ilgiausia trukmė", list(reels_studio.LENGTHS), value="90 s")
     speed = c2.select_slider("Greitis", [1.0, 1.05, 1.1, 1.15, 1.25, 1.5], value=1.0,
@@ -431,7 +463,7 @@ def source_for_cover():
 highlight = reels_studio._ass_color(reels_studio.ACCENTS[accent][0])[4:]  # BBGGRR
 work = st.session_state.setdefault(P + "work", tempfile.mkdtemp(prefix="reels_"))
 os.makedirs(work, exist_ok=True)
-signature = (tuple((c["id"], tuple(clips_ui.clip_segments(c) or ())) for c in clips), image_duration, transition,
+signature = (tuple((c["id"], tuple(clips_ui.clip_segments(c) or ())) for c in clips), image_duration, transition, fmt,
              remove_silence, subtitles, client is not None, subtitle_language, subtitle_text.strip())
 prep = st.session_state.get(P + "prep")
 ready = bool(prep) and prep["sig"] == signature and os.path.exists(prep["src"])
@@ -440,15 +472,14 @@ ready = bool(prep) and prep["sig"] == signature and os.path.exists(prep["src"])
 def prepare(say, progress):
     """Sujungia / apkarpo medžiagą, suranda pauzes ir paruošia titrus (be galutinio montažo)."""
     old = st.session_state.get(P + "prep")
-    src, protect = clips[0]["path"], None
     segments = [clips_ui.clip_segments(c) for c in clips]
-    if len(clips) > 1 or clips[0].get("image") or segments[0]:
-        say(f"Sujungiu {len(clips)} įrašus…" if len(clips) > 1 else "Ruošiu medžiagą…")
-        src = os.path.join(work, f"joined_{datetime.datetime.now().strftime('%H%M%S%f')}.mkv")
-        src, spans = video_editor.concat_clips([c["path"] for c in clips], src, "9:16",
-                                               progress=lambda p: progress(p * 0.5), image_duration=image_duration,
-                                               segments=segments, transition=transition)
-        protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
+    # Visada per sujungimą: medžiaga suvienodinama pagal pasirinktą formatą (standartinis dydis, sulietas fonas).
+    say(f"Sujungiu {len(clips)} įrašus…" if len(clips) > 1 else "Ruošiu medžiagą…")
+    src = os.path.join(work, f"joined_{datetime.datetime.now().strftime('%H%M%S%f')}.mkv")
+    src, spans = video_editor.concat_clips([c["path"] for c in clips], src, fmt,
+                                           progress=lambda p: progress(p * 0.5), image_duration=image_duration,
+                                           segments=segments, transition=transition)
+    protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
     analysis = video_editor.analyze(src, remove_silence=remove_silence, subtitles=subtitles, client=client,
                                     subtitle_language=subtitle_language, subtitle_text=subtitle_text,
                                     protect=protect, status=say)
@@ -476,8 +507,9 @@ def build(prep, words, tmp, out, quick, progress):
     """Montažas + Reels apdaila. quick – greita peržiūra (maža raiška, greitas kodavimas)."""
     edited = os.path.join(tmp, "edited.mp4")
     res = video_editor.render_edit(
-        prep["src"], edited, prep["analysis"], words, fmt="9:16", denoise=denoise and not quick,
+        prep["src"], edited, prep["analysis"], words, fmt=fmt, denoise=denoise and not quick,
         loudnorm=not quick, subtitle_style="modern", highlight=highlight, subtitle_look=look, ypos=subs_y,
+        subtitle_size=subs_size,
         progress=lambda p: progress(p * 0.6), max_side=640 if quick else 1920,
         preset="ultrafast" if quick else "veryfast", crf=30 if quick else 20)
     fin = reels_studio.finish(
@@ -485,160 +517,195 @@ def build(prep, words, tmp, out, quick, progress):
         ducking, reels_studio.LENGTHS[length], speed, color, progress_bar,
         progress=lambda p: progress(0.6 + p * 0.4), effects=effects, preview=quick,
         subs_words=prep["analysis"]["words"] if words is None else words, subs_look=look, subs_ypos=subs_y,
-        hook_ypos=hook_y)
+        hook_ypos=hook_y, subs_size=subs_size, text_size=text_size)
     return res, fin
 
 
-# ---------- VI. Titrai ir peržiūra ----------
+# ---------- II. Titrų taisymas (po medžiaga) ----------
 words = None
-with st.container(border=True):
-    step("VI", "Titrai ir peržiūra", "pataisykite prieš kuriant")
-    if not clips:
-        st.caption("Įkėlus medžiagą čia galėsite paruošti titrus, juos pataisyti ir greitai peržiūrėti video.")
-    elif not ready:
-        st.caption("Studija iškirps pauzes" + (" ir parodys titrus – galėsite pataisyti klaidas" if subtitles else "")
-                   + ". Tada – greita peržiūra ir galutinis video.")
-        if prep:
-            st.info("Pakeitėte medžiagą ar titrų nustatymus – paruoškite iš naujo.")
-        if st.button("🎙️  Paruošti titrus ir peržiūrą" if subtitles else "Paruošti peržiūrą", width="stretch",
-                     key=P + "prepare"):
-            box = st.status("Ruošiama…", expanded=True)
-            pbar = st.progress(0.0)
+if clips and subtitles:
+    with st.container(border=True):
+        step("II", "Titrų taisymas", "pataisykite prieš kuriant")
+        if not ready:
+            st.caption("Paspauskite – studija iškirps pauzes ir parodys titrus, kuriuos galėsite pataisyti. "
+                       "(Galite ir iškart spausti „Peržiūra“ ar „Kurti“ viršuje.)")
+            if prep:
+                st.info("Pakeitėte medžiagą, formatą ar titrų nustatymus – paruoškite iš naujo.")
+            if st.button("🎙️  Paruošti titrus", width="stretch", key=P + "prepare"):
+                box = st.status("Ruošiama…", expanded=True)
+                pbar = st.progress(0.0)
+                try:
+                    prepare(box.write, lambda p: pbar.progress(min(1.0, p)))
+                except Exception as e:
+                    box.update(label="Nepavyko paruošti", state="error")
+                    st.error(str(e))
+                    st.stop()
+                st.rerun()
+        else:
+            a = prep["analysis"]
+            lines = prep["lines"]
+            if lines:
+                import pandas as pd
+                st.caption("Spustelėkite tekstą ir pataisykite; ištrintas tekstas – eilutė nerodoma.")
+                df = pd.DataFrame([{"Nuo": round(x, 1), "Iki": round(y, 1), "Tekstas": t} for x, y, t in lines])
+                edited = st.data_editor(
+                    df, key=f"{P}lines_{prep['n']}", hide_index=True, width="stretch", num_rows="fixed",
+                    disabled=["Nuo", "Iki"],
+                    column_config={"Nuo": st.column_config.NumberColumn("Nuo (s)", format="%.1f", width="small"),
+                                   "Iki": st.column_config.NumberColumn("Iki (s)", format="%.1f", width="small"),
+                                   "Tekstas": st.column_config.TextColumn("Tekstas", width="large")})
+                new_lines = [(x, y, str(t) if t is not None else "")
+                             for (x, y, _), t in zip(lines, edited["Tekstas"].tolist())]
+                words = video_editor.apply_line_edits(a["words"], new_lines)
+                changed = sum(1 for (_, _, t0), (_, _, t1) in zip(lines, new_lines) if t0 != t1)
+                if changed:
+                    st.caption(f"✏️ Pataisyta eilučių: {changed} – spauskite „Peržiūra“ viršuje.")
+            else:
+                st.caption("Titrų nėra – kalbos neatpažinta ir teksto neįrašyta.")
+            cut = a["info"]["duration"] - sum(y - x for x, y in a["keep"])
+            st.caption(f"Medžiaga: {a['info']['duration']:.1f} s · iškirpta pauzių: {cut:.1f} s · "
+                       f"kirpimų: {len(a['keep']) - 1}")
+
+# ---------- Peržiūra ir rezultatas (viršuje) ----------
+portrait = cover_size[1] > cover_size[0]
+with top:
+    with st.container(border=True):
+        view = st.container(key=P + "view")
+        row = st.container(horizontal=True, gap="small", key=P + "actions")  # telefone – irgi vienoje eilutėje
+        cover_btn = row.button("👁 Viršelis", width="stretch", disabled=not clips, key=P + "cover_btn",
+                               help="Viršelio peržiūra")
+        quick_btn = row.button("▶ Peržiūra", width="stretch", disabled=not clips, key=P + "quick_btn",
+                               help="Greita peržiūra: visas video mažesne kokybe per kelias sekundes")
+        create = row.button("✨ Kurti", type="primary", width="stretch", disabled=not clips, key=P + "create_btn",
+                            help="Galutinis video pilna kokybe")
+        work_area = st.container()
+
+    def show(media, kind, caption=None):
+        """Rodo vaizdą/video peržiūros lange tinkamu pločiu pagal formatą."""
+        cols = view.columns([1, 1.15, 1]) if portrait else view.columns([1, 6, 1])
+        if kind == "video":
+            cols[1].video(media)
+        else:
+            cols[1].image(media, width="stretch")
+        if caption:
+            cols[1].caption(caption)
+
+    if cover_btn and clips:
+        with work_area, tempfile.TemporaryDirectory() as tmp, st.spinner("Kuriu viršelį…"):
+            path, at = source_for_cover()
+            out = os.path.join(tmp, "cover.jpg")
             try:
-                prepare(box.write, lambda p: pbar.progress(min(1.0, p)))
+                reels_studio.make_cover(path, out, at, hook, accent, template, handle, cover_size[0] // 2,
+                                        cover_size[1] // 2, color=color, effects=effects, text_size=text_size)
+                with open(out, "rb") as f:
+                    st.session_state[P + "preview"] = f.read()
+                st.session_state[P + "view"] = "cover"
             except Exception as e:
-                box.update(label="Nepavyko paruošti", state="error")
+                st.error(str(e))
+
+    if quick_btn and clips:
+        with work_area, tempfile.TemporaryDirectory() as tmp:
+            pbar = st.progress(0.0, text="Kuriama peržiūra…")
+            try:
+                if not ready:
+                    prep = prepare(lambda m: pbar.progress(0.0, text=m), lambda p: pbar.progress(min(1.0, p) * 0.4,
+                                                                                               text="Ruošiama…"))
+                    ready = True
+                out = os.path.join(tmp, "preview.mp4")
+                build(prep, words, tmp, out, True,
+                      lambda p: pbar.progress(0.4 + min(1.0, p) * 0.6, text="Kuriama peržiūra…"))
+                with open(out, "rb") as f:
+                    st.session_state[P + "quick_video"] = f.read()
+                st.session_state[P + "view"] = "quick"
+            except Exception as e:
+                st.error(str(e))
+            pbar.empty()
+
+    if create and clips:
+        st.session_state.pop(P + "preview", None)
+        with work_area, tempfile.TemporaryDirectory() as tmp:
+            status = st.status("Kuriama…", expanded=True)
+            bar = st.progress(0.0)
+            say = status.write
+            try:
+                if not ready:
+                    prep = prepare(say, lambda p: bar.progress(min(1.0, p) * 0.3))
+                final = os.path.join(tmp, "reels.mp4")
+                say("Montuoju ir uždedu apdailą…")
+                res, fin = build(prep, words, tmp, final, False, lambda p: bar.progress(0.3 + min(1.0, p) * 0.65))
+                say("Kuriu viršelį…")
+                # Viršelis iš paruoštos (jau suformatuotos) medžiagos – su tuo pačiu sulietu fonu kaip video.
+                path, at = (prep["src"], min(cover_at, prep["analysis"]["info"]["duration"] - 0.1)) if prep \
+                    else source_for_cover()
+                cover = os.path.join(tmp, "cover.jpg")
+                reels_studio.make_cover(path, cover, at, hook, accent, template, handle, cover_size[0],
+                                        cover_size[1], color=color, effects=effects, text_size=text_size)
+                caption = None
+                if client:
+                    say("Rašau aprašymą ir grotažymes…")
+                    try:
+                        caption = reels_studio.write_caption(client, res.get("text", ""), hook, topic,
+                                                             subtitle_language or "lt")
+                    except Exception as e:
+                        say(f"Aprašymo sukurti nepavyko: {e}")
+            except Exception as e:
+                status.update(label="Nepavyko sukurti", state="error")
                 st.error(str(e))
                 st.stop()
-            st.rerun()
+            bar.progress(1.0)
+            bar.empty()
+            status.update(label="Paruošta", state="complete", expanded=False)
+            with open(final, "rb") as f:
+                video = f.read()
+            with open(cover, "rb") as f:
+                cover_bytes = f.read()
+            st.session_state[P + "result"] = {
+                "video": video, "cover": cover_bytes, "caption": caption, "portrait": portrait,
+                "before": res["original_duration"], "after": fin["duration"], "cuts": res["cuts"],
+                "name": "reels_" + datetime.datetime.now().strftime("%Y%m%d_%H%M")}
+            st.session_state[P + "view"] = "result"
+
+    result = st.session_state.get(P + "result")
+    mode = st.session_state.get(P + "view")
+    if mode == "result" and result:
+        if result.get("portrait", True):
+            c0, cv, cc, c3 = view.columns([0.3, 1.2, 0.9, 0.3])
+        else:
+            c0, cv, cc, c3 = view.columns([0.05, 2.2, 1, 0.05])
+        cv.video(result["video"])
+        cc.image(result["cover"], caption="Viršelis", width="stretch")
+        saved = result["before"] - result["after"]
+        cc.metric("Trukmė", f"{result['after']:.1f} s", f"-{saved:.1f} s" if saved >= 0.1 else None,
+                  delta_color="inverse")
+    elif mode == "quick" and st.session_state.get(P + "quick_video"):
+        show(st.session_state[P + "quick_video"], "video",
+             "Greita peržiūra: mažesnė kokybė, garsas neapdorotas. Galutinis video – mygtukas „Kurti“.")
+    elif mode == "cover" and st.session_state.get(P + "preview"):
+        show(st.session_state[P + "preview"], "image", "Viršelio peržiūra")
+    elif not clips:
+        view.markdown('<div class="lux-empty">Įkelkite video ar nuotraukas žemiau – čia matysite peržiūrą '
+                      'ir rezultatą.</div>', unsafe_allow_html=True)
     else:
-        a = prep["analysis"]
-        lines = prep["lines"]
-        if subtitles and lines:
-            import pandas as pd
-            st.markdown("**Titrai** · <small>spustelėkite tekstą ir pataisykite; ištrintas tekstas – eilutė "
-                        "nerodoma</small>", unsafe_allow_html=True)
-            df = pd.DataFrame([{"Nuo": round(x, 1), "Iki": round(y, 1), "Tekstas": t} for x, y, t in lines])
-            edited = st.data_editor(
-                df, key=f"{P}lines_{prep['n']}", hide_index=True, width="stretch", num_rows="fixed",
-                disabled=["Nuo", "Iki"],
-                column_config={"Nuo": st.column_config.NumberColumn("Nuo (s)", format="%.1f", width="small"),
-                               "Iki": st.column_config.NumberColumn("Iki (s)", format="%.1f", width="small"),
-                               "Tekstas": st.column_config.TextColumn("Tekstas", width="large")})
-            new_lines = [(x, y, str(t) if t is not None else "")
-                         for (x, y, _), t in zip(lines, edited["Tekstas"].tolist())]
-            words = video_editor.apply_line_edits(a["words"], new_lines)
-            changed = sum(1 for (_, _, t0), (_, _, t1) in zip(lines, new_lines) if t0 != t1)
-            if changed:
-                st.caption(f"✏️ Pataisyta eilučių: {changed}")
-        elif subtitles:
-            st.caption("Titrų nėra – kalbos neatpažinta ir teksto neįrašyta.")
-        cut = a["info"]["duration"] - sum(y - x for x, y in a["keep"])
-        st.caption(f"Medžiaga: {a['info']['duration']:.1f} s · iškirpta pauzių: {cut:.1f} s · "
-                   f"kirpimų: {len(a['keep']) - 1}")
-        if st.button("▶  Greita peržiūra", width="stretch", key=P + "quick"):
-            with tempfile.TemporaryDirectory() as tmp:
-                out = os.path.join(tmp, "preview.mp4")
-                pbar = st.progress(0.0, text="Kuriama peržiūra…")
-                try:
-                    build(prep, words, tmp, out, True, lambda p: pbar.progress(min(1.0, p), text="Kuriama peržiūra…"))
-                    with open(out, "rb") as f:
-                        st.session_state[P + "quick_video"] = f.read()
-                except Exception as e:
-                    st.error(str(e))
-                pbar.empty()
-        if st.session_state.get(P + "quick_video"):
-            _, mid, _ = st.columns([1, 1.4, 1])
-            mid.video(st.session_state[P + "quick_video"])
-            mid.caption("Peržiūra mažesne kokybe, garsas neapdorotas. Galutinis video bus pilnos kokybės.")
+        show(base, "image", "Spauskite „▶ Peržiūra“ – pamatysite visą video su titrais ir efektais.")
 
-c1, c2 = st.columns([1, 2])
-preview = c1.button("👁  Viršelio peržiūra", width="stretch", disabled=not clips)
-create = c2.button("✨  Kurti Reels", type="primary", width="stretch", disabled=not clips)
-if not clips:
-    st.caption("Pirmiausia įkelkite arba nufilmuokite medžiagą (I žingsnis).")
-
-if preview and clips:
-    with tempfile.TemporaryDirectory() as tmp, st.spinner("Kuriu peržiūrą…"):
-        path, at = source_for_cover()
-        out = os.path.join(tmp, "cover.jpg")
-        try:
-            reels_studio.make_cover(path, out, at, hook, accent, template, handle, 540, 960, color=color,
-                                    effects=effects)
-            with open(out, "rb") as f:
-                st.session_state[P + "preview"] = f.read()
-        except Exception as e:
-            st.error(str(e))
-if P + "preview" in st.session_state and clips:
-    _, mid, _ = st.columns([1, 1.2, 1])
-    mid.image(st.session_state[P + "preview"], caption="Peržiūra", width="stretch")
-
-if create and clips:
-    st.session_state.pop(P + "preview", None)
-    with tempfile.TemporaryDirectory() as tmp:
-        status = st.status("Kuriamas Reels…", expanded=True)
-        bar = st.progress(0.0)
-        say = status.write
-        try:
-            if not ready:
-                prep = prepare(say, lambda p: bar.progress(min(1.0, p) * 0.3))
-            final = os.path.join(tmp, "reels.mp4")
-            say("Montuoju ir uždedu apdailą…")
-            res, fin = build(prep, words, tmp, final, False, lambda p: bar.progress(0.3 + min(1.0, p) * 0.65))
-            say("Kuriu viršelį…")
-            path, at = source_for_cover()
-            cover = os.path.join(tmp, "cover.jpg")
-            reels_studio.make_cover(path, cover, at, hook, accent, template, handle, color=color, effects=effects)
-            caption = None
-            if client:
-                say("Rašau aprašymą ir grotažymes…")
-                try:
-                    caption = reels_studio.write_caption(client, res.get("text", ""), hook, topic,
-                                                         subtitle_language or "lt")
-                except Exception as e:
-                    say(f"Aprašymo sukurti nepavyko: {e}")
-        except Exception as e:
-            status.update(label="Nepavyko sukurti Reels", state="error")
-            st.error(str(e))
-            st.stop()
-        bar.progress(1.0)
-        status.update(label="Reels paruoštas", state="complete", expanded=False)
-        with open(final, "rb") as f:
-            video = f.read()
-        with open(cover, "rb") as f:
-            cover_bytes = f.read()
-        st.session_state[P + "result"] = {
-            "video": video, "cover": cover_bytes, "caption": caption,
-            "before": res["original_duration"], "after": fin["duration"], "cuts": res["cuts"],
-            "name": "reels_" + datetime.datetime.now().strftime("%Y%m%d_%H%M")}
-
-result = st.session_state.get(P + "result")
-if result:
-    with st.container(border=True):
-        step("✦", "Rezultatas")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Medžiaga", f"{result['before']:.1f} s")
-        m2.metric("Reels", f"{result['after']:.1f} s")
-        m3.metric("Kirpimų", result["cuts"])
-        v, c = st.columns([3, 2])
-        v.video(result["video"])
-        c.image(result["cover"], caption="Viršelis", width="stretch")
-        d1, d2 = st.columns(2)
-        d1.download_button("⬇  Atsisiųsti Reels", result["video"], file_name=result["name"] + ".mp4",
-                           mime="video/mp4", type="primary", width="stretch")
-        d2.download_button("⬇  Viršelis (JPG)", result["cover"], file_name=result["name"] + "_virselis.jpg",
-                           mime="image/jpeg", width="stretch")
-        cap = result.get("caption")
-        if cap:
-            st.markdown("**Aprašymas**")
-            st.markdown(f'<div class="lux-caption">{html.escape(cap["caption"])}</div>'
-                        f'<div class="lux-tags">{html.escape(" ".join(cap["hashtags"]))}</div>', unsafe_allow_html=True)
-            st.code(cap["caption"] + "\n\n" + " ".join(cap["hashtags"]), language=None)
-            st.caption("☝️ Nukopijuokite mygtuku dešiniajame kampe.")
-            if cap.get("hooks"):
-                st.markdown("**Kabliukų idėjos kitam kartui:** " + " · ".join(f"„{h}“" for h in cap["hooks"]))
-        elif client is None and plan != "basic":
-            st.caption("Aprašymui ir grotažymėms sugeneruoti reikia OpenAI rakto.")
+    if result and mode == "result":
+        with st.container(border=True):
+            d1, d2 = st.columns(2)
+            d1.download_button("⬇  Atsisiųsti video", result["video"], file_name=result["name"] + ".mp4",
+                               mime="video/mp4", type="primary", width="stretch")
+            d2.download_button("⬇  Viršelis (JPG)", result["cover"], file_name=result["name"] + "_virselis.jpg",
+                               mime="image/jpeg", width="stretch")
+            cap = result.get("caption")
+            if cap:
+                st.markdown("**Aprašymas**")
+                st.markdown(f'<div class="lux-caption">{html.escape(cap["caption"])}</div>'
+                            f'<div class="lux-tags">{html.escape(" ".join(cap["hashtags"]))}</div>',
+                            unsafe_allow_html=True)
+                st.code(cap["caption"] + "\n\n" + " ".join(cap["hashtags"]), language=None)
+                if cap.get("hooks"):
+                    st.markdown("**Kabliukų idėjos kitam kartui:** " + " · ".join(f"„{h}“" for h in cap["hooks"]))
+            elif client is None and plan != "basic":
+                st.caption("Aprašymui ir grotažymėms sugeneruoti reikia OpenAI rakto.")
 
 if plan == "admin":
     with st.expander("👑 Administravimas – klientai ir naudojimas šį mėnesį"):
