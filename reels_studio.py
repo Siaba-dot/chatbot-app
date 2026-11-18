@@ -1191,6 +1191,104 @@ def make_cover(path, out_path, at=0.5, hook="", accent="Auksas", template="Praba
     return out_path
 
 
+def _ai_json(client, system, user, temperature=0.4):
+    """Užklausa OpenAI, atsakymas – JSON (bandomi keli modeliai)."""
+    last = None
+    for m in video_editor.TRANSLATE_MODELS:
+        try:
+            r = client.chat.completions.create(
+                model=m, temperature=temperature, response_format={"type": "json_object"},
+                messages=[{"role": "system", "content": system},
+                          {"role": "user", "content": json.dumps(user, ensure_ascii=False)}])
+            return json.loads(r.choices[0].message.content)
+        except Exception as e:  # modelis nepasiekiamas – bandom kitą
+            last = e
+    raise RuntimeError(f"Dirbtinis intelektas neatsakė: {last}")
+
+
+def transcript_lines(words, speed=1.0, limit=300):
+    """Kalba su laikais galutiniame video: „[3.2] žodis“ (dirbtiniam intelektui)."""
+    return " ".join(f"[{a / speed:.1f}] {video_editor.plain(w)}" for w, a, _ in list(words)[:limit])
+
+
+def ai_direct(client, request, settings, options, words=(), speed=1.0):
+    """✨ AI režisierius: naudotojo prašymas (bet kokia kalba) -> nustatymų pakeitimai.
+    settings – dabartiniai nustatymai, options – leistinos reikšmės. Grąžina {"changes": {...}, "summary": str}."""
+    system = (
+        "You are the creative director of a luxury Reels/Shorts video editing studio. The user describes in "
+        "Lithuanian (or another language) how the video should change. Change ONLY the settings needed to "
+        "fulfil the request, using ONLY the allowed values listed in `options` (copy them exactly). "
+        "Numbers must be within the given ranges. `effects` is the complete new list of effects. "
+        "To freeze the frame at a moment (\"Gintaro akimirka\"), add that effect and set `moment_at` in seconds "
+        "of the final video – use the transcript times ([seconds] word) to find words the user mentions. "
+        "Texts (hook, cta) must be short, catchy, in the language of the transcript (default Lithuanian) "
+        "with correct diacritics. If something cannot be done with these settings, say so in the summary. "
+        'Reply only with JSON: {"changes": {"setting": value, ...}, "summary": "1-3 short sentences in '
+        'Lithuanian: what you changed and why"}')
+    user = {"request": request, "current": settings, "options": options,
+            "transcript": transcript_lines(words, speed)}
+    j = _ai_json(client, system, user)
+    ch = j.get("changes") if isinstance(j.get("changes"), dict) else {}
+    return {"changes": ch, "summary": str(j.get("summary", "")).strip()}
+
+
+def ai_hooks(client, words=(), topic="", text=""):
+    """3–5 kabliukų pasiūlymai pagal kalbą / temą."""
+    system = ("You write scroll-stopping hooks for Instagram Reels. Based on the spoken text (or topic), write 5 "
+              "different short hooks (max 7 words each) in the language of the text (default Lithuanian, correct "
+              "diacritics): curiosity, benefit, number, question, bold claim. "
+              'Reply only with JSON: {"hooks": ["..."]}')
+    spoken = " ".join(video_editor.plain(w[0]) for w in words)[:3000] or text[:3000]
+    j = _ai_json(client, system, {"spoken_text": spoken, "topic": topic}, temperature=0.8)
+    return [str(h).strip().strip('"„“') for h in j.get("hooks", []) if str(h).strip()][:5]
+
+
+def ai_key_word_indices(client, words):
+    """Svarbiausių žodžių numeriai (AI): ne daugiau kaip ~1 per 2,5 s, tik prasminiai žodžiai."""
+    if not words:
+        return []
+    numbered = [f"{i}:{video_editor.plain(w)}" for i, (w, _, _) in enumerate(words[:400])]
+    dur = max(1.0, words[-1][2] - words[0][1])
+    n = max(1, min(25, round(dur / 2.6)))
+    system = ("You edit subtitles for viral short videos. From the numbered words, choose the most important words "
+              f"to emphasize visually (up to {n}): key numbers, product names, strong emotional or benefit words – "
+              "never filler words, pronouns or prepositions. Spread them across the video. "
+              'Reply only with JSON: {"indices": [numbers]}')
+    j = _ai_json(client, system, {"words": " ".join(numbered)}, temperature=0.2)
+    out = []
+    for i in j.get("indices", []):
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(words) and i not in out:
+            out.append(i)
+    return sorted(out)[:n]
+
+
+def mark_indices(words, indices, min_gap=1.2):
+    """Pažymi nurodytus žodžius *žodis* (per arti vienas kito – praleidžiami)."""
+    out, last = list(words), -1e9
+    for i in sorted(indices):
+        w, a, b = out[i]
+        if a - last < min_gap or not re.search(r"\w", w):
+            continue
+        m = re.match(r"^(\W*)(.*?)(\W*)$", w, flags=re.UNICODE)
+        out[i] = (f"{m.group(1)}{video_editor.KEY_MARK}{m.group(2)}{video_editor.KEY_MARK}{m.group(3)}", a, b)
+        last = a
+    return out
+
+
+def ai_moment(client, words, speed=1.0):
+    """Svarbiausia video akimirka (s galutiniame video) – „Gintaro akimirkai“."""
+    system = ("Find the single most impactful moment in this short video's speech – the key reveal, number, "
+              "result or emotional peak – where freezing the frame for 1.6 s would add drama. Times are in "
+              "[seconds]. Reply only with JSON: {\"time\": seconds, \"word\": \"the word\", \"why\": "
+              "\"short reason in Lithuanian\"}")
+    j = _ai_json(client, system, {"transcript": transcript_lines(words, speed)}, temperature=0.2)
+    return float(j.get("time", 0)), str(j.get("word", "")), str(j.get("why", ""))
+
+
 def write_caption(client, text="", hook="", topic="", language="lt", model=None):
     """Instagram aprašymas, grotažymės ir kabliukų idėjos per OpenAI.
     Grąžina {"caption": str, "hashtags": [str], "hooks": [str]}."""
