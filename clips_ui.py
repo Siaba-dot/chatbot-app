@@ -42,7 +42,24 @@ def add_clip(prefix, clip_id, ext, data, name, kind):
             path = mkv
     with st.spinner(f"Tikrinu „{name}“…"):
         try:
-            info = video_editor.probe(path)
+            try:
+                info = video_editor.probe(path)
+                if not info.get("duration"):
+                    raise ValueError("nežinoma trukmė")
+            except Exception:
+                if kind != "rec":
+                    raise
+                # Kai kurių naršyklių (ypač iPhone Safari) įrašai – neįprastos struktūros: perkoduojam į MP4
+                fixed = path + ".fixed.mp4"
+                cmd = video_editor.limit_threads(
+                    ["ffmpeg", "-y", "-loglevel", "error", "-fflags", "+genpts", "-i", path, "-vf", "format=yuv420p",
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k", fixed])
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                if r.returncode != 0:
+                    raise RuntimeError(r.stderr[-300:] or "nepavyko perkoduoti")
+                os.unlink(path)
+                path = fixed
+                info = video_editor.probe(path)
             duration = info["duration"]
             image = video_editor.is_image(path)
             if not image and max(info["width"], info["height"]) > 1920:
@@ -60,10 +77,13 @@ def add_clip(prefix, clip_id, ext, data, name, kind):
                         path = small
                         duration = video_editor.probe(path)["duration"]
             state, an = ("none", None) if image else video_editor.audio_status(path)
-        except Exception:
-            os.unlink(path)
+        except Exception as e:
+            if os.path.exists(path):
+                os.unlink(path)
             skip.add(clip_id)
-            st.error(f"„{name}“ nepavyko atidaryti. Įkelkite video (pvz. MP4, MOV) arba nuotrauką (JPG, PNG).")
+            st.session_state[prefix + "last_error"] = (clip_id, f"„{name}“ nepavyko atidaryti ({e})".strip())
+            st.error(f"„{name}“ nepavyko atidaryti. Įkelkite video (pvz. MP4, MOV) arba nuotrauką (JPG, PNG)."
+                     + (f" Priežastis: {str(e)[:200]}" if kind == "rec" else ""))
             return
     clips.append({"id": clip_id, "path": path, "name": name, "kind": kind, "duration": duration,
                   "image": image,
@@ -174,11 +194,27 @@ def clip_picker(prefix="", trim=False):
             st.rerun()
     else:
         st.session_state[ids_key] = set()  # įkėlimo laukas paslėptas – jo būsena išsivalo
-        rec = video_recorder(key=prefix + "recorder", default=None)
+        # Įrašas perskaitomas PRIEŠ piešiant filmavimo langą – kad langas iškart parodytų, ar įrašas priimtas.
+        rec = st.session_state.get(prefix + "recorder")
+        status = None
         if rec and rec.get("data"):
+            cid = f"rec-{rec['id']}"
             n = sum(c["kind"] == "rec" for c in st.session_state[prefix + "clips"]) + 1
-            add_clip(prefix, f"rec-{rec['id']}", ".mp4" if "mp4" in (rec.get("mime") or "") else ".webm",
-                     lambda: base64.b64decode(rec["data"]), f"Įrašas {n}", "rec")
+            try:
+                add_clip(prefix, cid, ".mp4" if "mp4" in (rec.get("mime") or "") else ".webm",
+                         lambda: base64.b64decode(rec["data"]), f"Įrašas {n}", "rec")
+            except Exception as e:  # pvz. sugadinti duomenys
+                st.session_state.setdefault(prefix + "skip_clips", set()).add(cid)
+                st.session_state[prefix + "last_error"] = (cid, f"Įrašo nepavyko priimti ({e})")
+            if any(c["id"] == cid for c in st.session_state[prefix + "clips"]):
+                status = {"id": rec["id"], "ok": True}
+            else:
+                err = st.session_state.get(prefix + "last_error") or (None, "")
+                status = {"id": rec["id"], "ok": False,
+                          "msg": err[1] if err[0] == cid else "Įrašas pašalintas arba nepriimtas."}
+        video_recorder(key=prefix + "recorder", default=None, status=status)
+        st.caption("📱 Telefone galite filmuoti ir įprasta kamera: pasirinkite „📁 Įkelti video“ → "
+                   "„Filmuoti video“ (iPhone) ar „Kamera“ (Android) – kokybė būna geresnė.")
 
     clips = st.session_state[prefix + "clips"]
     image_duration = video_editor.IMAGE_DURATION
