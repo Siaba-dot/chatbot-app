@@ -951,12 +951,14 @@ def link_help(result):
 def ai_director_ui():
     """✨ AI režisierius – Reels patobulinimas pagal žodinį prašymą."""
     box = st.container(key=P + "ai_box")
-    if client is None:
-        if clips:
-            box.caption("✨ **AI režisierius** – Reels patobulinimas pagal jūsų prašymą: " +
-                        ("Premium plane." if plan == "basic" else "reikia OpenAI rakto (Tekstai ir titrai)."))
+    if client is None:  # visada matoma – kad būtų aišku, kur ir kada AI veikia
+        box.caption("✨ **AI režisierius** – patobulina Reels pagal jūsų prašymą, parenka debesėlius, kabliukus ir "
+                    "svarbiausius žodžius: " + ("Premium plane." if plan == "basic" else
+                                                "įveskite OpenAI raktą (⚙️ Nustatymai → Tekstai ir titrai)."))
         return
     if not clips:
+        box.caption("✨ **AI režisierius** – įkelkite ar nufilmuokite video, ir galėsite parašyti, kaip jį "
+                    "patobulinti (pvz. „padaryk prabangiau, su debesėliais“).")
         return
     words = ai_words()
     box.text_input("✨ AI režisierius – ką patobulinti?", key=P + "ai_req",
@@ -967,7 +969,8 @@ def ai_director_ui():
     row.button("✨ Pritaikyti", type="primary", key=P + "ai_go", on_click=run_ai_director, args=(client, words))
     presets = [("💎 Prabangiau", "Padaryk prabangiau ir elegantiškiau"),
                ("⚡ Energingiau", "Padaryk energingiau ir dinamiškiau, trumpesnį"),
-               ("🌿 Ramiau", "Padaryk ramesnį, švelnesnį ir natūralesnį")]
+               ("🌿 Ramiau", "Padaryk ramesnį, švelnesnį ir natūralesnį"),
+               ("💬 Debesėliai", "Įjunk debesėlius ir svarbiausius žodžius su akcentų priartėjimu")]
     for i, (label, text) in enumerate(presets):
         row.button(label, key=f"{P}ai_p{i}", on_click=run_ai_director, args=(client, words, text))
     if words:

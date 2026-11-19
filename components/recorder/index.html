@@ -4,24 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  :root { --red: #ff4b4b; --text: #31333f; --muted: #6b6f7b; --bg: #f0f2f6; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Source Sans Pro", "Source Sans 3", system-ui, sans-serif; color: var(--text); }
-  .box { background: var(--bg); border-radius: 10px; padding: 12px; }
-  video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; display: none; }
+  /* Studijos stilius: gilus mėlynas fonas, gintariniai mygtukai */
+  :root { --amber: #E39B2E; --honey: #FFD58A; --ink: #061226; --text: #F3E7D3; --muted: #B4C3D8;
+          --panel: rgba(14,34,66,.72); --rec: #FF5A4E; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--text); background: transparent; }
+  .box { background: var(--panel); border: 1px solid rgba(227,155,46,.35); border-radius: 14px; padding: 12px;
+         box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  video { width: 100%; max-height: 60vh; background: #000; border-radius: 10px; display: none;
+          border: 1px solid rgba(227,155,46,.25); }
   video.mirror { transform: scaleX(-1); }
   .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-  button { flex: 1 1 auto; min-height: 44px; font-size: 16px; border-radius: 8px; border: 1px solid #d0d3da;
-           background: #fff; color: var(--text); padding: 8px 12px; cursor: pointer; font-family: inherit; }
-  button.primary { background: var(--red); border-color: var(--red); color: #fff; }
+  button { flex: 1 1 auto; min-height: 46px; font-size: 16px; border-radius: 12px;
+           border: 1px solid rgba(227,155,46,.45); background: rgba(6,18,38,.6); color: var(--text);
+           padding: 8px 12px; cursor: pointer; font-family: inherit; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: linear-gradient(100deg, #B85F12, #FFD58A 45%, #E39B2E 70%, #B85F12); border: 0;
+                   color: var(--ink); font-weight: 600; letter-spacing: .02em; }
+  button#stop { background: var(--rec); color: #fff; }
   button:disabled { opacity: .45; cursor: default; }
   .hidden { display: none !important; }
   .msg { margin-top: 8px; font-size: 15px; color: var(--muted); }
-  .msg.err { color: #b42318; }
+  .msg.err { color: #FF8A80; }
   .meter { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; color: var(--muted); }
-  .bar { flex: 1; height: 8px; background: #dfe2e8; border-radius: 4px; overflow: hidden; }
-  .bar > div { height: 100%; width: 0; background: #21c354; transition: width .08s; }
-  .rec { color: var(--red); font-weight: 600; }
+  .bar { flex: 1; height: 8px; background: rgba(180,195,216,.18); border-radius: 4px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, #E39B2E, #FFD58A); transition: width .08s; }
+  .rec { color: var(--rec); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -57,6 +65,21 @@ function say(text, err) { const m = $("msg"); m.textContent = text; m.classList.
 
 window.addEventListener("message", e => { if (e.data && e.data.type === "streamlit:render") resize(); });
 new ResizeObserver(resize).observe(document.body);
+// Studijos atsakymas: ar įrašas priimtas (rodom tik tada, kai Python patvirtina)
+let sentId = null, shownId = null;
+window.addEventListener("message", e => {
+  if (!e.data || e.data.type !== "streamlit:render") return;
+  const st = (e.data.args || {}).status;
+  if (!st || st.id !== sentId || st.id === shownId) return;
+  shownId = st.id;
+  if (st.ok) {
+    say("✅ Įrašas pridėtas – jį matote žemiau. Galite nufilmuoti dar vieną arba viršuje spausti „Peržiūra“.");
+  } else {
+    say("⚠️ " + (st.msg || "Įrašo nepavyko pridėti.") + " Pabandykite dar kartą arba įkelkite video iš galerijos.", true);
+  }
+  $("again").textContent = "🎥 Filmuoti kitą įrašą";
+  show(["again"]);
+});
 send("streamlit:componentReady", {apiVersion: 1});
 
 function stopStream() {
@@ -155,12 +178,20 @@ function useRecording() {
   reader.onload = () => {
     const url = String(reader.result);  // data:video/webm;codecs=vp8,opus;base64,....
     const data = url.slice(url.indexOf("base64,") + 7);
+    sentId = Date.now();
     send("streamlit:setComponentValue", {dataType: "json",
-      value: {id: Date.now(), mime: blob.type, data}});
+      value: {id: sentId, mime: blob.type, data}});
     $("use").disabled = false;
-    say("✅ Įrašas pridėtas. Galite nufilmuoti dar vieną arba žemiau spausti „Sumontuoti“.");
-    $("again").textContent = "🎥 Filmuoti kitą įrašą";
-    show(["again"]);
+    say("⏳ Studija tikrina įrašą… (didelis įrašas gali užtrukti iki minutės)");
+    show([]);
+    const waiting = sentId;
+    setTimeout(() => {
+      if (shownId === waiting || sentId !== waiting) return;
+      say("⚠️ Studija neatsako – įrašas gali būti per didelis arba nutrūko ryšys. Nufilmuokite trumpesnį " +
+          "arba įkelkite video iš galerijos.", true);
+      $("again").textContent = "🎥 Filmuoti iš naujo";
+      show(["again"]);
+    }, 150000);
   };
   reader.readAsDataURL(blob);
 }
