@@ -607,12 +607,13 @@ with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True)
     signature = ["c:" + n for n in reels_studio.SIGNATURE_FILTERS] + ["e:" + n for n in reels_studio.SIGNATURE_EFFECTS]
     tiles(P + "style_tiles", items,
           ["t:" + template, "c:" + color] + ["e:" + e for e in effects],
-          tabs=[{"name": "Šablonai", "items": ["t:" + n for n in reels_studio.TEMPLATES]}]
-          + [{"name": cat, "items": ["t:" + n for n, t in reels_studio.TEMPLATES.items() if t.get("cat") == cat]}
-             for cat in reels_studio.TEMPLATE_CATEGORIES if cat != "Prabanga"]
-          + [{"name": "Filtrai", "items": ["c:" + n for n in reels_studio.COLOR_FILTERS]},
+          # pirmiausia – pagrindiniai skirtukai (telefone matomi iškart), po jų – šablonų kategorijos
+          tabs=[{"name": "Šablonai", "items": ["t:" + n for n in reels_studio.TEMPLATES]},
+                {"name": "Filtrai", "items": ["c:" + n for n in reels_studio.COLOR_FILTERS]},
                 {"name": "Efektai", "items": ["e:" + n for n in reels_studio.EFFECTS], "multi": True},
-                {"name": "✦ Firminiai", "items": signature}])
+                {"name": "✦ Firminiai", "items": signature}]
+          + [{"name": cat, "items": ["t:" + n for n, t in reels_studio.TEMPLATES.items() if t.get("cat") == cat],
+              "sub": True} for cat in reels_studio.TEMPLATE_CATEGORIES if cat != "Prabanga"])
     st.caption(f"Šablonas: **{template}** · filtras: **{color}**"
                + (" · efektai: " + ", ".join(effects) if effects else " · efektų galima rinktis kelis")
                + ("" if clips else " · įkėlus video matysite savo kadrą"))

@@ -7,11 +7,15 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--text); background: transparent;
          user-select: none; -webkit-user-select: none; }
-  .tabs { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid rgba(180,195,216,.18);
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px 14px; border-bottom: 1px solid rgba(180,195,216,.18);
           margin-bottom: 10px; padding: 0 2px; }
-  .tabs::-webkit-scrollbar { display: none; }
   .tab { flex: none; padding: 6px 0 8px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer;
          border-bottom: 2px solid transparent; white-space: nowrap; }
+  /* šablonų kategorijos – mažesni „žetonai“ antroje eilutėje */
+  .tab.sub { font-size: 12.5px; font-weight: 500; padding: 3px 10px; margin: 2px 0 6px; border: 1px solid rgba(227,155,46,.35);
+             border-radius: 999px; }
+  .tab.sub.on { background: rgba(227,155,46,.18); border-color: var(--amber); }
+  .tabs .br { flex-basis: 100%; height: 0; }
   .tab.on { color: var(--text); border-bottom-color: var(--amber); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--size, 64px), 1fr)); gap: 10px 8px;
           padding: 2px; }
@@ -49,9 +53,14 @@ function render() {
   if (tab >= tabs.length) tab = 0;
   $("tabs").style.display = tabs.length > 1 ? "flex" : "none";
   $("tabs").innerHTML = "";
+  const onTemplates = tab === 0 || (tabs[tab] || {}).sub;  // kategorijos rodomos tik prie šablonų
   tabs.forEach((t, i) => {
+    if (t.sub && !onTemplates) return;
+    if (t.sub && !(tabs[i - 1] || {}).sub) {  // kategorijos – naujoje eilutėje
+      const br = document.createElement("div"); br.className = "br"; $("tabs").appendChild(br);
+    }
     const d = document.createElement("div");
-    d.className = "tab" + (i === tab ? " on" : ""); d.textContent = t.name;
+    d.className = "tab" + (t.sub ? " sub" : "") + (i === tab ? " on" : ""); d.textContent = t.name;
     d.onclick = () => { tab = i; render(); };
     $("tabs").appendChild(d);
   });
