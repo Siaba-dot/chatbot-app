@@ -65,21 +65,6 @@ function say(text, err) { const m = $("msg"); m.textContent = text; m.classList.
 
 window.addEventListener("message", e => { if (e.data && e.data.type === "streamlit:render") resize(); });
 new ResizeObserver(resize).observe(document.body);
-// Studijos atsakymas: ar įrašas priimtas (rodom tik tada, kai Python patvirtina)
-let sentId = null, shownId = null;
-window.addEventListener("message", e => {
-  if (!e.data || e.data.type !== "streamlit:render") return;
-  const st = (e.data.args || {}).status;
-  if (!st || st.id !== sentId || st.id === shownId) return;
-  shownId = st.id;
-  if (st.ok) {
-    say("✅ Įrašas pridėtas – jį matote žemiau. Galite nufilmuoti dar vieną arba viršuje spausti „Peržiūra“.");
-  } else {
-    say("⚠️ " + (st.msg || "Įrašo nepavyko pridėti.") + " Pabandykite dar kartą arba įkelkite video iš galerijos.", true);
-  }
-  $("again").textContent = "🎥 Filmuoti kitą įrašą";
-  show(["again"]);
-});
 send("streamlit:componentReady", {apiVersion: 1});
 
 function stopStream() {
@@ -145,7 +130,7 @@ function startRecording() {
   chunks = [];
   const mime = pickMime();
   try {
-    recorder = new MediaRecorder(stream, Object.assign({videoBitsPerSecond: 2500000}, mime ? {mimeType: mime} : {}));
+    recorder = new MediaRecorder(stream, Object.assign({videoBitsPerSecond: 2000000}, mime ? {mimeType: mime} : {}));
   } catch (e) { say("Nepavyko pradėti filmuoti: " + e.message, true); return; }
   recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.onstop = finishRecording;
@@ -171,30 +156,55 @@ function finishRecording() {
   show(["use", "again"]);
 }
 
-function useRecording() {
-  $("use").disabled = true;
-  say("Siunčiu įrašą programai…");
+// Įrašas siunčiamas dalimis: Streamlit Cloud didelių žinučių neperduoda. Kiekvieną dalį studija patvirtina.
+const CHUNK = 384 * 1024;  // didesnės dalys Streamlit Cloud nepereina (~1 MB riba)
+let sentId = null, shownId = null, nChunks = 0, curIdx = -1, retryTimer = null, sending = false;
+
+function sendChunk(i) {
+  curIdx = i;
   const reader = new FileReader();
   reader.onload = () => {
-    const url = String(reader.result);  // data:video/webm;codecs=vp8,opus;base64,....
+    const url = String(reader.result);
     const data = url.slice(url.indexOf("base64,") + 7);
-    sentId = Date.now();
     send("streamlit:setComponentValue", {dataType: "json",
-      value: {id: sentId, mime: blob.type, data}});
-    $("use").disabled = false;
-    say("⏳ Studija tikrina įrašą… (didelis įrašas gali užtrukti iki minutės)");
-    show([]);
-    const waiting = sentId;
-    setTimeout(() => {
-      if (shownId === waiting || sentId !== waiting) return;
-      say("⚠️ Studija neatsako – įrašas gali būti per didelis arba nutrūko ryšys. Nufilmuokite trumpesnį " +
-          "arba įkelkite video iš galerijos.", true);
-      $("again").textContent = "🎥 Filmuoti iš naujo";
-      show(["again"]);
-    }, 150000);
+      value: {id: sentId, mime: blob.type, idx: i, total: nChunks, data}});
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => { if (sending && curIdx === i) sendChunk(i); }, 25000);  // pasimetė – kartojam
   };
-  reader.readAsDataURL(blob);
+  reader.readAsDataURL(blob.slice(i * CHUNK, (i + 1) * CHUNK));
 }
+
+function useRecording() {
+  sentId = Date.now(); nChunks = Math.max(1, Math.ceil(blob.size / CHUNK)); sending = true;
+  say("⏳ Siunčiu įrašą studijai… 0 %");
+  show([]);
+  sendChunk(0);
+}
+
+// Studijos atsakymai: kiek dalių gauta ir ar įrašas priimtas
+window.addEventListener("message", e => {
+  if (!e.data || e.data.type !== "streamlit:render") return;
+  const st = (e.data.args || {}).status;
+  if (!st || st.id !== sentId) return;
+  if (st.ok === undefined) {  // dalis gauta – siunčiam kitą
+    if (st.got === curIdx && curIdx + 1 < nChunks) {
+      say("⏳ Siunčiu įrašą studijai… " + Math.round((curIdx + 1) / nChunks * 100) + " %");
+      sendChunk(curIdx + 1);
+    } else if (st.got === nChunks - 1) {
+      say("⏳ Studija tikrina įrašą…");
+    }
+    return;
+  }
+  if (st.id === shownId) return;
+  shownId = st.id; sending = false; clearTimeout(retryTimer);
+  if (st.ok) {
+    say("✅ Įrašas pridėtas – jį matote žemiau. Galite nufilmuoti dar vieną arba viršuje spausti „Peržiūra“.");
+  } else {
+    say("⚠️ " + (st.msg || "Įrašo nepavyko pridėti.") + " Pabandykite dar kartą arba įkelkite video iš galerijos.", true);
+  }
+  $("again").textContent = "🎥 Filmuoti kitą įrašą";
+  show(["again"]);
+});
 
 $("start").onclick = openCamera;
 $("again").onclick = openCamera;
