@@ -244,12 +244,38 @@ GRADIENTS = {
 }
 
 # Teksto šablonai. elegant – serifinis šriftas be dėžutės su plona linija, box – ryški dėžutė.
+# Šablonai: kabliuko ir kvietimo stilius + akcentas + filtras. kind: elegant (serifinis), script (ranka rašytas),
+# box (dėžutėje), bold (stambios raidės su kontūru); font – kitas šriftas, scale – teksto dydžio pataisa,
+# cat – kategorija (skirtukai studijoje).
+TEMPLATE_CATEGORIES = ("Prabanga", "Verslas", "Grožis", "Maistas", "Kelionės", "Šventės")
 TEMPLATES = {
-    "Baltijos gintaras": {"kind": "elegant", "accent": "Gintaro gradientas", "color": "Baltijos auksas"},
-    "Prabangus auksas": {"kind": "elegant", "accent": "Aukso gradientas", "color": "Auksinė valanda"},
-    "Ranka rašytas": {"kind": "script", "accent": "Aukso gradientas", "color": "Auksinė valanda"},
-    "Elegantiškas minimalizmas": {"kind": "elegant", "accent": "Sidabro gradientas", "color": "Kino"},
-    "Ryškus (TikTok stilius)": {"kind": "box", "accent": "Geltona", "color": "Ryškios"},
+    "Baltijos gintaras": {"kind": "elegant", "accent": "Gintaro gradientas", "color": "Baltijos auksas",
+                          "cat": "Prabanga"},
+    "Prabangus auksas": {"kind": "elegant", "accent": "Aukso gradientas", "color": "Auksinė valanda",
+                         "cat": "Prabanga"},
+    "Ranka rašytas": {"kind": "script", "accent": "Aukso gradientas", "color": "Auksinė valanda", "cat": "Prabanga"},
+    "Elegantiškas minimalizmas": {"kind": "elegant", "accent": "Sidabro gradientas", "color": "Kino",
+                                  "cat": "Prabanga"},
+    "Ryškus (TikTok stilius)": {"kind": "box", "accent": "Geltona", "color": "Ryškios", "cat": "Prabanga"},
+    # Verslas
+    "Verslo galia": {"kind": "bold", "accent": "Sidabro gradientas", "color": "Šaltos", "cat": "Verslas"},
+    "Ekspertas": {"kind": "elegant", "accent": "Šampanas", "color": "Natūralios", "cat": "Verslas"},
+    # Grožis
+    "Grožio salonas": {"kind": "script", "font": "Dancing Script", "scale": 0.75, "accent": "Rožinė",
+                       "color": "Paryžiaus rytas", "cat": "Grožis"},
+    "Šampano švelnumas": {"kind": "elegant", "accent": "Šampanas", "color": "Pastelinės", "cat": "Grožis"},
+    # Maistas
+    "Gardžiai!": {"kind": "box", "accent": "Raudona", "color": "Ryškios", "cat": "Maistas"},
+    "Kavinės jaukumas": {"kind": "script", "font": "Dancing Script", "scale": 0.75, "accent": "Auksas",
+                         "color": "Vintažas", "cat": "Maistas"},
+    # Kelionės
+    "Nuotykis": {"kind": "bold", "accent": "Geltona", "color": "Teal & Orange", "cat": "Kelionės"},
+    "Kelionių dienoraštis": {"kind": "script", "font": "Dancing Script", "scale": 0.75, "accent": "Balta",
+                             "color": "Teal & Orange", "cat": "Kelionės"},
+    # Šventės
+    "Šventinis auksas": {"kind": "elegant", "accent": "Aukso gradientas", "color": "Auksinė valanda",
+                         "cat": "Šventės"},
+    "Vakarėlis": {"kind": "box", "accent": "Rožinė", "color": "Ryškios", "cat": "Šventės"},
 }
 
 COLOR_FILTERS = {
@@ -403,6 +429,12 @@ SUBTITLE_POSITIONS = {"Viduryje": 0.62, "Žemiau": 0.72, "Apačioje": 0.78}
 HOOK_POSITIONS = {"Viršuje": 0.12, "Aukščiau": 0.2, "Žemiau": 0.3}
 
 SAMPLE_WORDS = [("Taip", 0.2, 0.6), ("atrodo", 0.6, 1.5), ("titrai", 1.5, 2.2)]
+# dinamiškiems stiliams – visi žodžiai jau ištarti iki peržiūros kadro (1,2 s), paskutinis – svarbiausias
+SAMPLE_FAST = [("Taip", 0.0, 0.3), ("atrodo", 0.3, 0.65), ("*titrai*", 0.65, 1.1)]
+
+
+def _sample(look):
+    return SAMPLE_FAST if video_editor.SUBTITLE_LOOKS.get(look, {}).get("mode") else SAMPLE_WORDS
 
 
 def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas", color="Natūralios", effects=(),
@@ -423,7 +455,7 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
             hl = _ass_color(accent_colors(accent)[0])[4:]
             a = os.path.join(tmp, "subs.ass")
             with open(a, "w", encoding="utf-8") as f:
-                f.write(video_editor.build_ass(SAMPLE_WORDS, width, height, ypos=subs_ypos, highlight=hl,
+                f.write(video_editor.build_ass(_sample(look), width, height, ypos=subs_ypos, highlight=hl,
                                                look=look, size=subs_size))
             post.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
         pre = [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}", "setsar=1"]
@@ -433,7 +465,7 @@ def style_preview(frame, out_path, template="Prabangus auksas", accent="Auksas",
             if look:
                 a = os.path.join(tmp, "subs_mask.ass")
                 with open(a, "w", encoding="utf-8") as f:
-                    f.write(video_editor.build_ass(SAMPLE_WORDS, width, height, ypos=subs_ypos, look=look,
+                    f.write(video_editor.build_ass(_sample(look), width, height, ypos=subs_ypos, look=look,
                                                    mask=True, size=subs_size))
                 masks.append(f"ass=filename='{_filter_path(a)}':fontsdir='{_filter_path(FONT_DIR)}'")
             if hook.strip():
@@ -523,6 +555,118 @@ def _ass_color(rgb, alpha="00"):
     return f"&H{alpha}{rgb[4:6]}{rgb[2:4]}{rgb[0:2]}".upper()
 
 
+# ---------- Debesėliai: ?, !, WOW, Hmm… – iššoka tam tikrose vietose ----------
+BUBBLE_KINDS = {
+    "question": {"shape": "speech", "text": "?", "title": "Klausimas"},
+    "exclaim": {"shape": "burst", "text": "!", "title": "Šauktukas"},
+    "wow": {"shape": "burst", "text": "WOW!", "title": "Nuostaba"},
+    "hmm": {"shape": "thought", "text": "Hmm…", "title": "Abejonė"},
+    "idea": {"shape": "speech", "text": "IDĖJA!", "title": "Idėja / patarimas"},
+    "top": {"shape": "burst", "text": "TOP!", "title": "Geriausia"},
+    "heart": {"shape": "heart", "text": "", "title": "Meilė / patinka"},
+}
+BUBBLE_LEN = 1.4  # s
+
+
+def _f(v):
+    return f"{v:.0f}"
+
+
+def _ellipse(cx, cy, rx, ry):
+    k = 0.5523
+    return (f"m {_f(cx)} {_f(cy - ry)} b {_f(cx + k * rx)} {_f(cy - ry)} {_f(cx + rx)} {_f(cy - k * ry)} "
+            f"{_f(cx + rx)} {_f(cy)} b {_f(cx + rx)} {_f(cy + k * ry)} {_f(cx + k * rx)} {_f(cy + ry)} "
+            f"{_f(cx)} {_f(cy + ry)} b {_f(cx - k * rx)} {_f(cy + ry)} {_f(cx - rx)} {_f(cy + k * ry)} "
+            f"{_f(cx - rx)} {_f(cy)} b {_f(cx - rx)} {_f(cy - k * ry)} {_f(cx - k * rx)} {_f(cy - ry)} "
+            f"{_f(cx)} {_f(cy - ry)}")
+
+
+def _bubble_shape(shape, w, h, left):
+    """ASS piešinys (vietinės koordinatės 0..w, 0..h) ir teksto centras."""
+    import math
+    if shape == "burst":  # sprogimo žvaigždė
+        n, pts = 12, []
+        for i in range(n * 2):
+            r = (0.5 if i % 2 == 0 else 0.34)
+            a = math.pi * i / n - math.pi / 2
+            pts.append((w / 2 + math.cos(a) * w * r, h / 2 + math.sin(a) * h * r))
+        d = "m " + " l ".join(f"{_f(x)} {_f(y)}" for x, y in pts)
+        return d, (w / 2, h / 2)
+    if shape == "heart":
+        d = (f"m {_f(w / 2)} {_f(h * 0.95)} b {_f(-w * 0.05)} {_f(h * 0.55)} {_f(w * 0.1)} {_f(-h * 0.05)} "
+             f"{_f(w / 2)} {_f(h * 0.25)} b {_f(w * 0.9)} {_f(-h * 0.05)} {_f(w * 1.05)} {_f(h * 0.55)} "
+             f"{_f(w / 2)} {_f(h * 0.95)}")
+        return d, (w / 2, h / 2)
+    if shape == "thought":  # minčių debesėlis + du burbuliukai
+        d = _ellipse(w / 2, h * 0.42, w * 0.48, h * 0.36)
+        for i, (cx, cy, rx, ry) in enumerate(((0.3, 0.2, 0.2, 0.17), (0.7, 0.22, 0.2, 0.17), (0.5, 0.12, 0.2, 0.12),
+                                              (0.25, 0.6, 0.18, 0.15), (0.75, 0.6, 0.18, 0.15))):
+            d += " " + _ellipse(w * cx, h * cy, w * rx, h * ry)
+        bx = w * (0.22 if left else 0.78)
+        d += " " + _ellipse(bx, h * 0.86, w * 0.07, h * 0.06) + " " + _ellipse(bx + (-1 if left else 1) * w * 0.08,
+                                                                               h * 0.97, w * 0.04, h * 0.035)
+        return d, (w / 2, h * 0.42)
+    # kalbos debesėlis su uodegėle (į kalbančiojo pusę)
+    d = _ellipse(w / 2, h * 0.42, w * 0.5, h * 0.4)
+    tx = w * (0.3 if left else 0.7)
+    tip = w * (0.12 if left else 0.88)
+    tail = f"m {_f(tx - w * 0.08)} {_f(h * 0.7)} l {_f(tip)} {_f(h * 0.98)} l {_f(tx + w * 0.08)} {_f(h * 0.74)}"
+    return [tail, d], (w / 2, h * 0.42)
+
+
+def bubbles_ass(bubbles, width, height, accent="Aukso gradientas"):
+    """Debesėlių ASS: bubbles – [(laikas s, rūšis)] galutiniame video. Debesėlis iššoka, pasvyra ir išnyksta."""
+    acc = _ass_color(accent_colors(accent)[0])
+    styles = [f"Style: B,{FONT_NAME},40,&H00FFFFFF,&H00FFFFFF,&H00101010,&H64000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1"]
+    lines = _ass_header(width, height, styles)
+    ref = min(width, height * 0.75)
+    for i, (t, kind) in enumerate(sorted(bubbles)):
+        k = BUBBLE_KINDS.get(kind)
+        if not k:
+            continue
+        left = i % 2 == 0
+        shape = k["shape"]
+        w = ref * (0.34 if shape in ("speech", "thought") and len(k["text"]) > 2 else 0.26)
+        h = w * (0.78 if shape != "burst" else 0.9)
+        x0 = width * (0.07 if left else 0.93) - (0 if left else w)
+        y0 = height * (0.3 if height > width else 0.12)
+        d, (cx, cy) = _bubble_shape(shape, w, h, left)
+        fill = {"burst": acc, "heart": "&H004A3BFF"}.get(shape, "&H00FFFFFF")
+        rot = 8 if left else -8
+        org = f"\\org({_f(x0 + w / 2)},{_f(y0 + h)})"
+        anim = (f"\\fscx20\\fscy20\\t(0,140,\\fscx112\\fscy112)\\t(140,240,\\fscx100\\fscy100)"
+                f"\\frz{rot}\\t(240,{round(BUBBLE_LEN * 1000)},\\frz{rot // 2})\\fad(0,220)")
+        ol = max(3, round(w * 0.025))
+        a, b = _ass_time(t), _ass_time(t + BUBBLE_LEN)
+        # figūros piešiamos atskirai (persidengusios figūros viename piešinyje viena kitą „išpjautų“);
+        # antras sluoksnis be kontūro uždengia vidines sandūrų linijas (uodegėlė, debesėlio burbulai)
+        for layer, extra in ((5, f"\\3c&H00101010&\\bord{ol}\\shad{max(2, ol // 2)}"), (6, "\\bord0\\shad0")):
+            for part in (d if isinstance(d, list) else [d]):
+                lines.append(f"Dialogue: {layer},{a},{b},B,,0,0,0,,{{\\an7\\pos({_f(x0)},{_f(y0)}){org}"
+                             f"\\1c{fill}{extra}{anim}\\p1}}" + part)
+        if k["text"]:
+            fs = round(h * (0.5 if len(k["text"]) <= 2 else 0.27 if len(k["text"]) <= 4 else 0.23))
+            dark_fill = shape == "burst" and accent_colors(accent)[1] == "FFFFFF"  # tamsus akcentas – balta raidė
+            col = "&H00FFFFFF" if dark_fill else "&H00101010"
+            lines.append(f"Dialogue: 7,{a},{b},B,,0,0,0,,{{\\an5\\pos({_f(x0 + cx)},{_f(y0 + cy)}){org}\\fs{fs}"
+                         f"\\1c{col}\\bord0\\shad0{anim}}}" + _ass_escape(k["text"]))
+    return "\n".join(lines) + "\n"
+
+
+def auto_bubbles(words, max_n=6, gap=2.5):
+    """Debesėliai be AI – pagal skyrybą: klausimas -> „?“, šauktukas -> „!“ / „WOW!“."""
+    out, last = [], -1e9
+    for w, a, b in words:
+        p = video_editor.plain(w).strip()
+        kind = "question" if p.endswith("?") else ("wow" if len(out) % 2 else "exclaim") if p.endswith("!") else None
+        if kind and b - last >= gap:
+            out.append((round(max(0.0, b - 0.2), 2), kind))
+            last = b
+        if len(out) >= max_n:
+            break
+    return out
+
+
 def _ass_header(width, height, styles):
     return [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
@@ -546,15 +690,18 @@ def _rule(cx, y, length, thick, color, start_ms=0):
 def _overlay_layout(width, height, template, hook_ypos=0.2, size=1.0):
     """Kabliuko ir CTA išdėstymas (bendras tekstui, kaukei ir gradientui). Dydžiai – nuo trumpesnės kraštinės,
     kad tiktų ir horizontaliam (YouTube) video; size – naudotojo mastelis."""
-    kind = TEMPLATES.get(template, TEMPLATES["Prabangus auksas"])["kind"]
-    ref = min(width, height * 0.75) * size
+    t = TEMPLATES.get(template, TEMPLATES["Prabangus auksas"])
+    kind = t["kind"]
+    ref = min(width, height * 0.75) * size * t.get("scale", 1.0)
     if kind == "box":
         hsize, csize = round(ref * 0.074), round(ref * 0.07)
+    elif kind == "bold":
+        hsize, csize = round(ref * 0.088), round(ref * 0.075)
     elif kind == "script":
         hsize, csize = round(ref * 0.15), round(ref * 0.12)
     else:
         hsize, csize = round(ref * 0.088), round(ref * 0.075)
-    hook_y = round(height * hook_ypos) + (0 if kind == "box" else round(hsize * 0.9))
+    hook_y = round(height * hook_ypos) + (0 if kind in ("box", "bold") else round(hsize * 0.9))
     cta_y = round(height * 0.44)
     return kind, hsize, csize, hook_y, cta_y
 
@@ -588,8 +735,18 @@ def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="
             f"Style: Cta,{FONT_NAME},{csize},{acc},{acc},&H00000000,&H78000000,"
             f"0,0,0,0,100,100,0,0,1,{cta_ol},{cta_sh},5,{margin},{margin},0,1",
         ]
+    elif kind == "bold":  # stambios didžiosios raidės akcento spalva su storu tamsiu kontūru
+        def bol(sz):
+            return (0, 0) if mask else (max(3, round(sz * 0.11)), max(2, round(sz * 0.07)))
+        styles = [
+            f"Style: Hook,{FONT_NAME},{hsize},{acc},{acc},&H00000000,&H78000000,"
+            f"0,0,0,0,100,100,0,0,1,{bol(hsize)[0]},{bol(hsize)[1]},5,{margin},{margin},0,1",
+            f"Style: Cta,{FONT_NAME},{csize},{acc},{acc},&H00000000,&H78000000,"
+            f"0,0,0,0,100,100,0,0,1,{bol(csize)[0]},{bol(csize)[1]},5,{margin},{margin},0,1",
+        ]
     else:
-        font = SCRIPT if kind == "script" else SERIF
+        tfont = TEMPLATES.get(template, {}).get("font")
+        font = tfont or (SCRIPT if kind == "script" else SERIF)
         hb, cb, ci = (0, 0, 0) if kind == "script" else (-1, 0, -1)
         def ol(sz):
             return (0, 0) if mask else (max(1, sz // 40), max(2, sz // 22))
@@ -609,7 +766,7 @@ def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="
 
     if hook:
         end = min(duration, hook_duration)
-        if kind == "box":
+        if kind in ("box", "bold"):
             lines.append(
                 f"Dialogue: 2,{_ass_time(0)},{_ass_time(end)},Hook,,0,0,0,,"
                 f"{{\\an5\\pos({cx},{hook_y})\\fad(80,200)\\fscx70\\fscy70"
@@ -625,7 +782,7 @@ def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="
                                  round(ref * 0.22 * size), max(2, round(ref) // 400), acc, 200))
     if cta and duration > cta_duration + 1:
         a = duration - cta_duration
-        if kind == "box":
+        if kind in ("box", "bold"):
             lines.append(
                 f"Dialogue: 2,{_ass_time(a)},{_ass_time(duration + 1)},Cta,,0,0,0,,"
                 f"{{\\an5\\pos({cx},{cta_y})\\fad(150,0)\\fscx80\\fscy80\\t(0,200,\\fscx100\\fscy100)}}"
@@ -638,7 +795,7 @@ def build_overlay_ass(width, height, duration, hook="", hook_duration=3.0, cta="
                          + _rule(cx, cta_y + round(csize * (0.3 if kind == "script" else 0.45)),
                                  round(ref * 0.16 * size), max(2, round(ref) // 400), acc, 0))
     if handle:
-        label = handle.upper() if kind != "box" else handle
+        label = handle.upper() if kind not in ("box", "bold") else handle
         lines.append(f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration + 1)},Handle,,0,0,0,,"
                      f"{{\\an5\\pos({cx},{round(height * 0.085)})\\fad(600,0)}}" + _ass_escape(label))
     return "\n".join(lines) + "\n"
@@ -807,7 +964,7 @@ def gradient_image(path, width, height, accent, template="Prabangus auksas", hoo
     t = (1 - np.abs(2 * d - 1)).astype(np.float32)
     del d
     t = np.broadcast_to(t, (height, width)).copy()
-    if kind != "box":  # eilutėmis sutapdintos juostos kabliukui ir CTA
+    if kind not in ("box", "bold"):  # eilutėmis sutapdintos juostos kabliukui ir CTA
         for yb, size, lo, hi in ((hook_y, hsize, 0, (hook_y + cta_y) // 2),
                                  (cta_y, csize, (hook_y + cta_y) // 2, round(height * 0.55))):
             pitch = size * (1.3 if kind == "script" else 1.18)
@@ -938,7 +1095,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
            music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN, punch=False,
-           logo=None, end_card=None):
+           logo=None, end_card=None, bubbles=None):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
     natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
@@ -983,6 +1140,13 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if card_len:  # vieta kortelei (po ja – sustingęs paskutinis kadras)
             pre.append(f"tpad=stop_mode=clone:stop_duration={card_len + 0.5:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
+        if bubbles:  # debesėliai (laikai – montažo laiku, todėl dalinami iš greičio)
+            bb = [(t / speed, k) for t, k in bubbles if t / speed < duration - 0.3]
+            if bb:
+                bp = os.path.join(tmp, "bubbles.ass")
+                with open(bp, "w", encoding="utf-8") as f:
+                    f.write(bubbles_ass(bb, W, H, accent))
+                post.append(f"ass=filename='{_filter_path(bp)}':fontsdir='{_filter_path(FONT_DIR)}'")
         # svarbiausių žodžių (*žodis*) laikai galutiniame video – akcentų priartėjimui
         punches = []
         if punch and subs_words:
@@ -1270,6 +1434,28 @@ def mark_indices(words, indices, min_gap=1.2):
         out[i] = (f"{m.group(1)}{video_editor.KEY_MARK}{m.group(2)}{video_editor.KEY_MARK}{m.group(3)}", a, b)
         last = a
     return out
+
+
+def ai_bubbles(client, words, max_n=6):
+    """AI parenka vietas debesėliams (laikai – kaip žodžių): [(laikas, rūšis)]."""
+    kinds = {k: v["title"] for k, v in BUBBLE_KINDS.items()}
+    system = ("You add playful comic speech bubbles to a short social video. From the timed transcript ([seconds] "
+              f"word), choose up to {max_n} moments (at least 2.5 s apart) where a bubble adds emotion: a question, "
+              "surprise, doubt, a tip/idea, the best part, love. Use only these kinds: "
+              + json.dumps(kinds, ensure_ascii=False) +
+              '. Reply only with JSON: {"bubbles": [{"time": seconds, "kind": "question"}]}')
+    j = _ai_json(client, system, {"transcript": transcript_lines(words)}, temperature=0.4)
+    out, last = [], -1e9
+    end = words[-1][2] if words else 0
+    for b in sorted(j.get("bubbles", []), key=lambda x: float(x.get("time", 0)) if isinstance(x, dict) else 0):
+        try:
+            t, k = float(b["time"]), str(b["kind"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if k in BUBBLE_KINDS and 0 <= t <= end and t - last >= 2.0:
+            out.append((round(t, 2), k))
+            last = t
+    return out[:max_n]
 
 
 def ai_moment(client, words, speed=1.0):
