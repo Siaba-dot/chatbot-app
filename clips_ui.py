@@ -90,6 +90,14 @@ def add_clip(prefix, clip_id, ext, data, name, kind):
                   "audio": state, "levels": an and {k: an[k] for k in ("noise", "loud")}})
 
 
+def clear_clips(prefix):
+    """Pašalina visus įrašus (pvz. nebereikalingą nufilmuotą medžiagą)."""
+    clips = st.session_state.get(prefix + "clips", [])
+    for i in range(len(clips) - 1, -1, -1):
+        move_clip(prefix, i, 0)
+    st.session_state.pop(prefix + "rec_status", None)
+
+
 def move_clip(prefix, i, step):
     clips = st.session_state[prefix + "clips"]
     if step == 0:
@@ -163,6 +171,53 @@ def _trim_controls(prefix, c, box):
             st.rerun()  # perskaičiuoja trukmes ir peržiūrą
 
 
+def _recorder(prefix):
+    """Filmavimas programoje. Įrašas siunčiamas dalimis (po 384 KB): didesnės komponento žinutės nepereina.
+    Veikia kaip fragmentas – kiekviena dalis perpiešia tik šį langą (greita); gavus visą įrašą – visas puslapis."""
+    @st.fragment
+    def frag():
+        key = prefix + "recorder"
+        rec = st.session_state.get(key)
+        up = st.session_state.setdefault(prefix + "rec_up", {})  # gaunami įrašai: id -> {path, next, total, mime}
+        status = st.session_state.get(prefix + "rec_status")
+        if rec and rec.get("data") is not None and "idx" in rec:
+            rid, idx, total = rec["id"], int(rec["idx"]), max(1, int(rec["total"]))
+            u = up.get(rid)
+            if u is None and idx == 0:
+                fd, path = tempfile.mkstemp(suffix=".part")
+                os.close(fd)
+                u = up[rid] = {"path": path, "next": 0, "total": total, "mime": rec.get("mime") or ""}
+            if u and idx == u["next"]:
+                with open(u["path"], "ab") as f:
+                    f.write(base64.b64decode(rec["data"]))
+                u["next"] += 1
+                status = {"id": rid, "got": idx, "total": total}
+                if u["next"] >= total:  # visas įrašas gautas – tikrinam ir pridedam
+                    cid = f"rec-{rid}"
+                    n = sum(c["kind"] == "rec" for c in st.session_state[prefix + "clips"]) + 1
+                    try:
+                        with open(u["path"], "rb") as fh:
+                            add_clip(prefix, cid, ".mp4" if "mp4" in u["mime"] else ".webm", fh, f"Įrašas {n}", "rec")
+                    except Exception as e:
+                        st.session_state.setdefault(prefix + "skip_clips", set()).add(cid)
+                        st.session_state[prefix + "last_error"] = (cid, f"Įrašo nepavyko priimti ({e})")
+                    finally:
+                        if os.path.exists(u["path"]):
+                            os.unlink(u["path"])
+                        up.pop(rid, None)
+                    ok = any(c["id"] == cid for c in st.session_state[prefix + "clips"])
+                    err = st.session_state.get(prefix + "last_error") or (None, "")
+                    status = {"id": rid, "ok": ok,
+                              "msg": "" if ok else (err[1] if err[0] == cid else "Įrašas nepriimtas.")}
+                    st.session_state[prefix + "rec_status"] = status
+                    if ok:
+                        st.rerun(scope="app")  # visas puslapis – kad įrašas atsirastų sąraše ir peržiūroje
+            elif u:  # pakartotinai atsiųsta dalis – patvirtinam dar kartą
+                status = {"id": rid, "got": u["next"] - 1, "total": total}
+        video_recorder(key=key, default=None, status=status)
+    frag()
+
+
 def clip_picker(prefix="", trim=False):
     """Įkėlimo / filmavimo laukas ir įrašų sąrašas su tvarkos keitimu (ir apkarpymu, jei trim=True).
     Grąžina (įrašai, kiek sekundžių rodyti nuotrauką)."""
@@ -194,25 +249,7 @@ def clip_picker(prefix="", trim=False):
             st.rerun()
     else:
         st.session_state[ids_key] = set()  # įkėlimo laukas paslėptas – jo būsena išsivalo
-        # Įrašas perskaitomas PRIEŠ piešiant filmavimo langą – kad langas iškart parodytų, ar įrašas priimtas.
-        rec = st.session_state.get(prefix + "recorder")
-        status = None
-        if rec and rec.get("data"):
-            cid = f"rec-{rec['id']}"
-            n = sum(c["kind"] == "rec" for c in st.session_state[prefix + "clips"]) + 1
-            try:
-                add_clip(prefix, cid, ".mp4" if "mp4" in (rec.get("mime") or "") else ".webm",
-                         lambda: base64.b64decode(rec["data"]), f"Įrašas {n}", "rec")
-            except Exception as e:  # pvz. sugadinti duomenys
-                st.session_state.setdefault(prefix + "skip_clips", set()).add(cid)
-                st.session_state[prefix + "last_error"] = (cid, f"Įrašo nepavyko priimti ({e})")
-            if any(c["id"] == cid for c in st.session_state[prefix + "clips"]):
-                status = {"id": rec["id"], "ok": True}
-            else:
-                err = st.session_state.get(prefix + "last_error") or (None, "")
-                status = {"id": rec["id"], "ok": False,
-                          "msg": err[1] if err[0] == cid else "Įrašas pašalintas arba nepriimtas."}
-        video_recorder(key=prefix + "recorder", default=None, status=status)
+        _recorder(prefix)
         st.caption("📱 Telefone galite filmuoti ir įprasta kamera: pasirinkite „📁 Įkelti video“ → "
                    "„Filmuoti video“ (iPhone) ar „Kamera“ (Android) – kokybė būna geresnė.")
 
@@ -248,7 +285,10 @@ def clip_picker(prefix="", trim=False):
             total = sum(clip_length(c, image_duration) if trim else image_duration if c.get("image")
                         else c["duration"] for c in clips)
             st.caption(f"Bendra trukmė prieš montažą: {total:.1f} s")
-        st.caption("➕ Galite pridėti daugiau video – įkelti iš albumo arba nufilmuoti.")
+        c1, c2 = st.columns([3, 2], vertical_alignment="center")
+        c1.caption("➕ Galite pridėti daugiau video – įkelti iš albumo arba nufilmuoti.")
+        c2.button("🗑 Išvalyti viską", key=prefix + "clear_all", on_click=clear_clips, args=(prefix,),
+                  width="stretch", help="Pašalinti visus įrašus ir pradėti iš naujo")
     return clips, image_duration
 
 

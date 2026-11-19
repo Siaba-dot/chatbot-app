@@ -220,7 +220,7 @@ def tile_click(key):
     return None
 
 
-SPEEDS = [1.0, 1.05, 1.1, 1.15, 1.25, 1.5]
+SPEEDS = [1.0, 1.05, 1.1, 1.15, 1.25, 1.5, 1.75, 2.0]
 PROGRESS = ["Viršuje", "Apačioje", "Nėra"]
 
 
@@ -977,6 +977,19 @@ def ai_director_ui():
         row.button("✦ Akimirka svarbiausioje vietoje", key=P + "ai_moment", on_click=run_ai_director,
                    args=(client, words, "moment"),
                    help="AI suras svarbiausią kalbos vietą – ten kadras nušvis gintaro šviesa (Gintaro akimirka).")
+    # ✨ Kabliukai – AI pasiūlo iškart, kai tik kalba atpažinta (vieną kartą kiekvienam paruoštam video)
+    pr = st.session_state.get(P + "prep")
+    if words and pr and st.session_state.get(P + "hook_ideas_for") != pr["n"]:
+        st.session_state[P + "hook_ideas_for"] = pr["n"]
+        with box, st.spinner("✨ AI ieško kabliukų…"):
+            run_ai_hooks(client, words, "")
+    ideas = st.session_state.get(P + "hook_ideas") or []
+    if ideas:
+        box.caption("✨ **AI siūlo kabliukus** – paspauskite, ir jis bus įrašytas pirmoms sekundėms:")
+        hrow = box.container(horizontal=True, gap="small", wrap=True)
+        for i, h in enumerate(ideas):
+            hrow.button(f"„{h}“", key=f"{P}top_hook{i}", on_click=set_hook, args=(h,),
+                        type="primary" if st.session_state.get(P + "hook") == h else "secondary")
     res = st.session_state.get(P + "ai_result")
     if res:
         if res.get("error"):
