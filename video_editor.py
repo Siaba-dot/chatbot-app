@@ -386,7 +386,211 @@ SUBTITLE_LOOKS = {
     "minimal": {"title": "Minimalūs", "font": "Montserrat SemiBold", "bold": 0, "size": 0.056, "upper": False,
                 "base": "FFFFFF", "box": False, "outline": 1 / 16, "shadow": 0.4, "dim": "38", "pop": False,
                 "ypos": 0.74},
+    # --- dinamiški stiliai (savas išdėstymas: žodžiai matuojami ir dedami po vieną) ---
+    "popout": {"title": "Iššokantys", "font": FONT_NAME, "bold": 0, "size": 0.12, "upper": True, "base": "FFFFFF",
+               "box": False, "outline": 1 / 10, "shadow": 0.6, "dim": "00", "pop": True, "ypos": None,
+               "mode": "popout"},
+    "mixed": {"title": "Mišrūs", "font": FONT_NAME, "bold": 0, "size": 0.078, "upper": True, "base": "FFFFFF",
+              "box": False, "outline": 1 / 12, "shadow": 0.6, "dim": "00", "pop": True, "ypos": None,
+              "mode": "mixed"},
+    "karaoke": {"title": "Karaoke", "font": FONT_NAME, "bold": 0, "size": 0.075, "upper": True, "base": "FFFFFF",
+                "box": False, "outline": 1 / 12, "shadow": 0.5, "dim": "00", "pop": True, "ypos": None,
+                "mode": "karaoke"},
+    "neon": {"title": "Neoniniai", "font": "Montserrat SemiBold", "bold": 0, "size": 0.075, "upper": False,
+             "base": "FFFFFF", "box": False, "outline": 1 / 9, "shadow": 0, "dim": "50", "pop": False,
+             "ypos": None, "glow": True},
+    "bounce": {"title": "Šokinėjantys", "font": FONT_NAME, "bold": 0, "size": 0.08, "upper": True,
+               "base": "FFFFFF", "box": False, "outline": 1 / 12, "shadow": 0.5, "dim": "40", "pop": True,
+               "ypos": None, "mode": "bounce"},
+    "marker": {"title": "Žymeklis", "font": FONT_NAME, "bold": 0, "size": 0.078, "upper": True, "base": "FFFFFF",
+               "box": False, "outline": 1 / 14, "shadow": 0.4, "dim": "00", "pop": True, "ypos": None,
+               "mode": "marker"},
+    "typewriter": {"title": "Rašomoji mašinėlė", "font": "Montserrat SemiBold", "bold": 0, "size": 0.066,
+                   "upper": False, "base": "FFFFFF", "box": False, "outline": 1 / 12, "shadow": 0.6, "dim": "00",
+                   "pop": False, "ypos": None, "mode": "typewriter"},
 }
+
+# Šriftų failai – žodžių pločiui matuoti (savas išdėstymas)
+FONT_FILES = {"Montserrat Black": "Montserrat_900Black.ttf", "Montserrat SemiBold": "Montserrat_600SemiBold.ttf",
+              "Dancing Script": "DancingScript_700Bold.ttf", "Playfair Display": "PlayfairDisplay_700Bold.ttf",
+              "Playfair Display Italic": "PlayfairDisplay_400Regular_Italic.ttf",
+              "Great Vibes": "GreatVibes_400Regular.ttf"}
+# libass ir PIL šrifto dydį supranta skirtingai – pataisos išmatuotos pagal tikrą libass atvaizdą
+FONT_WIDTH_FIX = {"Montserrat Black": 0.774, "Montserrat SemiBold": 0.763, "Dancing Script": 0.89,
+                  "Playfair Display": 0.93, "Playfair Display Italic": 0.955, "Great Vibes": 0.79}
+_FONT_CACHE = {}
+
+
+def text_width(font, size, text):
+    """Teksto plotis px (libass dydžio vienetais: dydis = šrifto aukštis ascender+descender)."""
+    key = (font, round(size))
+    if key not in _FONT_CACHE:
+        from PIL import ImageFont
+        path = os.path.join(FONT_DIR, FONT_FILES.get(font, FONT_FILES["Montserrat Black"]))
+        ref = ImageFont.truetype(path, 200)
+        a, d = ref.getmetrics()
+        _FONT_CACHE[key] = ImageFont.truetype(path, max(4, round(size * 200 / (a + d))))
+    return _FONT_CACHE[key].getlength(text) * FONT_WIDTH_FIX.get(font, 0.8)
+
+
+def _layout(items, width, height, ypos, max_w):
+    """Išdėsto žodžius eilutėmis (centruota). items: [{"text", "font", "size"}].
+    Grąžina [(x_centras, y_apačia)] kiekvienam žodžiui."""
+    rows, cur, cur_w = [], [], 0.0
+    for i, it in enumerate(items):
+        w = text_width(it["font"], it["size"], it["text"])
+        sp = max(text_width(it["font"], it["size"], " ") * 1.6, it["size"] * 0.22)
+        it["w"] = w
+        if cur and cur_w + sp + w > max_w:
+            rows.append(cur)
+            cur, cur_w = [], 0.0
+        if cur:
+            cur_w += sp
+        it["x0"] = cur_w
+        cur.append(i)
+        cur_w += w
+    if cur:
+        rows.append(cur)
+    heights = [max(items[i]["size"] for i in r) * 0.98 for r in rows]
+    total = sum(heights)
+    y = height * ypos - total / 2
+    pos = [None] * len(items)
+    for r, h in zip(rows, heights):
+        y += h
+        last = items[r[-1]]
+        row_w = last["x0"] + last["w"]
+        left = width / 2 - row_w / 2
+        for i in r:
+            pos[i] = (round(left + items[i]["x0"] + items[i]["w"] / 2), round(y))
+    return pos
+
+
+def _light(bgr):
+    """Ar spalva šviesi (ASS BBGGRR)."""
+    b, g, r = (int(bgr[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.299 * r + 0.587 * g + 0.114 * b > 150
+
+
+def _mixed_role(w, k, pi):
+    """Mišrių titrų žodžio vaidmuo: big (svarbiausias), script (ranka, kreivai), small (jungiamasis), normal."""
+    core = re.sub(r"[^\w]", "", plain(w), flags=re.UNICODE)
+    if is_key(w):
+        return "big"
+    if not core or core.lower() in _COMMON or len(core) <= 3:
+        return "small"
+    return "normal"
+
+
+def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, base, highlight, mask):
+    """Dinamiški titrų stiliai (iššokantys, mišrūs, karaoke, šokinėjantys, žymeklis, rašomoji mašinėlė)."""
+    mode, out = L["mode"], []
+    font = L["font"]
+    up = (lambda t: t.upper()) if L["upper"] else (lambda t: t)
+    max_w = width * 0.84
+    ol = 0 if mask else outline
+    sh = 0 if mask else max(1, shadow)
+    hl = "FFFFFF" if mask else highlight
+
+    def ev(a, b, tags, text, layer=0):
+        if b > a + 0.01:
+            out.append(f"Dialogue: {layer},{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,{{{tags}}}" + text)
+
+    for pi, ph in enumerate(phrases):
+        start = ph[0][1]
+        end = ph[-1][2] + 0.35
+        if pi + 1 < len(phrases):
+            end = min(end, phrases[pi + 1][0][1])
+        if end <= start:
+            continue
+        if mode == "popout":  # vienas didelis žodis vienu metu: įšoka, truputį pasvyra
+            for i, (w, a, b) in enumerate(ph):
+                b2 = ph[i + 1][1] if i + 1 < len(ph) else end
+                key = is_key(w)
+                if mask and not key:
+                    continue
+                col = hl if key else base
+                rot = (-3, 2, -2, 3)[(pi + i) % 4]
+                size = round(fsize * (1.18 if key else 1.0))
+                tags = (f"\\an5\\pos({width // 2},{round(height * ypos)})\\fs{size}\\1c&H{col}&\\bord{ol}"
+                        f"\\shad{sh}\\frz{rot}\\fscx45\\fscy45\\t(0,90,\\fscx114\\fscy114)"
+                        f"\\t(90,170,\\fscx100\\fscy100)")
+                ev(a if i else start, b2, tags, _ass_escape(up(plain(w))))
+            continue
+        if mode == "karaoke":  # žodžiai užsipildo akcento spalva, kai ištariami
+            parts, t = [], start
+            for i, (w, a, b) in enumerate(ph):
+                gap = max(0, round((a - t) * 100))
+                dur = max(1, round(((ph[i + 1][1] if i + 1 < len(ph) else b) - a) * 100))
+                parts.append((f"{{\\k{gap}}}" if gap else "") + f"{{\\kf{dur}}}" + _ass_escape(up(plain(w))))
+                t = a + dur / 100
+            ev(start, end, f"\\an5\\pos({width // 2},{round(height * ypos)})\\fad(80,100)", " ".join(parts))
+            continue
+        if mode == "typewriter":  # raidės atsiranda po vieną, lyg spausdinamos
+            parts = []
+            for i, (w, a, b) in enumerate(ph):
+                txt = plain(w)
+                span = max(0.08, min(b - a, 0.45))
+                for c_i, ch in enumerate(txt):
+                    t0 = round((a - start + span * c_i / max(1, len(txt))) * 1000)
+                    parts.append(f"{{\\alpha&HFF&\\t({t0},{t0 + 1},\\alpha&H00&)}}" + _ass_escape(ch))
+                if i + 1 < len(ph):
+                    parts.append(" ")
+            if mask:
+                continue
+            ev(start, end, f"\\an5\\pos({width // 2},{round(height * ypos)})\\fad(0,120)", "".join(parts))
+            continue
+        # --- išdėstomi žodžiai (mišrūs, šokinėjantys, žymeklis) ---
+        items = []
+        for i, (w, a, b) in enumerate(ph):
+            role = _mixed_role(w, i, pi) if mode == "mixed" else "normal"
+            if mode == "mixed" and role == "normal" and len(ph) > 1 and (pi + i) % 3 == 1:
+                role = "script"  # dalis žodžių – ranka, kreivai
+            spec = {"big": (FONT_NAME, 1.55, True), "normal": (FONT_NAME, 1.0, True),
+                    "small": ("Playfair Display Italic", 0.78, False), "script": ("Dancing Script", 1.35, False)}
+            f, k, upper = spec[role] if mode == "mixed" else (font, 1.0, L["upper"])
+            txt = plain(w).upper() if upper else plain(w)
+            items.append({"text": txt, "font": f, "size": fsize * k, "role": role, "a": a, "b": b})
+        pos = _layout(items, width, height, ypos, max_w)
+        for i, (it, (x, y)) in enumerate(zip(items, pos)):
+            a = it["a"] if i else start
+            b_spoken = items[i + 1]["a"] if i + 1 < len(items) else end
+            fnt = "Playfair Display" if it["font"] == "Playfair Display Italic" else it["font"]
+            ital = "\\i1" if it["font"] == "Playfair Display Italic" else ""
+            base_tags = (f"\\an2\\pos({x},{y})\\fn{fnt}{ital}\\fs{round(it['size'])}\\bord{ol}\\shad{sh}")
+            txt = _ass_escape(it["text"])
+            if mode == "mixed":  # žodis įšoka, kai ištariamas, ir lieka iki frazės pabaigos
+                accent_word = it["role"] in ("big", "script")
+                if mask and not accent_word:
+                    continue
+                col = hl if accent_word else base
+                rot = {"script": -7 if (pi + i) % 2 else 6, "big": -2}.get(it["role"], 0)
+                tags = (base_tags + f"\\1c&H{col}&\\org({x},{y - round(it['size'] / 2)})\\frz{rot}"
+                        "\\fscx40\\fscy40\\t(0,110,\\fscx112\\fscy112)\\t(110,190,\\fscx100\\fscy100)")
+                ev(a, end, tags, txt)
+            elif mode == "bounce":  # ištariamas žodis pašoka aukštyn ir nusidažo
+                jump = round(it["size"] * 0.22)
+                if not mask:
+                    ev(start, a, base_tags + f"\\1c&H{base}&\\alpha&H{L['dim']}&", txt)
+                    ev(b_spoken, end, base_tags + f"\\1c&H{base}&", txt)
+                ev(a, b_spoken, (f"\\an2\\move({x},{y},{x},{y - jump},0,90)\\fn{fnt}\\fs{round(it['size'])}"
+                                 f"\\bord{ol}\\shad{sh}\\1c&H{hl}&\\fscx100\\fscy100"
+                                 "\\t(0,90,\\fscx116\\fscy116)\\t(90,200,\\fscx106\\fscy106)"), txt, 1)
+            elif mode == "marker":  # ištariamas žodis – spalvotame žymeklio fone
+                if mask:
+                    continue
+                ev(start, a, base_tags + f"\\1c&H{base}&", txt, 2)
+                ev(b_spoken, end, base_tags + f"\\1c&H{base}&", txt, 2)
+                pad, h = round(it["size"] * 0.16), round(it["size"] * 0.96)
+                bw = round(it["w"] + 2 * pad)
+                r = round(h * 0.22)
+                box = (f"m {r} 0 l {bw - r} 0 b {bw} 0 {bw} 0 {bw} {r} l {bw} {h - r} b {bw} {h} {bw} {h} {bw - r} {h} "
+                       f"l {r} {h} b 0 {h} 0 {h} 0 {h - r} l 0 {r} b 0 0 0 0 {r} 0")
+                txt_col = "1A1A1A" if _light(highlight) else base
+                ev(a, b_spoken, (f"\\an7\\pos({x - bw // 2},{y - h})\\bord0\\shad0\\1c&H{highlight}&"
+                                 f"\\org({x},{y - h // 2})\\frz-2\\fscx80\\fscy80\\t(0,90,\\fscx100\\fscy100)\\p1"),
+                   box, 1)
+                ev(a, b_spoken, base_tags + f"\\1c&H{txt_col}&\\bord0\\shad0", txt, 3)
+    return out
 
 
 KEY_SCALE = 128  # svarbiausio žodžio dydis, %
@@ -414,10 +618,19 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
     elif L["box"]:  # BorderStyle 3: OutlineColour – dėžutės spalva
         style = (f"Style: Default,{L['font']},{fsize},&H00{base},&H00{base},&H55000000,&H00000000,"
                  f"{L['bold']},0,0,0,100,100,0,0,3,{outline},0,5,{margin},{margin},0,1")
+    elif L.get("glow"):  # neonas: baltas tekstas, švytintis akcento spalvos kontūras
+        style = (f"Style: Default,{L['font']},{fsize},&H00{base},&H00{base},&H00{highlight},&H00000000,"
+                 f"{L['bold']},0,0,0,100,100,0,0,1,{outline},0,5,{margin},{margin},0,1")
+    elif L.get("mode") == "karaoke":  # Primary – jau ištarta (akcentas), Secondary – dar ne (balta)
+        style = (f"Style: Default,{L['font']},{fsize},&H00{highlight},&H00{base},&H00000000,&H78000000,"
+                 f"{L['bold']},0,0,0,100,100,0,0,1,{outline},{max(1, shadow)},5,{margin},{margin},0,1")
     else:
         oc = "&H00000000" if look != "elegant" else "&H20100A08"
         style = (f"Style: Default,{L['font']},{fsize},&H00{base},&H00{base},{oc},&H78000000,"
                  f"{L['bold']},0,0,0,100,100,0,0,1,{outline},{max(1, shadow)},5,{margin},{margin},0,1")
+    if mask and L.get("mode") == "karaoke":
+        style = (f"Style: Default,{L['font']},{fsize},&H00FFFFFF,&HFFFFFFFF,&H00000000,&H00000000,"
+                 f"{L['bold']},0,0,0,100,100,0,0,1,0,0,5,{margin},{margin},0,1")
     lines = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
         "WrapStyle: 0", "ScaledBorderAndShadow: yes", "",
@@ -431,6 +644,9 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
     ]
     pos = f"\\an5\\pos({width // 2},{round(height * ypos)})"
     phrases = group_phrases(words)
+    if L.get("mode"):
+        lines += _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, base, highlight, mask)
+        return "\n".join(lines) + "\n"
     if L.get("write"):  # frazė „rašoma“ rašikliu iš kairės į dešinę, kol ji ištariama
         color = "FFFFFF" if mask else highlight
         for pi, ph in enumerate(phrases):
@@ -454,6 +670,8 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
             end = min(end, phrases[pi + 1][0][1])
         texts = [_ass_escape(plain(w[0]).upper() if L["upper"] else plain(w[0])) for w in ph]
         keys = [is_key(w[0]) for w in ph]
+        if L.get("glow") and not mask:  # neonas: ištartas žodis ne nusidažo, o užsidega (baltas, ryškus)
+            keys = [False] * len(ph)
         for i, (_, s, _) in enumerate(ph):
             a = ph[0][1] if i == 0 else s
             b = ph[i + 1][1] if i + 1 < len(ph) else end
@@ -473,15 +691,21 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
                 elif j < i:
                     parts.append(f"{{\\1c&H{base}&\\1a&H00&}}" + t)
                 elif j == i:
-                    parts.append(f"{{\\1c&H{highlight}&\\1a&H00&}}" + t)
+                    parts.append(f"{{\\1c&H{base if L.get('glow') else highlight}&\\1a&H00&}}" + t)
                 else:
                     parts.append(f"{{\\1c&H{base}&\\1a&H{L['dim']}&}}" + t)
-            fx = pos
+            fx = pos + ("\\blur4" if L.get("glow") and not mask else "")
             if i == 0:
                 fx += ("\\fad(100,0)\\fscx82\\fscy82\\t(0,180,\\fscx100\\fscy100)" if L["pop"]
                        else "\\fad(160,0)\\blur3\\t(0,220,\\blur0)")
             if i == len(ph) - 1:
                 fx += "\\fad(0,120)" if i else ""
+            if L.get("glow") and not mask:  # neonas: apačioje sulietas švytėjimas, viršuje – ryškus tekstas
+                lines.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,"
+                             f"{{{fx}\\bord{outline * 2}\\blur{max(4, outline * 2)}}}" + " ".join(parts))
+                lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,"
+                             f"{{{fx.replace(chr(92) + 'blur4', '')}\\bord{max(1, outline // 3)}}}" + " ".join(parts))
+                continue
             lines.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,{{{fx}}}" + " ".join(parts))
     return "\n".join(lines) + "\n"
 

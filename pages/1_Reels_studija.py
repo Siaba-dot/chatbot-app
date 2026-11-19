@@ -250,7 +250,7 @@ AI_LABELS = {"template": "Šablonas", "accent": "Akcentas", "color": "Filtras", 
              "end_card": "Pabaigos kortelė", "yt_end": "YouTube pabaigos ekranas",
              "moment_at": "Gintaro akimirka (s)", "transition": "Perėjimas", "music_choice": "Muzika",
              "music_volume": "Muzikos garsumas", "length": "Ilgiausia trukmė", "speed": "Greitis",
-             "progress": "Progreso juostelė"}
+             "progress": "Progreso juostelė", "bubbles": "Debesėliai"}
 
 
 def ai_options():
@@ -263,6 +263,7 @@ def ai_options():
         "link": "url", "hook_pos": list(reels_studio.HOOK_POSITIONS),
         "subs_pos": list(reels_studio.SUBTITLE_POSITIONS), "text_size": "60-150 (%)", "subs_size": "60-150 (%)",
         "key_words": "bool", "punch": "bool", "end_card": "bool (end card with link and QR)",
+        "bubbles": "bool (comic speech bubbles ?, !, WOW at emotional moments)",
         "yt_end": "bool (16:9 YouTube end screen)", "moment_at": "0.5-60 seconds",
         "transition": list(video_editor.TRANSITIONS),
         "music_choice": ["Be muzikos"] + list(reels_studio.music_library()), "music_volume": "0-100 (%)",
@@ -360,6 +361,24 @@ def undo_ai():
         else:
             ss[P + k] = v
     ss[P + "ai_result"] = {"summary": "↶ Pakeitimai atšaukti.", "done": []}
+
+
+def bubble_list(words):
+    """Debesėlių vietos: AI (Premium, įsimenama) arba pagal skyrybą. None – išjungta."""
+    words = list(words or [])
+    if not bubbles_on or not words:
+        return None
+    if client is not None:
+        cache = st.session_state.setdefault(P + "ai_bubbles", {})
+        k = hash(tuple((w, round(a, 2)) for w, a, _ in words))
+        if k not in cache:
+            try:
+                cache[k] = reels_studio.ai_bubbles(client, words)
+            except Exception:
+                cache[k] = None
+        if cache[k]:
+            return cache[k]
+    return reels_studio.auto_bubbles(words)
 
 
 def marked(words):
@@ -588,8 +607,10 @@ with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True)
     signature = ["c:" + n for n in reels_studio.SIGNATURE_FILTERS] + ["e:" + n for n in reels_studio.SIGNATURE_EFFECTS]
     tiles(P + "style_tiles", items,
           ["t:" + template, "c:" + color] + ["e:" + e for e in effects],
-          tabs=[{"name": "Šablonai", "items": ["t:" + n for n in reels_studio.TEMPLATES]},
-                {"name": "Filtrai", "items": ["c:" + n for n in reels_studio.COLOR_FILTERS]},
+          tabs=[{"name": "Šablonai", "items": ["t:" + n for n in reels_studio.TEMPLATES]}]
+          + [{"name": cat, "items": ["t:" + n for n, t in reels_studio.TEMPLATES.items() if t.get("cat") == cat]}
+             for cat in reels_studio.TEMPLATE_CATEGORIES if cat != "Prabanga"]
+          + [{"name": "Filtrai", "items": ["c:" + n for n in reels_studio.COLOR_FILTERS]},
                 {"name": "Efektai", "items": ["e:" + n for n in reels_studio.EFFECTS], "multi": True},
                 {"name": "✦ Firminiai", "items": signature}])
     st.caption(f"Šablonas: **{template}** · filtras: **{color}**"
@@ -660,8 +681,13 @@ with sb.expander("✍️  Tekstai ir titrai"):
                                    "dirbtinis intelektas) ir juos išryškina. Titrų taisyme žodį galite pažymėti ir patys: *žodis*.")
         punch = st.toggle("✦ Akcentų priartėjimas", key=P + "punch", disabled=not key_words,
                           help="Ties svarbiausiais žodžiais kadras trumpam „įšoka“ arčiau – kaip profesionalų montaže.")
+        st.session_state.setdefault(P + "bubbles", False)
+        bubbles_on = st.toggle("✦ Debesėliai (?, !, WOW)", key=P + "bubbles",
+                               help="Komiksų debesėliai iššoka tam tikrose vietose: klausimui – „?“, nuostabai – "
+                                    "„WOW!“, abejonei – „Hmm…“, patarimui – „IDĖJA!“, meilei – širdelė. Premium – vietas "
+                                    "parenka dirbtinis intelektas pagal tai, ką sakote; be jo – pagal ? ir ! tekste.")
     else:
-        key_words = punch = False
+        key_words = punch = bubbles_on = False
 
     # Balso atpažinimas (OpenAI Whisper)
     speech_minutes = sum(clips_ui.clip_length(c, image_duration) for c in clips if not c.get("image")) / 60
@@ -1131,6 +1157,7 @@ def build(prep, words, tmp, out, quick, progress, fmt=fmt):
         subs_words=words, subs_look=look, subs_ypos=subs_y,
         hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
         voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch, logo=logo, end_card=end_card,
+        bubbles=bubble_list(words),
         moment_at=st.session_state.get(P + "moment_at", 3.0) if "Gintaro akimirka" in effects else None)
     return res, fin
 

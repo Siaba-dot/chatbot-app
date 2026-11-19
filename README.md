@@ -41,6 +41,13 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **Šablonai pagal kategorijas** – 15 šablonų skirtukuose **Verslas · Grožis · Maistas · Kelionės · Šventės**
+  (pvz. „Verslo galia“, „Grožio salonas“, „Gardžiai!“, „Nuotykis“, „Vakarėlis“), naujas stambių raidžių stilius;
+- **13 titrų stilių**, tarp jų nauji: **Iššokantys** (vienas didelis žodis vienu metu), **Mišrūs** (svarbiausi
+  žodžiai dideli, jungiamieji maži, dalis – ranka ir kreivai), **Karaoke**, **Neoniniai**, **Šokinėjantys**,
+  **Žymeklis** (žodis spalvotame fone), **Rašomoji mašinėlė**;
+- **✦ Debesėliai** – komiksų debesėliai „?“, „!“, „WOW!“, „Hmm…“, „IDĖJA!“, „TOP!“, širdelė iššoka tinkamose
+  vietose: Premium – vietas parenka AI pagal kalbą, be jo – pagal ? ir ! tekste;
 - **✨ AI režisierius** (Premium) – po peržiūros langu parašote savais žodžiais, pvz. „padaryk prabangiau ir
   energingiau, iki 30 s, sustabdyk ties žodžiu paslaptis“: dirbtinis intelektas pakeičia šabloną, filtrą, efektus,
   titrų stilių, kabliuką, kvietimą, muziką, tempą ir trukmę, parodo, ką pakeitė, ir iškart sukuria peržiūrą;
