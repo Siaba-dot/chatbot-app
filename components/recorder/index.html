@@ -30,11 +30,28 @@
   .bar { flex: 1; height: 8px; background: rgba(180,195,216,.18); border-radius: 4px; overflow: hidden; }
   .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, #E39B2E, #FFD58A); transition: width .08s; }
   .rec { color: var(--rec); font-weight: 600; }
+  /* Sufleris: tekstas slenka ant kameros vaizdo */
+  .stage { position: relative; }
+  .prompt { position: absolute; left: 0; right: 0; top: 0; height: 55%; overflow: hidden; border-radius: 10px 10px 0 0;
+            background: linear-gradient(180deg, rgba(6,18,38,.82) 70%, rgba(6,18,38,0)); pointer-events: none; }
+  .prompt .txt { padding: 10px 16px 40px; color: #fff; font-weight: 600; line-height: 1.35; text-align: center;
+                 text-shadow: 0 1px 3px rgba(0,0,0,.8); will-change: transform; }
+  .pctl { position: absolute; right: 6px; bottom: 8px; display: flex; gap: 4px; z-index: 2; }
+  .pctl button { flex: none; min-height: 30px; padding: 2px 8px; font-size: 13px; border-radius: 8px;
+                 background: rgba(6,18,38,.75); }
 </style>
 </head>
 <body>
 <div class="box">
-  <video id="live" playsinline muted autoplay></video>
+  <div class="stage">
+    <video id="live" playsinline muted autoplay></video>
+    <div id="prompt" class="prompt hidden"><div id="ptext" class="txt"></div></div>
+    <div id="pctl" class="pctl hidden">
+      <button id="pslow" title="Lėčiau">🐢</button><button id="pfast" title="Greičiau">🐇</button>
+      <button id="psmall" title="Mažesnės raidės">A−</button><button id="pbig" title="Didesnės raidės">A+</button>
+      <button id="ptop" title="Iš pradžių">⤒</button>
+    </div>
+  </div>
   <video id="playback" playsinline controls></video>
   <div id="meterRow" class="meter hidden">🎙️ <div class="bar"><div id="meter"></div></div> <span id="timer"></span></div>
   <div class="row">
@@ -65,6 +82,34 @@ function say(text, err) { const m = $("msg"); m.textContent = text; m.classList.
 
 window.addEventListener("message", e => { if (e.data && e.data.type === "streamlit:render") resize(); });
 new ResizeObserver(resize).observe(document.body);
+// ---------- Sufleris ----------
+let script = "", pSpeed = 16, pSize = 22, pOff = 0, pLast = 0, pRun = false;
+function promptVisible() {
+  const on = !!script && live.style.display === "block";
+  $("prompt").classList.toggle("hidden", !on); $("pctl").classList.toggle("hidden", !on);
+}
+function promptRender() { $("ptext").style.fontSize = pSize + "px"; $("ptext").style.transform = `translateY(${-pOff}px)`; }
+function promptTick(ts) {
+  if (!pRun) return;
+  if (pLast) pOff += pSpeed * (ts - pLast) / 1000;
+  pLast = ts; promptRender(); requestAnimationFrame(promptTick);
+}
+function promptStart() {  // 1,5 s pauzė – spėsite perskaityti pirmą eilutę
+  pRun = true; pLast = 0;
+  setTimeout(() => { if (pRun) requestAnimationFrame(promptTick); }, 1500);
+}
+function promptStop() { pRun = false; }
+$("pslow").onclick = () => { pSpeed = Math.max(8, pSpeed - 6); };
+$("pfast").onclick = () => { pSpeed = Math.min(120, pSpeed + 6); };
+$("psmall").onclick = () => { pSize = Math.max(14, pSize - 2); promptRender(); resize(); };
+$("pbig").onclick = () => { pSize = Math.min(40, pSize + 2); promptRender(); resize(); };
+$("ptop").onclick = () => { pOff = 0; promptRender(); };
+window.addEventListener("message", e => {
+  if (!e.data || e.data.type !== "streamlit:render") return;
+  const sc = String((e.data.args || {}).script || "");
+  if (sc !== script) { script = sc; $("ptext").textContent = script; pOff = 0; promptRender(); promptVisible(); }
+});
+new MutationObserver(promptVisible).observe(live, {attributes: true, attributeFilter: ["style"]});
 send("streamlit:componentReady", {apiVersion: 1});
 
 function stopStream() {
@@ -112,7 +157,8 @@ async function openCamera() {
     return;
   }
   if (!stream.getAudioTracks().length) say("⚠️ Mikrofonas nerastas – video bus be garso.", true);
-  else say("Kamera įjungta. Pakalbėkite – žalia juostelė turi judėti. Tada spauskite „Pradėti filmuoti“.");
+  else say(script ? "Kamera įjungta. Viršuje – jūsų tekstas: pradėjus filmuoti jis slinks. 🐢/🐇 – greitis, A−/A+ – raidės."
+                  : "Kamera įjungta. Pakalbėkite – juostelė turi judėti. Tada spauskite „Pradėti filmuoti“.");
   live.srcObject = stream; live.classList.toggle("mirror", facing === "user");
   live.style.display = "block"; playback.style.display = "none";
   $("meterRow").classList.remove("hidden"); $("timer").textContent = "";
@@ -136,6 +182,7 @@ function startRecording() {
   recorder.onstop = finishRecording;
   recorder.start(1000);
   t0 = Date.now();
+  pOff = 0; promptStart();
   timerId = setInterval(() => {
     const s = Math.floor((Date.now() - t0) / 1000);
     $("timer").innerHTML = '<span class="rec">● ' + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + "</span>";
@@ -147,6 +194,7 @@ function startRecording() {
 
 function finishRecording() {
   clearInterval(timerId);
+  promptStop();
   blob = new Blob(chunks, {type: recorder.mimeType || chunks[0]?.type || "video/webm"});
   stopStream();
   live.style.display = "none"; $("meterRow").classList.add("hidden");
@@ -157,7 +205,7 @@ function finishRecording() {
 }
 
 // Įrašas siunčiamas dalimis: Streamlit Cloud didelių žinučių neperduoda. Kiekvieną dalį studija patvirtina.
-const CHUNK = 384 * 1024;  // didesnės dalys Streamlit Cloud nepereina (~1 MB riba)
+const CHUNK = 256 * 1024;  // base64 ~340 KB; ~512 KB ir didesnės žinutės nepereina (patikrinta)
 let sentId = null, shownId = null, nChunks = 0, curIdx = -1, retryTimer = null, sending = false;
 
 function sendChunk(i) {

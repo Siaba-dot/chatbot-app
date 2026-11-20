@@ -187,6 +187,68 @@ def step(n, title, desc=""):
                 f'<span class="d">{desc}</span></div>', unsafe_allow_html=True)
 
 
+# ---------- 💡 Ką filmuoti? – idėjos ir sufleris ----------
+def gen_ideas():
+    ss = st.session_state
+    niche = (ss.get(P + "niche") or "").strip()
+    ss.pop(P + "ideas_err", None)
+    if not niche:
+        ss[P + "ideas_err"] = "Įrašykite savo sritį, pvz. „kirpykla“, „kavinė“, „buhalterė“."
+        return
+    ideas, cl = [], clips_ui.openai_client()
+    if cl is not None:
+        try:
+            ideas = reels_studio.ai_ideas(cl, niche)
+        except Exception as e:
+            ss[P + "ideas_err"] = f"AI idėjų nepavyko gauti ({e}) – rodomos studijos idėjos."
+    ss[P + "ideas_ai"] = bool(ideas)
+    ss[P + "ideas"] = ideas or reels_studio.template_ideas(niche)
+    ss.pop(P + "idea_used", None)
+
+
+def use_idea(i):
+    ss = st.session_state
+    it = ss[P + "ideas"][i]
+    ss[P + "script"] = (it["hook"].rstrip(".") + ". " + it["script"]).strip()
+    ss[P + "hook"] = it["hook"]
+    if it.get("cta"):
+        ss[P + "cta"] = it["cta"]
+    ss[P + "subtitle_text_in"] = ss[P + "script"]  # be AI rakto – titrai iš to paties teksto
+    ss[P + "source"] = "🎥 Filmuoti dabar"
+    ss[P + "idea_used"] = i
+
+
+def ideas_ui():
+    ss = st.session_state
+    with st.expander("💡 Ką filmuoti? – idėjos su paruoštu tekstu ir sufleriu",
+                     expanded=not ss.get(P + "clips") or bool(ss.get(P + "ideas"))):
+        st.caption("Nežinote, ką pasakyti? Įrašykite savo sritį – gausite 5 Reels idėjas su paruoštu tekstu. "
+                   "Pasirinkus idėją, filmuojant tekstas slinks ekrane kaip sufleris – nieko nereikia mokytis.")
+        c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
+        c1.text_input("Jūsų sritis", key=P + "niche", placeholder="Pvz.: kirpykla, kavinė, nagų salonas, buhalterė")
+        c2.button("✨ Sugalvok 5 idėjas", on_click=gen_ideas, type="primary", width="stretch", key=P + "ideas_btn")
+        if ss.get(P + "ideas_err"):
+            st.warning(ss[P + "ideas_err"])
+        ideas = ss.get(P + "ideas") or []
+        if ideas and not ss.get(P + "ideas_ai"):
+            st.caption("Studijos idėjų šablonai. Su OpenAI raktu idėjas ir tekstą jūsų sričiai sukurs AI.")
+        for i, it in enumerate(ideas):
+            used = ss.get(P + "idea_used") == i
+            with st.container(border=True):
+                st.markdown(f"**{i + 1}. {html.escape(it['title'])}**" + ("  ✅" if used else ""))
+                st.markdown(f"🎣 **Kabliukas:** {html.escape(it['hook'])}  \n"
+                            f"🗣 {html.escape(it['script'])}  \n"
+                            + (f"📣 **Kvietimas:** {html.escape(it['cta'])}" if it.get("cta") else ""))
+                if it.get("shot"):
+                    st.caption("🎥 " + it["shot"])
+                st.button("✅ Pasirinkta – filmuokite žemiau" if used else "🎬 Filmuoti su šiuo tekstu",
+                          key=f"{P}idea{i}", on_click=use_idea, args=(i,), width="stretch",
+                          type="secondary" if used else "primary")
+        if ss.get(P + "script"):
+            st.text_area("📜 Sufleris – tekstas, kuris slinks filmuojant (galite pataisyti)", key=P + "script",
+                         height=110)
+
+
 def apply_template():
     t = reels_studio.TEMPLATES[st.session_state[P + "template"]]
     st.session_state[P + "accent"] = t["accent"]
@@ -549,7 +611,7 @@ hook_y = reels_studio.HOOK_POSITIONS[st.session_state[P + "hook_pos"]]
 # ---------- Prekės ženklo rinkinys: išsaugoti numatytieji nustatymai ----------
 BRAND_DIR = os.path.join(accounts.DATA_DIR, "brand")
 BRAND_KEYS = ("template", "accent", "color", "handle", "cta", "brand_color", "logo_on", "logo_pos", "logo_size",
-              "logo_opacity", "link", "end_card", "yt_end")
+              "logo_opacity", "link", "end_card", "yt_end", "niche")
 
 
 def brand_file():
@@ -598,6 +660,7 @@ st.markdown('<div class="lux-settings-hint">⚙️ <b>Nustatymai</b> – filtrai
 # ---------- I. Medžiaga ----------
 with st.container(border=True):
     step("I", "Medžiaga", "video, nuotraukos arba filmavimas")
+    ideas_ui()
     clips, image_duration = clips_ui.clip_picker(P, trim=True)
     st.session_state.setdefault(P + "transition", "Be perėjimo")
     pick = tile_click(P + "x_tiles")
@@ -838,6 +901,7 @@ with sb.expander("✍️  Tekstai ir titrai"):
                                 "atpažinti. Jei ne – įrašykite tekstą.")
         else:
             subtitle_text = st.text_area("Titrų tekstas", placeholder="Tekstas bus tolygiai išdėliotas per video.",
+                                         key=P + "subtitle_text_in",
                                          help="Įrašykite tekstą – programa suskaidys jį į frazes ir išdėlios "
                                               "per video.")
 
@@ -1036,6 +1100,12 @@ def link_help(result):
 def ai_director_ui():
     """✨ AI režisierius – Reels patobulinimas pagal žodinį prašymą."""
     box = st.container(key=P + "ai_box")
+    res = st.session_state.get(P + "ai_result")
+    if res and client is None and not res.get("error"):  # pvz. Autopilotas be AI rakto – kas parinkta
+        lines = [f"- **{k}:** {', '.join(map(str, v)) if isinstance(v, list) else v}" for k, v in res["done"]]
+        box.info((res.get("summary") or "") + ("\n\n" + "\n".join(lines) if lines else ""))
+        if res["done"] and st.session_state.get(P + "ai_undo"):
+            box.button("↶ Atšaukti Autopiloto pakeitimus", key=P + "ai_undo_btn0", on_click=undo_ai)
     if client is None:  # visada matoma – kad būtų aišku, kur ir kada AI veikia
         box.caption("✨ **AI režisierius** – patobulina Reels pagal jūsų prašymą, parenka debesėlius, kabliukus ir "
                     "svarbiausius žodžius: " + ("Premium plane." if plan == "basic" else

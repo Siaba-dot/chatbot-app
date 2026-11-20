@@ -1451,6 +1451,53 @@ def mark_indices(words, indices, min_gap=1.2):
     return out
 
 
+def ai_ideas(client, niche, extra="", n=5):
+    """💡 Reels idėjos su paruoštu tekstu (sufleriui). Grąžina [{title, hook, script, cta, shot}]."""
+    system = ("You are a top Lithuanian social media strategist. For the given business / niche, write "
+              f"{n} different Instagram Reels ideas in Lithuanian with correct diacritics. Mix formats: tips list, "
+              "common mistake, before/after, behind the scenes, answer to a client question, myth vs truth, story. "
+              "For each: title (max 6 words), hook (first spoken sentence, max 9 words, scroll-stopping), script "
+              "(what to say on camera after the hook, 3–6 short natural spoken sentences, 20–40 seconds, simple "
+              "words, no hashtags or emojis), cta (short call to action), shot (one short tip what to show on camera). "
+              'Reply only with JSON: {"ideas": [{"title": "", "hook": "", "script": "", "cta": "", "shot": ""}]}')
+    j = _ai_json(client, system, {"niche": niche, "notes": extra}, temperature=0.9)
+    out = []
+    for it in j.get("ideas", []):
+        if isinstance(it, dict) and str(it.get("script", "")).strip():
+            out.append({k: str(it.get(k, "")).strip() for k in ("title", "hook", "script", "cta", "shot")})
+    return out[:n]
+
+
+def template_ideas(niche):
+    """💡 Idėjos BE dirbtinio intelekto – patikrinti Reels formatai su jūsų sritimi."""
+    x = (niche or "mano sritis").strip()
+    return [
+        {"title": "3 patarimai", "hook": f"3 patarimai, kuriuos turi žinoti kiekvienas – {x}",
+         "script": f"Pirmas patarimas – pradėkite nuo paprasčiausio dalyko, kurį galite padaryti šiandien. "
+                   f"Antras – neskubėkite, kokybė svarbiau už greitį. Trečias – klauskite specialisto, "
+                   f"kai abejojate. Būtent taip dirbame ir mes – {x}.",
+         "cta": "Išsaugok, kad nepamirštum!", "shot": "Kalbėkite į kamerą, ties kiekvienu patarimu parodykite pirštais skaičių."},
+        {"title": "Dažniausia klaida", "hook": "Šią klaidą daro beveik visi",
+         "script": f"Dažniausia klaida, kurią matau kasdien – noras viską padaryti iš karto. "
+                   f"Rezultatas tada nedžiugina. Mano patarimas – vienas žingsnis vienu metu. "
+                   f"Taip dirbdami pasiekiame geriausių rezultatų – {x}.",
+         "cta": "Parašyk, ar tau tai pažįstama 👇", "shot": "Pradėkite rimtu veidu, pabaigoje nusišypsokite."},
+        {"title": "Prieš ir po", "hook": "Pažiūrėk, koks skirtumas!",
+         "script": f"Štai kaip atrodė pradžioje. O štai rezultatas po mūsų darbo. "
+                   f"Visas paslaptis – kruopštumas ir patirtis. Toks yra mūsų kasdienis darbas – {x}.",
+         "cta": "Nori tokio rezultato? Rašyk žinutę!", "shot": "Pirmiausia parodykite „prieš“, tada – „po“ (du įrašai)."},
+        {"title": "Užkulisiai", "hook": "Taip atrodo mūsų diena iš vidaus",
+         "script": f"Rytas prasideda nuo kavos ir plano. Tada – darbas, kurį labai mylime. "
+                   f"Kiekviena detalė svarbi, todėl skiriame laiko kiekvienam klientui. Tai mes – {x}.",
+         "cta": "Sek, kad pamatytum daugiau!", "shot": "Kelios trumpos scenos: atvykimas, darbas, rezultatas."},
+        {"title": "Atsakau į klausimą", "hook": "Klientai dažniausiai klausia būtent to",
+         "script": f"Dažniausias klausimas, kurį girdžiu – nuo ko pradėti? Atsakymas paprastas: "
+                   f"nuo pokalbio. Pasakykite, ko norite, o mes pasiūlysime geriausią sprendimą. "
+                   f"Tam ir esame – {x}.",
+         "cta": "Užduok savo klausimą komentaruose!", "shot": "Parodykite klausimą ekrane, tada atsakykite į kamerą."},
+    ]
+
+
 def ai_bubbles(client, words, max_n=6):
     """AI parenka vietas debesėliams (laikai – kaip žodžių): [(laikas, rūšis)]."""
     kinds = {k: v["title"] for k, v in BUBBLE_KINDS.items()}
