@@ -14,6 +14,10 @@ from video_editor import FONT_NAME, _ass_escape, _ass_time
 
 STICKERS = {"hearts": "Širdelės", "stars": "Žvaigždutės", "confetti": "Konfeti", "fire": "Liepsnelės"}
 MARKS = {"circle": "Apskritimas", "arrow": "Rodyklė", "underline": "Pabraukimas"}
+FX = {"shatter": "Byrančios kaladėlės", "glitch": "Glitch", "flash": "Blyksnis", "leak": "Šviesos nutekėjimas",
+      "bw": "Nespalvota akimirka"}
+FX_ORDER = ("shatter", "flash", "glitch", "leak", "bw")
+SHATTER_LEN, GLITCH_LEN, BW_LEN = 1.4, 0.45, 1.3
 INTRO_LEN, OUTRO_LEN = 1.3, 1.8
 
 # ---------- žodžiai, pagal kuriuos parenkama be AI ----------
@@ -262,14 +266,216 @@ def animations_ass(plan, W, H, duration, accent_rgb="E9A23B", subs_y=0.72, handl
     for i, (t, txt) in enumerate(cards):
         end = min(t + 2.6, cards[i + 1][0] if i + 1 < len(cards) else duration, duration)
         _card(lines, t, end, txt.strip()[:40], i, W, H, acc, rnd)
+    for t, kind in (plan or {}).get("fx", []):
+        if kind in ("flash", "leak") and t < duration - 0.5:
+            _fx_ass(lines, t, kind, W, H, rnd)
     _intro_outro(lines, W, H, duration, acc, handle, intro, outro)
     return "\n".join(lines) + "\n"
+
+
+# ---------- 🎆 Efektų mozaika ----------
+def render_shatter(img, out_path, fps=30):
+    """Byrančios kaladėlės: kadras (PIL, jau su filtrais) suskyla į kaladėles, kurios nubyra žemyn
+    (permatomas MOV qtrle sluoksnis; po juo video tęsiasi)."""
+    import os
+    import subprocess
+    import tempfile
+    from PIL import Image, ImageDraw
+    img = img.convert("RGBA")
+    w, h = img.size
+    cols, rows = 6, 10
+    tw, th = math.ceil(w / cols), math.ceil(h / rows)
+    rnd = random.Random(11)
+    tiles = []
+    for r in range(rows):
+        for c in range(cols):
+            box = (c * tw, r * th, min(w, (c + 1) * tw), min(h, (r + 1) * th))
+            tile = img.crop(box)
+            ImageDraw.Draw(tile).rectangle((0, 0, tile.width - 1, tile.height - 1), outline=(255, 214, 140, 160))
+            tiles.append({"img": tile, "x": box[0], "y": box[1],
+                          "delay": 0.12 + (rows - 1 - r) / rows * 0.35 + rnd.uniform(0, 0.15),
+                          "vx": rnd.uniform(-0.25, 0.25) * w, "vy": -rnd.uniform(0.05, 0.3) * h,
+                          "spin": rnd.uniform(-260, 260)})
+    g = h * 2.6
+    frames = round(SHATTER_LEN * fps)
+    tmp = tempfile.mkdtemp()
+    try:
+        for fi in range(frames):
+            t = fi / fps
+            canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            for tl in tiles:
+                dt = t - tl["delay"]
+                if dt <= 0:
+                    canvas.alpha_composite(tl["img"], (tl["x"], tl["y"]))
+                    continue
+                x = tl["x"] + tl["vx"] * dt
+                y = tl["y"] + tl["vy"] * dt + 0.5 * g * dt * dt
+                if y > h:
+                    continue
+                im = tl["img"].rotate(tl["spin"] * dt, expand=True, resample=Image.BILINEAR)
+                canvas.alpha_composite(im, (round(x - (im.width - tl["img"].width) / 2),
+                                            round(y - (im.height - tl["img"].height) / 2)))
+            canvas.save(os.path.join(tmp, f"f{fi:04d}.png"), compress_level=1)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps), "-i",
+                        os.path.join(tmp, "f%04d.png"), "-c:v", "qtrle", "-pix_fmt", "argb", out_path], check=True)
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out_path
+
+
+def _fx_ass(lines, t, kind, W, H, rnd):
+    """Blyksnis ir šviesos nutekėjimas (ASS); glitch, nespalvota ir kaladėlės – ffmpeg sluoksniai finish() metu."""
+    full = f"m 0 0 l {W} 0 l {W} {H} l 0 {H}"
+    if kind == "flash":
+        _ev(lines, 11, t, t + 0.45, "\\an7\\pos(0,0)\\1c&H00FFFFFF&\\alpha&H00&\\t(60,450,\\alpha&HFF&)"
+            "\\bord0\\shad0\\p1", full)
+    elif kind == "leak":
+        for i, col in enumerate(("&H003A8CFF&", "&H0066B4FF&", "&H00A0D8FF&")):
+            r = W * (0.55 - 0.12 * i)
+            x0, x1 = -r * 0.6 + i * 40, W + r * 0.4
+            y = H * (0.25 + 0.2 * i)
+            _ev(lines, 11, t + i * 0.08, t + 1.5, f"\\an5\\move({_f(x0)},{_f(y)},{_f(x1)},{_f(y - H * 0.1)})"
+                f"\\1c{col}\\alpha&H70&\\bord0\\shad0\\blur{round(W * 0.06)}\\fad(300,500)\\p1",
+                _ellipse(0, 0, r, r * 0.8))
+
+
+# ---------- 📱 Nuotraukos skrenda į telefoną ----------
+PHONE_LEN = 3.0
+_PHONE_WORDS = r"^(nuotrauk|foto|galerij|telefon|video|įraš|turin|kadr|prisimin|akimirk|reels|instagram)"
+
+
+def _ease(x):
+    x = max(0.0, min(1.0, x))
+    return 1 - (1 - x) ** 3
+
+
+def render_phone_burst(thumbs, out_path, W, H, fps=30, accent_rgb="E9A23B"):
+    """Permatomas efekto sluoksnis (MOV qtrle, piešiama per pusę mažesne raiška): iš kairio telefono išskrenda
+    kortelės su kadrais, pasisklaido ir sukrenta į dešinį telefoną, kurio galerija prisipildo."""
+    import os
+    import subprocess
+    import tempfile
+    from PIL import Image, ImageDraw, ImageFilter
+    w, h = W // 2 // 2 * 2, H // 2 // 2 * 2
+    ref = min(w, h * 0.75)
+    rnd = random.Random(3)
+    acc = tuple(int(accent_rgb[i:i + 2], 16) for i in (0, 2, 4))
+    n = max(1, len(thumbs))
+    # kortelės: kadras su baltu rėmeliu ir šešėliu
+    cw = round(ref * 0.27)
+    cards = []
+    for i in range(14):
+        im = thumbs[i % n].convert("RGB")
+        ch = round(cw * 1.3)
+        im = im.resize((cw, ch), Image.LANCZOS) if im.size != (cw, ch) else im
+        b = max(3, cw // 22)
+        card = Image.new("RGBA", (cw + 2 * b, ch + 2 * b), (255, 255, 255, 255))
+        card.paste(im, (b, b))
+        sh = Image.new("RGBA", (card.width + 16, card.height + 16), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rectangle((8, 10, card.width + 8, card.height + 10), fill=(0, 0, 0, 110))
+        sh = sh.filter(ImageFilter.GaussianBlur(5))
+        sh.alpha_composite(card, (8, 8))
+        cards.append(sh)
+    # telefonai
+    pw = round(ref * 0.34)
+    ph = round(pw * 2.05)
+
+    def phone(screen_fill):
+        img = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        r = pw // 7
+        d.rounded_rectangle((0, 0, pw - 1, ph - 1), r, fill=(18, 18, 22, 255), outline=(90, 90, 100, 255), width=2)
+        m = max(4, pw // 22)
+        d.rounded_rectangle((m, m, pw - m, ph - m), r - m, fill=(0, 0, 0, 255))
+        screen_fill(img, (m, m, pw - m, ph - m))
+        d.rounded_rectangle((pw * 0.36, m + 4, pw * 0.64, m + 4 + pw // 12), pw // 24, fill=(0, 0, 0, 255))
+        return img
+
+    def left_screen(img, box):
+        x0, y0, x1, y1 = box
+        t = thumbs[0].convert("RGB").resize((x1 - x0, y1 - y0))
+        mask = Image.new("L", t.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, t.width - 1, t.height - 1), pw // 9, fill=255)
+        img.paste(t, (x0, y0), mask)
+
+    grid_cells = 12
+
+    def right_screen(filled):
+        def f(img, box):
+            x0, y0, x1, y1 = box
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle(box, pw // 9, fill=(14, 14, 16, 255))
+            cols, gap = 3, 3
+            cs = (x1 - x0 - gap * (cols + 1)) // cols
+            top = y0 + pw // 6
+            for k in range(min(filled, grid_cells)):
+                cx = x0 + gap + (k % cols) * (cs + gap)
+                cy = top + gap + (k // cols) * (cs + gap)
+                th = thumbs[k % n].convert("RGB").resize((cs, cs))
+                img.paste(th, (cx, cy))
+            d.rounded_rectangle((x0 + gap, y0 + 6, x0 + gap + cs, y0 + 6 + pw // 14), 3, fill=acc + (255,))
+        return f
+
+    left_img = phone(left_screen).rotate(8, expand=True, resample=Image.BICUBIC)
+    lp = (round(w * 0.03), round(h * 0.62))
+    rp = (round(w * 0.97) - left_img.width, round(h * 0.62))
+    lc = (lp[0] + left_img.width * 0.5, lp[1] + left_img.height * 0.35)
+    rc = (rp[0] + left_img.width * 0.5, rp[1] + left_img.height * 0.4)
+    plan = []
+    for i in range(14):
+        start = 0.35 + 0.045 * i
+        target = (rnd.uniform(0.08, 0.92) * w, rnd.uniform(0.1, 0.5) * h)
+        back = 1.55 + 0.05 * i
+        plan.append((start, target, rnd.uniform(-28, 28), back, rnd.uniform(-1, 1)))
+    frames = round(PHONE_LEN * fps)
+    tmp = tempfile.mkdtemp()
+    try:
+        for fi in range(frames):
+            t = fi / fps
+            canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            # telefonai išnyra iš apačios ir pabaigoje nusileidžia
+            rise = _ease(t / 0.35) * (1 - _ease((t - (PHONE_LEN - 0.35)) / 0.35))
+            dy = round((1 - rise) * h * 0.45)
+            arrived = sum(1 for st, tg, rot, bk, dr in plan if t >= bk + 0.42)
+            right_img = phone(right_screen(arrived)).rotate(-8, expand=True, resample=Image.BICUBIC)
+            canvas.alpha_composite(left_img, (lp[0], lp[1] + dy))
+            canvas.alpha_composite(right_img, (rp[0], rp[1] + dy))
+            for i, (st, tg, rot, bk, dr) in enumerate(plan):
+                if t < st or t >= bk + 0.42:
+                    continue
+                if t < st + 0.45:  # išskrenda
+                    k = _ease((t - st) / 0.45)
+                    x = lc[0] + (tg[0] - lc[0]) * k
+                    y = lc[1] + (tg[1] - lc[1]) * k - math.sin(k * math.pi) * h * 0.08
+                    sc, ang = 0.35 + 0.65 * k, rot * k
+                elif t < bk:  # pakimba ir šiek tiek plaukia
+                    x, y = tg[0] + dr * (t - st) * 8, tg[1] - (t - st) * 6
+                    sc, ang = 1.0, rot
+                else:  # sukrenta į dešinį telefoną
+                    k = _ease((t - bk) / 0.42)
+                    hx, hy = tg[0] + dr * (bk - st) * 8, tg[1] - (bk - st) * 6
+                    x = hx + (rc[0] - hx) * k
+                    y = hy + (rc[1] + dy - hy) * k
+                    sc, ang = 1.0 - 0.75 * k, rot * (1 - k)
+                c = cards[i]
+                im = c.resize((max(2, round(c.width * sc)), max(2, round(c.height * sc))), Image.BILINEAR)
+                im = im.rotate(ang, expand=True, resample=Image.BILINEAR)
+                canvas.alpha_composite(im, (round(x - im.width / 2), round(y - im.height / 2)))
+            canvas.save(os.path.join(tmp, f"f{fi:04d}.png"), compress_level=1)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps), "-i",
+                        os.path.join(tmp, "f%04d.png"), "-c:v", "qtrle", "-pix_fmt", "argb", out_path], check=True)
+    finally:
+        for f in os.listdir(tmp):
+            os.unlink(os.path.join(tmp, f))
+        os.rmdir(tmp)
+    return out_path
 
 
 # ---------- kur dėti animacijas ----------
 def auto_plan(words, gap=2.6):
     """Planas BE AI: lipdukai pagal žodžius, žymėjimai ties svarbiausiais žodžiais, kortelės pagal „pirma, antra…“."""
-    plan = {"stickers": [], "marks": [], "cards": []}
+    plan = {"stickers": [], "marks": [], "cards": [], "phone": [], "fx": []}
     last_s = last_m = -1e9
     mark_kinds = ["circle", "arrow", "underline"]
     for i, (w, a, b) in enumerate(words):
@@ -298,6 +504,17 @@ def auto_plan(words, gap=2.6):
             txt = " ".join(r for r in rest if r)
             if txt:
                 plan["cards"].append((round(a, 2), f"{num}. {txt}"))
+    last_f = -1e9  # efektų mozaika – ties naujais sakiniais, vis kitas efektas
+    for ph_ in video_editor.group_phrases(list(words)):
+        a = ph_[0][1]
+        if a >= 1.0 and a - last_f >= 3.5 and len(plan["fx"]) < 5:
+            plan["fx"].append((round(a, 2), FX_ORDER[len(plan["fx"]) % len(FX_ORDER)]))
+            last_f = a
+    ph = next((a for w, a, b in words if re.search(_PHONE_WORDS, video_editor.plain(w).lower())), None)
+    if ph is None and words:
+        ph = words[len(words) // 3][1]
+    if ph is not None:
+        plan["phone"] = [round(ph, 2)]
     if not plan["stickers"] and words:  # bent vienas lipdukas – ties pirmu šauktuku arba pabaigoje
         ex = next((a for w, a, b in words if video_editor.plain(w).endswith("!")), words[-1][1])
         plan["stickers"].append((round(ex, 2), "stars"))
@@ -312,12 +529,17 @@ def ai_plan(client, words, ai_json):
               "), hand-drawn marks at the most important moments (up to 4, kinds: " +
               json.dumps(MARKS, ensure_ascii=False) + "), and pop-up cards ONLY if the speaker lists points/tips/"
               "steps/prices (up to 5, text max 4 words in the transcript language, start with the number, e.g. "
-              "\"1. Kokybė\"). Reply only with JSON: {\"stickers\": [{\"time\": 0, \"kind\": \"hearts\"}], "
-              "\"marks\": [{\"time\": 0, \"kind\": \"circle\"}], \"cards\": [{\"time\": 0, \"text\": \"1. ...\"}]}")
+              "\"1. Kokybė\"), and ONE moment for a 'photos fly into a phone' effect (when photos, videos, gallery, "
+              "memories or content are mentioned, otherwise a strong moment), and up to 5 varied visual effects at "
+              "the starts of new sentences, at least 3.5 s apart, each different (kinds: " +
+              json.dumps(FX, ensure_ascii=False) + "). Reply only with JSON: {\"stickers\": [{\"time\": 0, \"kind\": \"hearts\"}], "
+              "\"marks\": [{\"time\": 0, \"kind\": \"circle\"}], \"cards\": [{\"time\": 0, \"text\": \"1. ...\"}], \"phone\": 0, "
+              "\"fx\": [{\"time\": 0, \"kind\": \"shatter\"}]}")
     j = ai_json(client, system, {"transcript": lines})
     end = words[-1][2] if words else 0
     out = {"stickers": [], "marks": [], "cards": []}
-    for key, valid, field in (("stickers", STICKERS, "kind"), ("marks", MARKS, "kind"), ("cards", None, "text")):
+    for key, valid, field in (("stickers", STICKERS, "kind"), ("marks", MARKS, "kind"), ("cards", None, "text"),
+                              ("fx", FX, "kind")):
         for it in j.get(key, []) if isinstance(j.get(key), list) else []:
             try:
                 t, v = float(it["time"]), str(it[field]).strip()
@@ -326,4 +548,9 @@ def ai_plan(client, words, ai_json):
             if 0 <= t <= end and v and (valid is None or v in valid):
                 out[key].append((round(t, 2), v[:40]))
         out[key] = sorted(out[key])[:5]
+    try:
+        ph = float(j.get("phone"))
+        out["phone"] = [round(ph, 2)] if 0 <= ph <= end else []
+    except (TypeError, ValueError):
+        out["phone"] = []
     return out

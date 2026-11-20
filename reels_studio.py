@@ -17,7 +17,9 @@ import subprocess
 import tempfile
 import time
 
+import animations
 import video_editor
+from PIL import Image as PILImage
 from video_editor import FONT_DIR, FONT_NAME, TRAINING_FONT, _ass_escape, _ass_time, _filter_path
 
 # Akcento spalvos: pavadinimas -> (RGB hex, teksto spalva ant jos)
@@ -1141,8 +1143,9 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         cta = ""
     # Animuota pabaiga („AČIŪ!“) – taip pat PO video (kad neuždengtų paskutinio sakinio), jei nėra pabaigos kortelės
     outro_len = 0.0
+    phone_times = []
+    fx_list = []
     if anims and anims.get("outro") and not card_len:
-        import animations
         outro_len = animations.OUTRO_LEN
     total = duration + card_len + outro_len
 
@@ -1167,9 +1170,17 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                     f.write(bubbles_ass(bb, W, H, accent))
                 post.append(f"ass=filename='{_filter_path(bp)}':fontsdir='{_filter_path(FONT_DIR)}'")
         if anims:  # animacijos: lipdukai, žymėjimai, kortelės, įžanga / pabaiga (laikai – montažo laiku)
-            import animations
             pl = {k: [(t / speed, v) for t, v in anims.get("plan", {}).get(k, [])]
-                  for k in ("stickers", "marks", "cards")}
+                  for k in ("stickers", "marks", "cards", "fx")}
+            fx_list = [(t, k) for t, k in pl["fx"] if t < duration - 0.6]
+            for t, k in fx_list:  # glitch ir nespalvota akimirka – laiko lange (pastovus kadro dydis)
+                if k == "glitch":
+                    e = f"enable='between(t,{t:.3f},{t + animations.GLITCH_LEN:.3f})'"
+                    pre += [f"rgbashift=rh=-16:bh=16:rv=5:bv=-5:{e}", f"noise=alls=28:allf=t:{e}"]
+                elif k == "bw":  # po spalvų filtro (kitaip filtras vėl nuspalvintų), prieš titrus
+                    post.insert(0, f"hue=s=0:enable='between(t,{t:.3f},{t + animations.BW_LEN:.3f})'")
+            phone_times = [t / speed for t in anims.get("plan", {}).get("phone", [])
+                           if t / speed < duration - animations.PHONE_LEN * 0.6][:2]
             ap = os.path.join(tmp, "anims.ass")
             with open(ap, "w", encoding="utf-8") as f:
                 f.write(animations.animations_ass(pl, W, H, duration + outro_len, accent_colors(accent)[0], subs_ypos,
@@ -1218,8 +1229,37 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             inputs.extend(args)
             return n
 
+        if anims and phone_times:  # 📱 nuotraukos skrenda į telefoną – kortelėse video kadrai
+            tdir = os.path.join(tmp, "thumbs")
+            os.makedirs(tdir, exist_ok=True)
+            src_dur = max(1.0, info["duration"])
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vf",
+                            f"fps=12/{src_dur:.3f},scale=270:-2", "-frames:v", "12", os.path.join(tdir, "t%02d.jpg")],
+                           check=False)
+            thumbs = [PILImage.open(os.path.join(tdir, f)) for f in sorted(os.listdir(tdir))]
+            if thumbs:
+                bp_ = animations.render_phone_burst(thumbs, os.path.join(tmp, "phone.mov"), W, H, fps,
+                                                    accent_colors(accent)[0])
+                for pi_, pt in enumerate(phone_times):
+                    k = add_input("-i", bp_)
+                    graph.append(f"[{k}:v]scale={W}:{H},format=yuva420p,"
+                                 f"setpts=PTS-STARTPTS+{max(0.0, pt - 0.4):.3f}/TB[ph{pi_}]")
+                    graph.append(f"{vout}[ph{pi_}]overlay=eof_action=pass:format=auto[pho{pi_}]")
+                    vout = f"[pho{pi_}]"
+        for si_, (t, k) in enumerate([x for x in fx_list if x[1] == "shatter"][:3]):  # 🧱 byrančios kaladėlės
+            snap = os.path.join(tmp, f"snap{si_}.jpg")
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{min(t * speed, info['duration'] - 0.1):.3f}",
+                            "-i", path, "-frames:v", "1", snap], check=False)
+            if os.path.exists(snap):
+                graded = thumbnail(snap, os.path.join(tmp, f"snapg{si_}.jpg"), color, [e for e in (effects or ())
+                                   if e in ("Ryškumas", "Vinjetė", "Švytėjimas", "Kino juostos")],
+                                   W // 2 // 2 * 2, H // 2 // 2 * 2, accent)
+                sp_ = animations.render_shatter(PILImage.open(graded), os.path.join(tmp, f"shatter{si_}.mov"), fps)
+                k_ = add_input("-i", sp_)
+                graph.append(f"[{k_}:v]scale={W}:{H},format=yuva420p,setpts=PTS-STARTPTS+{t:.3f}/TB[sh{si_}]")
+                graph.append(f"{vout}[sh{si_}]overlay=eof_action=pass:format=auto[sho{si_}]")
+                vout = f"[sho{si_}]"
         if anims and (anims.get("intro") or (anims.get("outro") and not card_len)):  # logotipas įžangoje / pabaigoje
-            import animations
             lsrc = (logo or {}).get("path") if logo and os.path.exists((logo or {}).get("path", "")) else AMBER_LOGO
             lp_, _, _ = logo_layer({"path": lsrc, "size": 0.26, "opacity": 1.0}, W, H, os.path.join(tmp, "alogo.png"))
             windows = []
@@ -1341,9 +1381,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 "-r", str(fps), "-movflags", "+faststart", "-t", f"{total:.3f}", out_path]
         _run(cmd, total, progress, "Nepavyko paruošti Reels")
     finally:
-        for name in os.listdir(tmp):
-            os.unlink(os.path.join(tmp, name))
-        os.rmdir(tmp)
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
     return {"duration": total, "width": W, "height": H, "trimmed": trimmed}
 
 

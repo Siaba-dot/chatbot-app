@@ -41,6 +41,10 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **📱 Nuotraukos skrenda į telefoną** – apačioje išnyra du telefonai, iš vieno išskrenda kortelės su jūsų video
+  kadrais, pasisklaido ir sukrenta į kitą (galerija prisipildo); **🎆 Efektų mozaika** – viename video vis kitas efektas
+  ties naujais sakiniais: byrančios kaladėlės, glitch, blyksnis, šviesos nutekėjimas, nespalvota akimirka;
+  titrų stilius **Kino** (siauras Anton šriftas, svarbiausias žodis didesnis ir metalinis);
 - **🎬 Animacijos** (skiltis šoninėje juostoje): **animuoti lipdukai** (kylančios širdelės, žvaigždučių sprogimas,
   konfeti, liepsnelės), **ranka piešti žymėjimai** (apskritimas, rodyklė, pabraukimas „nusipiešia“ ties svarbiausiais
   žodžiais), **iššokančios kortelės** („1. …, 2. …“ kai vardijama), **įžanga** (logotipas ir paskyra įskrenda) ir

@@ -342,6 +342,7 @@ AI_LABELS = {"template": "Šablonas", "accent": "Akcentas", "color": "Filtras", 
              "music_volume": "Muzikos garsumas", "length": "Ilgiausia trukmė", "speed": "Greitis",
              "progress": "Progreso juostelė", "bubbles": "Debesėliai", "an_stickers": "Animuoti lipdukai",
              "an_marks": "Ranka piešti žymėjimai", "an_cards": "Iššokančios kortelės", "an_intro": "Įžanga",
+             "an_phone": "Nuotraukos į telefoną", "an_fx": "Efektų mozaika",
              "an_outro": "Pabaiga"}
 
 
@@ -359,6 +360,8 @@ def ai_options():
         "an_stickers": "bool (animated stickers: hearts, stars, confetti, fire)",
         "an_marks": "bool (hand-drawn circle / arrow / underline at key moments)",
         "an_cards": "bool (pop-up cards when the speaker lists points)", "an_intro": "bool (animated logo intro)",
+        "an_phone": "bool (photo cards fly out of one phone into another)",
+        "an_fx": "bool (varied effects at different moments: shattering blocks, glitch, flash, light leak, b&w)",
         "an_outro": "bool (animated thank-you outro)",
         "yt_end": "bool (16:9 YouTube end screen)", "moment_at": "0.5-60 seconds",
         "transition": list(video_editor.TRANSITIONS),
@@ -439,7 +442,7 @@ def autopilot_plan(client, words):
     ss = st.session_state
     library = reels_studio.music_library()
     ch = {"key_words": True, "punch": True, "bubbles": True, "look": "mixed", "an_stickers": True, "an_marks": True,
-          "an_cards": True, "an_intro": True, "an_outro": True,
+          "an_cards": True, "an_phone": True, "an_fx": True, "an_intro": True, "an_outro": True,
           "effects": sorted(set(ss.get(P + "effects", [])) | {"Švytėjimas", "Auksinės dulkės"})}
     if (ss.get(P + "link") or "").strip():
         ch["end_card"] = True
@@ -508,11 +511,11 @@ def undo_ai():
 
 def anim_spec(words):
     """Animacijų planas build'ui: AI (Premium, įsimenama) arba pagal žodžius. None – visos išjungtos."""
-    if not (an_stickers or an_marks or an_cards or an_intro or an_outro):
+    if not (an_stickers or an_marks or an_cards or an_phone or an_fx or an_intro or an_outro):
         return None
     words = list(words or [])
     plan = None
-    if words and (an_stickers or an_marks or an_cards):
+    if words and (an_stickers or an_marks or an_cards or an_phone or an_fx):
         if client is not None:
             cache = st.session_state.setdefault(P + "ai_anims", {})
             k = hash(tuple((w, round(a, 2)) for w, a, _ in words))
@@ -527,7 +530,9 @@ def anim_spec(words):
     plan = plan or {}
     return {"plan": {"stickers": plan.get("stickers", []) if an_stickers else [],
                      "marks": plan.get("marks", []) if an_marks else [],
-                     "cards": plan.get("cards", []) if an_cards else []},
+                     "cards": plan.get("cards", []) if an_cards else [],
+                     "phone": plan.get("phone", []) if an_phone else [],
+                     "fx": plan.get("fx", []) if an_fx else []},
             "intro": an_intro, "outro": an_outro, "handle": handle}
 
 
@@ -956,7 +961,7 @@ with sb.expander("🎬  Animacijos"):
     st.caption("Animacijos dedamos ten, kur jos tinka pagal tai, ką sakote" +
                (" – vietas parenka dirbtinis intelektas." if client is not None else
                 " (pagal žodžius: „patinka“ – širdelės, „super“ – žvaigždutės, „pirma, antra…“ – kortelės)."))
-    for k in ("an_stickers", "an_marks", "an_cards", "an_intro", "an_outro"):
+    for k in ("an_stickers", "an_marks", "an_cards", "an_phone", "an_fx", "an_intro", "an_outro"):
         st.session_state.setdefault(P + k, False)
     an_stickers = st.toggle("✨ Animuoti lipdukai", key=P + "an_stickers",
                             help="Kylančios širdelės, žvaigždučių sprogimas, krentantys konfeti, liepsnelės.")
@@ -964,6 +969,13 @@ with sb.expander("🎬  Animacijos"):
                          help="Apskritimas, rodyklė ir pabraukimas „nusipiešia“ ties svarbiausiais žodžiais.")
     an_cards = st.toggle("🃏 Iššokančios kortelės", key=P + "an_cards",
                          help="Kai vardijate („pirma…, antra…“ ar patarimus), kortelės su tekstu išslysta po vieną.")
+    an_phone = st.toggle("📱 Nuotraukos skrenda į telefoną", key=P + "an_phone",
+                         help="Apačioje išnyra du telefonai: iš vieno išskrenda kortelės su jūsų video kadrais, "
+                              "pasisklaido ir sukrenta į kitą telefoną (3 s). Puikiai tinka kalbant apie nuotraukas, "
+                              "video, turinį ar prisiminimus.")
+    an_fx = st.toggle("🎆 Efektų mozaika", key=P + "an_fx",
+                      help="Skirtingose vietose – vis kitas efektas: byrančios kaladėlės, glitch, blyksnis, šviesos "
+                           "nutekėjimas, nespalvota akimirka. Dedama ties naujais sakiniais, ne dažniau kaip kas 3,5 s.")
     c1, c2 = st.columns(2)
     an_intro = c1.toggle("🎬 Įžanga", key=P + "an_intro", help="Logotipas ir jūsų paskyra įskrenda pradžioje (1,3 s).")
     an_outro = c2.toggle("🙏 Pabaiga", key=P + "an_outro",
