@@ -323,21 +323,25 @@ MOMENT_LEN = 1.6  # s – kiek trunka „Gintaro akimirka“ (švytėjimas)
 TEXT_EFFECTS = ("Aukso blizgesys",)  # matosi tik ant teksto – peržiūra rodoma su pavyzdiniu tekstu
 
 
-def zoom_filters(W, H, duration):
+def _zoompan(W, H, z, fps):
+    """Priartinimas su PASTOVIU kadro dydžiu (zoompan, centre). Ankstesnis būdas (scale eval=frame + crop) keitė
+    kadro dydį kiekvienam kadrui – kartu su kitais filtrais ffmpeg dėl to nulūždavo („double free or corruption“)."""
+    return [f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={W}x{H}:fps={fps}", "setsar=1"]
+
+
+def zoom_filters(W, H, duration, fps=30):
     """Lėtas priartėjimas per visą video (10 %)."""
     d = max(1.0, duration)
-    return [f"scale=w='trunc({W}*(1+0.10*t/{d:.3f})/2)*2':h='trunc({H}*(1+0.10*t/{d:.3f})/2)*2':eval=frame",
-            f"crop={W}:{H}"]
+    return _zoompan(W, H, f"1+0.10*it/{d:.3f}", fps)
 
 
-def punch_filters(W, H, times, amp=0.07, length=0.55):
+def punch_filters(W, H, times, amp=0.07, length=0.55, fps=30):
     """Akcentų priartėjimas: ties svarbiausiais žodžiais kadras trumpam „įšoka“ arčiau (punch-in) ir grįžta."""
     times = sorted(times)[:40]
     if not times:
         return []
-    z = "+".join(f"between(t,{a:.2f},{a + length:.2f})*sin(PI*(t-{a:.2f})/{length:.2f})" for a in times)
-    k = f"(1+{amp}*({z}))"
-    return [f"scale=w='trunc({W}*{k}/2)*2':h='trunc({H}*{k}/2)*2':eval=frame", f"crop={W}:{H}"]
+    z = "+".join(f"between(it,{a:.2f},{a + length:.2f})*sin(PI*(it-{a:.2f})/{length:.2f})" for a in times)
+    return _zoompan(W, H, f"1+{amp}*({z})", fps)
 
 
 AMBER_LOOK = ["colorbalance=rs=0.16:gs=0.05:bs=-0.2:rm=0.12:gm=0.03:bm=-0.16:rh=0.08:bh=-0.12",
@@ -354,13 +358,13 @@ def moment_filter(at, length):
 
 
 def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, duration=10.0, still=False,
-               pre=(), post=()):
+               pre=(), post=(), fps=30):
     """Filtrų grandinė nuo `inp` iki `out` etikečių: spalvų filtras + efektai.
     still=True – vienam kadrui (miniatiūroms ir viršeliui): judesio efektai parodomi statiškai."""
     effects = set(effects or ())
     a = list(pre) + list(COLOR_FILTERS.get(color, []))
     if "Lėtas priartėjimas" in effects:
-        a += ["crop=iw*0.88:ih*0.88", f"scale={W}:{H}"] if still else zoom_filters(W, H, duration)
+        a += ["crop=iw*0.88:ih*0.88", f"scale={W}:{H}"] if still else zoom_filters(W, H, duration, fps)
     b = []
     if "Ryškumas" in effects:
         b.append("unsharp=5:5:0.8:5:5:0")
@@ -1161,11 +1165,12 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         punches = []
         if punch and subs_words:
             punches = [a0 / speed for w, a0, _ in subs_words if video_editor.is_key(w)]
-        punch_f = punch_filters(W, H, punches)
+        vfps = round(fps * speed, 3)  # po pagreitinimo (setpts) kadrų dažnis didesnis – zoompan turi jį žinoti
+        punch_f = punch_filters(W, H, punches, fps=vfps)
         if moment:  # akimirkos metu kadras švelniai priartėja (titrai – kartu su vaizdu)
-            punch_f += punch_filters(W, H, [moment_at], amp=0.06, length=moment_len)
+            punch_f += punch_filters(W, H, [moment_at], amp=0.06, length=moment_len, fps=vfps)
         pre += punch_f
-        graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
+        graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post, fps=vfps)]
         vout = "[base]"
         if moment:
             graph.append(f"[base]{moment_filter(moment_at, moment_len)}[mbase]")
@@ -1182,7 +1187,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 masks.append(f"ass=filename='{_filter_path(sm)}':fontsdir='{_filter_path(FONT_DIR)}'")
                 masks += punch_f  # titrai sumontuoti anksčiau – „įšoka“ kartu su vaizdu
                 if "Lėtas priartėjimas" in (effects or ()):  # titrai sumontuoti anksčiau – priartėja kartu su vaizdu
-                    masks += zoom_filters(W, H, duration)
+                    masks += zoom_filters(W, H, duration, fps)
             om = os.path.join(tmp, "overlay_mask.ass")
             with open(om, "w", encoding="utf-8") as f:
                 f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, "", accent,
