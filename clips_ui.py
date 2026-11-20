@@ -172,7 +172,7 @@ def _trim_controls(prefix, c, box):
 
 
 def _recorder(prefix):
-    """Filmavimas programoje. Įrašas siunčiamas dalimis (po 384 KB): didesnės komponento žinutės nepereina.
+    """Filmavimas programoje. Įrašas siunčiamas dalimis (po 256 KB): didesnės komponento žinutės (>~512 KB) nepereina.
     Veikia kaip fragmentas – kiekviena dalis perpiešia tik šį langą (greita); gavus visą įrašą – visas puslapis."""
     @st.fragment
     def frag():
@@ -214,7 +214,7 @@ def _recorder(prefix):
                         st.rerun(scope="app")  # visas puslapis – kad įrašas atsirastų sąraše ir peržiūroje
             elif u:  # pakartotinai atsiųsta dalis – patvirtinam dar kartą
                 status = {"id": rid, "got": u["next"] - 1, "total": total}
-        video_recorder(key=key, default=None, status=status)
+        video_recorder(key=key, default=None, status=status, script=st.session_state.get(prefix + "script", ""))
     frag()
 
 

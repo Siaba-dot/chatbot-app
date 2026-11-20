@@ -41,6 +41,13 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **✨ Autopilotas** – vienas mygtukas „padaryk viską už mane“: atpažįsta kalbą, parenka stilių, titrus, kabliuką,
+  efektus, debesėlius ir muziką (su AI raktu – AI pagal turinį, be jo – patikrintas studijos derinys), sukuria
+  3 formatus su viršeliais ir aprašymu; parodo, ką parinko, viską galima atšaukti;
+- **💡 Ką filmuoti?** – įrašote savo sritį, gaunate 5 Reels idėjas su kabliuku, paruoštu tekstu, kvietimu ir
+  patarimu, ką rodyti (su AI raktu – AI, be jo – studijos šablonai); „🎬 Filmuoti su šiuo tekstu“ įrašo kabliuką ir
+  kvietimą, atidaro filmavimą su **sufleriu** – tekstas slenka ant kameros vaizdo (🐢/🐇 greitis, A−/A+ dydis);
+  be AI rakto tas pats tekstas tampa titrais;
 - **Žingsnių juosta** viršuje: ① Medžiaga → ② Stilius → ③ Peržiūra → ④ Kurti, dabartinis žingsnis paryškintas, ir
   „🎁 Pabaigoje gausite“: 3 video formatai, viršelis, paruoštas aprašymas su grotažymėmis, viskas viename ZIP;
 - **„Kurti“ iš karto sukuria 3 formatus** (Reels/TikTok 9:16, YouTube 16:9, Instagram 4:5; galima išjungti

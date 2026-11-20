@@ -323,21 +323,25 @@ MOMENT_LEN = 1.6  # s – kiek trunka „Gintaro akimirka“ (švytėjimas)
 TEXT_EFFECTS = ("Aukso blizgesys",)  # matosi tik ant teksto – peržiūra rodoma su pavyzdiniu tekstu
 
 
-def zoom_filters(W, H, duration):
+def _zoompan(W, H, z, fps):
+    """Priartinimas su PASTOVIU kadro dydžiu (zoompan, centre). Ankstesnis būdas (scale eval=frame + crop) keitė
+    kadro dydį kiekvienam kadrui – kartu su kitais filtrais ffmpeg dėl to nulūždavo („double free or corruption“)."""
+    return [f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={W}x{H}:fps={fps}", "setsar=1"]
+
+
+def zoom_filters(W, H, duration, fps=30):
     """Lėtas priartėjimas per visą video (10 %)."""
     d = max(1.0, duration)
-    return [f"scale=w='trunc({W}*(1+0.10*t/{d:.3f})/2)*2':h='trunc({H}*(1+0.10*t/{d:.3f})/2)*2':eval=frame",
-            f"crop={W}:{H}"]
+    return _zoompan(W, H, f"1+0.10*it/{d:.3f}", fps)
 
 
-def punch_filters(W, H, times, amp=0.07, length=0.55):
+def punch_filters(W, H, times, amp=0.07, length=0.55, fps=30):
     """Akcentų priartėjimas: ties svarbiausiais žodžiais kadras trumpam „įšoka“ arčiau (punch-in) ir grįžta."""
     times = sorted(times)[:40]
     if not times:
         return []
-    z = "+".join(f"between(t,{a:.2f},{a + length:.2f})*sin(PI*(t-{a:.2f})/{length:.2f})" for a in times)
-    k = f"(1+{amp}*({z}))"
-    return [f"scale=w='trunc({W}*{k}/2)*2':h='trunc({H}*{k}/2)*2':eval=frame", f"crop={W}:{H}"]
+    z = "+".join(f"between(it,{a:.2f},{a + length:.2f})*sin(PI*(it-{a:.2f})/{length:.2f})" for a in times)
+    return _zoompan(W, H, f"1+{amp}*({z})", fps)
 
 
 AMBER_LOOK = ["colorbalance=rs=0.16:gs=0.05:bs=-0.2:rm=0.12:gm=0.03:bm=-0.16:rh=0.08:bh=-0.12",
@@ -354,13 +358,13 @@ def moment_filter(at, length):
 
 
 def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, duration=10.0, still=False,
-               pre=(), post=()):
+               pre=(), post=(), fps=30):
     """Filtrų grandinė nuo `inp` iki `out` etikečių: spalvų filtras + efektai.
     still=True – vienam kadrui (miniatiūroms ir viršeliui): judesio efektai parodomi statiškai."""
     effects = set(effects or ())
     a = list(pre) + list(COLOR_FILTERS.get(color, []))
     if "Lėtas priartėjimas" in effects:
-        a += ["crop=iw*0.88:ih*0.88", f"scale={W}:{H}"] if still else zoom_filters(W, H, duration)
+        a += ["crop=iw*0.88:ih*0.88", f"scale={W}:{H}"] if still else zoom_filters(W, H, duration, fps)
     b = []
     if "Ryškumas" in effects:
         b.append("unsharp=5:5:0.8:5:5:0")
@@ -1086,6 +1090,16 @@ def _run_once(cmd, total, progress, what, stall=12.0, hard=180.0, threads=None):
     if proc.returncode != 0 and not (stopped_at and proc.returncode in (0, 255)):
         if proc.returncode < 0 and not err.strip():  # nulūžo be pranešimo (signalas)
             err = f"ffmpeg aborted (signal {-proc.returncode})"
+        # diagnostikai – į serverio žurnalą (Streamlit Cloud: Manage app → logs)
+        import sys as _sys
+        try:
+            gi = cmd.index("-filter_complex_script") + 1
+            with open(cmd[gi], encoding="utf-8") as gf:
+                graph_txt = gf.read()
+        except Exception:
+            graph_txt = ""
+        print(f"[ffmpeg klaida] kodas={proc.returncode} gijos={threads}\n{' '.join(map(str, cmd))}\n"
+              f"{graph_txt}\n{err[-1500:]}", file=_sys.stderr, flush=True)
         raise RuntimeError(f"{what}:\n{err[-2000:]}")
     return {"stopped_early": bool(stopped_at), "reached": state["t"]}
 
@@ -1151,11 +1165,12 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         punches = []
         if punch and subs_words:
             punches = [a0 / speed for w, a0, _ in subs_words if video_editor.is_key(w)]
-        punch_f = punch_filters(W, H, punches)
+        vfps = round(fps * speed, 3)  # po pagreitinimo (setpts) kadrų dažnis didesnis – zoompan turi jį žinoti
+        punch_f = punch_filters(W, H, punches, fps=vfps)
         if moment:  # akimirkos metu kadras švelniai priartėja (titrai – kartu su vaizdu)
-            punch_f += punch_filters(W, H, [moment_at], amp=0.06, length=moment_len)
+            punch_f += punch_filters(W, H, [moment_at], amp=0.06, length=moment_len, fps=vfps)
         pre += punch_f
-        graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post)]
+        graph = [look_graph("[0:v]", "[base]", color, effects, W, H, duration, pre=pre, post=post, fps=vfps)]
         vout = "[base]"
         if moment:
             graph.append(f"[base]{moment_filter(moment_at, moment_len)}[mbase]")
@@ -1172,7 +1187,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 masks.append(f"ass=filename='{_filter_path(sm)}':fontsdir='{_filter_path(FONT_DIR)}'")
                 masks += punch_f  # titrai sumontuoti anksčiau – „įšoka“ kartu su vaizdu
                 if "Lėtas priartėjimas" in (effects or ()):  # titrai sumontuoti anksčiau – priartėja kartu su vaizdu
-                    masks += zoom_filters(W, H, duration)
+                    masks += zoom_filters(W, H, duration, fps)
             om = os.path.join(tmp, "overlay_mask.ass")
             with open(om, "w", encoding="utf-8") as f:
                 f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, "", accent,
@@ -1434,6 +1449,53 @@ def mark_indices(words, indices, min_gap=1.2):
         out[i] = (f"{m.group(1)}{video_editor.KEY_MARK}{m.group(2)}{video_editor.KEY_MARK}{m.group(3)}", a, b)
         last = a
     return out
+
+
+def ai_ideas(client, niche, extra="", n=5):
+    """💡 Reels idėjos su paruoštu tekstu (sufleriui). Grąžina [{title, hook, script, cta, shot}]."""
+    system = ("You are a top Lithuanian social media strategist. For the given business / niche, write "
+              f"{n} different Instagram Reels ideas in Lithuanian with correct diacritics. Mix formats: tips list, "
+              "common mistake, before/after, behind the scenes, answer to a client question, myth vs truth, story. "
+              "For each: title (max 6 words), hook (first spoken sentence, max 9 words, scroll-stopping), script "
+              "(what to say on camera after the hook, 3–6 short natural spoken sentences, 20–40 seconds, simple "
+              "words, no hashtags or emojis), cta (short call to action), shot (one short tip what to show on camera). "
+              'Reply only with JSON: {"ideas": [{"title": "", "hook": "", "script": "", "cta": "", "shot": ""}]}')
+    j = _ai_json(client, system, {"niche": niche, "notes": extra}, temperature=0.9)
+    out = []
+    for it in j.get("ideas", []):
+        if isinstance(it, dict) and str(it.get("script", "")).strip():
+            out.append({k: str(it.get(k, "")).strip() for k in ("title", "hook", "script", "cta", "shot")})
+    return out[:n]
+
+
+def template_ideas(niche):
+    """💡 Idėjos BE dirbtinio intelekto – patikrinti Reels formatai su jūsų sritimi."""
+    x = (niche or "mano sritis").strip()
+    return [
+        {"title": "3 patarimai", "hook": f"3 patarimai, kuriuos turi žinoti kiekvienas – {x}",
+         "script": f"Pirmas patarimas – pradėkite nuo paprasčiausio dalyko, kurį galite padaryti šiandien. "
+                   f"Antras – neskubėkite, kokybė svarbiau už greitį. Trečias – klauskite specialisto, "
+                   f"kai abejojate. Būtent taip dirbame ir mes – {x}.",
+         "cta": "Išsaugok, kad nepamirštum!", "shot": "Kalbėkite į kamerą, ties kiekvienu patarimu parodykite pirštais skaičių."},
+        {"title": "Dažniausia klaida", "hook": "Šią klaidą daro beveik visi",
+         "script": f"Dažniausia klaida, kurią matau kasdien – noras viską padaryti iš karto. "
+                   f"Rezultatas tada nedžiugina. Mano patarimas – vienas žingsnis vienu metu. "
+                   f"Taip dirbdami pasiekiame geriausių rezultatų – {x}.",
+         "cta": "Parašyk, ar tau tai pažįstama 👇", "shot": "Pradėkite rimtu veidu, pabaigoje nusišypsokite."},
+        {"title": "Prieš ir po", "hook": "Pažiūrėk, koks skirtumas!",
+         "script": f"Štai kaip atrodė pradžioje. O štai rezultatas po mūsų darbo. "
+                   f"Visas paslaptis – kruopštumas ir patirtis. Toks yra mūsų kasdienis darbas – {x}.",
+         "cta": "Nori tokio rezultato? Rašyk žinutę!", "shot": "Pirmiausia parodykite „prieš“, tada – „po“ (du įrašai)."},
+        {"title": "Užkulisiai", "hook": "Taip atrodo mūsų diena iš vidaus",
+         "script": f"Rytas prasideda nuo kavos ir plano. Tada – darbas, kurį labai mylime. "
+                   f"Kiekviena detalė svarbi, todėl skiriame laiko kiekvienam klientui. Tai mes – {x}.",
+         "cta": "Sek, kad pamatytum daugiau!", "shot": "Kelios trumpos scenos: atvykimas, darbas, rezultatas."},
+        {"title": "Atsakau į klausimą", "hook": "Klientai dažniausiai klausia būtent to",
+         "script": f"Dažniausias klausimas, kurį girdžiu – nuo ko pradėti? Atsakymas paprastas: "
+                   f"nuo pokalbio. Pasakykite, ko norite, o mes pasiūlysime geriausią sprendimą. "
+                   f"Tam ir esame – {x}.",
+         "cta": "Užduok savo klausimą komentaruose!", "shot": "Parodykite klausimą ekrane, tada atsakykite į kamerą."},
+    ]
 
 
 def ai_bubbles(client, words, max_n=6):
