@@ -37,6 +37,8 @@
   .prompt .txt { padding: 10px 16px 40px; color: #fff; font-weight: 600; line-height: 1.35; text-align: center;
                  text-shadow: 0 1px 3px rgba(0,0,0,.8); will-change: transform; }
   .pctl { position: absolute; right: 6px; bottom: 8px; display: flex; gap: 4px; z-index: 2; }
+  .prate { align-self: center; min-width: 34px; text-align: center; font-size: 12px; color: #FFD58A;
+           background: rgba(6,18,38,.75); border-radius: 6px; padding: 2px 4px; }
   .pctl button { flex: none; min-height: 30px; padding: 2px 8px; font-size: 13px; border-radius: 8px;
                  background: rgba(6,18,38,.75); }
 </style>
@@ -47,7 +49,8 @@
     <video id="live" playsinline muted autoplay></video>
     <div id="prompt" class="prompt hidden"><div id="ptext" class="txt"></div></div>
     <div id="pctl" class="pctl hidden">
-      <button id="pslow" title="Lėčiau">🐢</button><button id="pfast" title="Greičiau">🐇</button>
+      <button id="pslow" title="Lėčiau">🐢</button><span id="prate" class="prate">1.0×</span>
+      <button id="pfast" title="Greičiau">🐇</button><button id="ppause" title="Sustabdyti / tęsti">⏸</button>
       <button id="psmall" title="Mažesnės raidės">A−</button><button id="pbig" title="Didesnės raidės">A+</button>
       <button id="ptop" title="Iš pradžių">⤒</button>
     </div>
@@ -83,24 +86,40 @@ function say(text, err) { const m = $("msg"); m.textContent = text; m.classList.
 window.addEventListener("message", e => { if (e.data && e.data.type === "streamlit:render") resize(); });
 new ResizeObserver(resize).observe(document.body);
 // ---------- Sufleris ----------
-let script = "", pSpeed = 16, pSize = 22, pOff = 0, pLast = 0, pRun = false;
+let script = "", pSize = 22, pOff = 0, pLast = 0, pRun = false, pPause = false;
+// Greitis pritaikomas tekstui: visas tekstas praslenka per tiek laiko, kiek reikia jį ramiai perskaityti
+// (~1,8 žodžio/s). pRate – jūsų pataisa (🐢 / 🐇), įsimenama naršyklėje.
+const WPS = 1.8;
+let pRate = 1.0;
+try { pRate = parseFloat(localStorage.getItem("prompterRate")) || 1.0; } catch (e) { /* be atminties */ }
 function promptVisible() {
   const on = !!script && live.style.display === "block";
   $("prompt").classList.toggle("hidden", !on); $("pctl").classList.toggle("hidden", !on);
 }
 function promptRender() { $("ptext").style.fontSize = pSize + "px"; $("ptext").style.transform = `translateY(${-pOff}px)`; }
+function baseSpeed() {  // px/s: teksto aukštis / skaitymo laikas
+  const words = Math.max(1, script.trim().split(/\s+/).length);
+  const dist = Math.max(40, $("ptext").scrollHeight - $("prompt").clientHeight * 0.45);
+  return dist / (words / WPS);
+}
+function showRate() { $("prate").textContent = pRate.toFixed(1) + "×"; }
 function promptTick(ts) {
   if (!pRun) return;
-  if (pLast) pOff += pSpeed * (ts - pLast) / 1000;
+  if (pLast && !pPause) pOff += baseSpeed() * pRate * (ts - pLast) / 1000;
   pLast = ts; promptRender(); requestAnimationFrame(promptTick);
 }
-function promptStart() {  // 1,5 s pauzė – spėsite perskaityti pirmą eilutę
-  pRun = true; pLast = 0;
-  setTimeout(() => { if (pRun) requestAnimationFrame(promptTick); }, 1500);
+function promptStart() {  // 2 s pauzė – spėsite perskaityti pirmą eilutę
+  pRun = true; pLast = 0; pPause = false; $("ppause").textContent = "⏸";
+  setTimeout(() => { if (pRun) requestAnimationFrame(promptTick); }, 2000);
 }
 function promptStop() { pRun = false; }
-$("pslow").onclick = () => { pSpeed = Math.max(8, pSpeed - 6); };
-$("pfast").onclick = () => { pSpeed = Math.min(120, pSpeed + 6); };
+function setRate(r) {
+  pRate = Math.round(Math.max(0.3, Math.min(2.5, r)) * 10) / 10; showRate();
+  try { localStorage.setItem("prompterRate", String(pRate)); } catch (e) { /* be atminties */ }
+}
+$("pslow").onclick = () => setRate(pRate - 0.1);
+$("pfast").onclick = () => setRate(pRate + 0.1);
+$("ppause").onclick = () => { pPause = !pPause; $("ppause").textContent = pPause ? "▶" : "⏸"; };
 $("psmall").onclick = () => { pSize = Math.max(14, pSize - 2); promptRender(); resize(); };
 $("pbig").onclick = () => { pSize = Math.min(40, pSize + 2); promptRender(); resize(); };
 $("ptop").onclick = () => { pOff = 0; promptRender(); };
@@ -110,6 +129,7 @@ window.addEventListener("message", e => {
   if (sc !== script) { script = sc; $("ptext").textContent = script; pOff = 0; promptRender(); promptVisible(); }
 });
 new MutationObserver(promptVisible).observe(live, {attributes: true, attributeFilter: ["style"]});
+showRate();
 send("streamlit:componentReady", {apiVersion: 1});
 
 function stopStream() {
@@ -157,7 +177,7 @@ async function openCamera() {
     return;
   }
   if (!stream.getAudioTracks().length) say("⚠️ Mikrofonas nerastas – video bus be garso.", true);
-  else say(script ? "Kamera įjungta. Viršuje – jūsų tekstas: pradėjus filmuoti jis slinks. 🐢/🐇 – greitis, A−/A+ – raidės."
+  else say(script ? "Kamera įjungta. Viršuje – jūsų tekstas: pradėjus filmuoti jis slinks ramiu tempu. 🐢/🐇 – lėčiau / greičiau, ⏸ – sustabdyti, A−/A+ – raidės."
                   : "Kamera įjungta. Pakalbėkite – juostelė turi judėti. Tada spauskite „Pradėti filmuoti“.");
   live.srcObject = stream; live.classList.toggle("mirror", facing === "user");
   live.style.display = "block"; playback.style.display = "none";
