@@ -535,7 +535,7 @@ def anim_spec(words):
     plan = plan or {}
     gfx = []
     if gfx_kinds and words:  # 🎁 grafikos efektai – ne ten, kur jau telefonas ar mozaikos efektas
-        busy = list(plan.get("phone", []) if an_phone else []) + [t for t, _ in (plan.get("fx", []) if an_fx else [])]
+        busy = list(plan.get("phone", []) if an_phone else [])  # mozaika užleis vietą (žr. žemiau)
         if client is not None:
             cache = st.session_state.setdefault(P + "ai_gfx", {})
             k = hash((tuple((w, round(a, 2)) for w, a, _ in words), tuple(gfx_kinds), tuple(busy)))
@@ -547,6 +547,8 @@ def anim_spec(words):
             gfx = cache[k] or []
         if not gfx:
             gfx = fxpack.auto_plan(words, gfx_kinds, busy)
+    if gfx and plan.get("fx"):  # turinio efektai svarbesni – mozaikos efektai šalia jų praleidžiami
+        plan = dict(plan, fx=[(t, k) for t, k in plan["fx"] if all(abs(t - g["t"]) >= 2.8 for g in gfx)])
     return {"gfx": gfx, "plan": {"stickers": plan.get("stickers", []) if an_stickers else [],
                      "marks": plan.get("marks", []) if an_marks else [],
                      "cards": plan.get("cards", []) if an_cards else [],
