@@ -1139,7 +1139,12 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
     if card_len:
         end_card = dict(end_card, title=end_card.get("title") or cta)
         cta = ""
-    total = duration + card_len
+    # Animuota pabaiga („AČIŪ!“) – taip pat PO video (kad neuždengtų paskutinio sakinio), jei nėra pabaigos kortelės
+    outro_len = 0.0
+    if anims and anims.get("outro") and not card_len:
+        import animations
+        outro_len = animations.OUTRO_LEN
+    total = duration + card_len + outro_len
 
     tmp = tempfile.mkdtemp()
     try:
@@ -1151,8 +1156,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         pre = [f"setpts=PTS/{speed:.4f}"] if abs(speed - 1) > 0.001 else []
         if extend > 0.01:  # įgarsinimas ilgesnis – paskutinis kadras palaikomas ilgiau
             pre.append(f"tpad=stop_mode=clone:stop_duration={extend:.3f}")
-        if card_len:  # vieta kortelei (po ja – sustingęs paskutinis kadras)
-            pre.append(f"tpad=stop_mode=clone:stop_duration={card_len + 0.5:.3f}")
+        if card_len or outro_len:  # vieta kortelei / pabaigai (po ja – sustingęs paskutinis kadras)
+            pre.append(f"tpad=stop_mode=clone:stop_duration={card_len + outro_len + 0.5:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
         if bubbles:  # debesėliai (laikai – montažo laiku, todėl dalinami iš greičio)
             bb = [(t / speed, k) for t, k in bubbles if t / speed < duration - 0.3]
@@ -1167,7 +1172,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                   for k in ("stickers", "marks", "cards")}
             ap = os.path.join(tmp, "anims.ass")
             with open(ap, "w", encoding="utf-8") as f:
-                f.write(animations.animations_ass(pl, W, H, duration, accent_colors(accent)[0], subs_ypos,
+                f.write(animations.animations_ass(pl, W, H, duration + outro_len, accent_colors(accent)[0], subs_ypos,
                                                   anims.get("handle") or handle, anims.get("intro"),
                                                   anims.get("outro") and not card_len))
             post.append(f"ass=filename='{_filter_path(ap)}':fontsdir='{_filter_path(FONT_DIR)}'")
@@ -1220,8 +1225,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             windows = []
             if anims.get("intro"):
                 windows.append((0.0, animations.INTRO_LEN))
-            if anims.get("outro") and not card_len and duration > animations.OUTRO_LEN + 2:
-                windows.append((duration - animations.OUTRO_LEN, animations.OUTRO_LEN + 1))
+            if outro_len:
+                windows.append((duration, outro_len + 1))
             for wi, (st0, ln) in enumerate(windows):
                 k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{ln:.3f}", "-i", lp_)
                 fo = "" if wi else f",fade=t=out:st={ln - 0.35:.3f}:d=0.35:alpha=1"

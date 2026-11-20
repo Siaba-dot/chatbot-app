@@ -1498,6 +1498,8 @@ if clips:
             if reels_studio.LENGTHS[length]:
                 final_dur = min(final_dur, reels_studio.LENGTHS[length])
             final_dur += reels_studio.end_card_len(end_card, *cover_size)  # pabaigos kortelė
+            if an_outro and not end_card:  # animuota pabaiga – po video
+                final_dur += animations.OUTRO_LEN
             tracks = list(library) + ([OWN_MUSIC] if music_file else [])
             if P + "mblocks" not in st.session_state:  # pradžia – pasirinkta muzika per visą video
                 st.session_state[P + "mblocks"] = ([{"name": music_choice, "start": 0.0, "end": round(final_dur, 2),

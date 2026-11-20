@@ -228,9 +228,9 @@ def _intro_outro(lines, W, H, duration, acc, handle, intro, outro):
         lw = W * 0.4
         _ev(lines, 12, 0.15, e, f"\\an7\\pos({_f((W - lw) / 2)},{_f(H * 0.52)})\\1c{acc}\\bord0\\shad0"
             f"\\fscx0\\t(0,450,\\fscx100)\\fad(0,300)\\p1", f"m 0 0 l {_f(lw)} 0 l {_f(lw)} 4 l 0 4")
-    if outro and duration > OUTRO_LEN + 2:
+    if outro and duration > OUTRO_LEN + 1:  # duration – su pabaiga (pabaiga pridedama po video)
         a = duration - OUTRO_LEN
-        _ev(lines, 10, a, duration + 1, "\\an7\\pos(0,0)\\1c&H00261206&\\alpha&HFF&\\t(0,400,\\alpha&H28&)"
+        _ev(lines, 10, a, duration + 1, "\\an7\\pos(0,0)\\1c&H00261206&\\alpha&HFF&\\t(0,350,\\alpha&H08&)"
             "\\bord0\\shad0\\p1", full)
         _ev(lines, 12, a + 0.35, duration + 1, f"\\an5\\pos({W // 2},{_f(H * 0.56)})\\fn{FONT_NAME}"
             f"\\fs{round(ref * 0.07)}\\1c{acc}\\bord0\\shad0\\fscx60\\fscy60\\t(0,300,\\fscx100\\fscy100)"
