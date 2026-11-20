@@ -1141,6 +1141,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         cta = ""
     # Animuota pabaiga („AČIŪ!“) – taip pat PO video (kad neuždengtų paskutinio sakinio), jei nėra pabaigos kortelės
     outro_len = 0.0
+    phone_times = []
     if anims and anims.get("outro") and not card_len:
         import animations
         outro_len = animations.OUTRO_LEN
@@ -1170,6 +1171,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             import animations
             pl = {k: [(t / speed, v) for t, v in anims.get("plan", {}).get(k, [])]
                   for k in ("stickers", "marks", "cards")}
+            phone_times = [t / speed for t in anims.get("plan", {}).get("phone", [])
+                           if t / speed < duration - animations.PHONE_LEN * 0.6][:2]
             ap = os.path.join(tmp, "anims.ass")
             with open(ap, "w", encoding="utf-8") as f:
                 f.write(animations.animations_ass(pl, W, H, duration + outro_len, accent_colors(accent)[0], subs_ypos,
@@ -1218,6 +1221,25 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             inputs.extend(args)
             return n
 
+        if anims and phone_times:  # 📱 nuotraukos skrenda į telefoną – kortelėse video kadrai
+            import animations
+            from PIL import Image
+            tdir = os.path.join(tmp, "thumbs")
+            os.makedirs(tdir, exist_ok=True)
+            src_dur = max(1.0, info["duration"])
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vf",
+                            f"fps=12/{src_dur:.3f},scale=270:-2", "-frames:v", "12", os.path.join(tdir, "t%02d.jpg")],
+                           check=False)
+            thumbs = [Image.open(os.path.join(tdir, f)) for f in sorted(os.listdir(tdir))]
+            if thumbs:
+                bp_ = animations.render_phone_burst(thumbs, os.path.join(tmp, "phone.mov"), W, H, fps,
+                                                    accent_colors(accent)[0])
+                for pi_, pt in enumerate(phone_times):
+                    k = add_input("-i", bp_)
+                    graph.append(f"[{k}:v]scale={W}:{H},format=yuva420p,"
+                                 f"setpts=PTS-STARTPTS+{max(0.0, pt - 0.4):.3f}/TB[ph{pi_}]")
+                    graph.append(f"{vout}[ph{pi_}]overlay=eof_action=pass:format=auto[pho{pi_}]")
+                    vout = f"[pho{pi_}]"
         if anims and (anims.get("intro") or (anims.get("outro") and not card_len)):  # logotipas įžangoje / pabaigoje
             import animations
             lsrc = (logo or {}).get("path") if logo and os.path.exists((logo or {}).get("path", "")) else AMBER_LOGO
@@ -1341,9 +1363,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 "-r", str(fps), "-movflags", "+faststart", "-t", f"{total:.3f}", out_path]
         _run(cmd, total, progress, "Nepavyko paruošti Reels")
     finally:
-        for name in os.listdir(tmp):
-            os.unlink(os.path.join(tmp, name))
-        os.rmdir(tmp)
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
     return {"duration": total, "width": W, "height": H, "trimmed": trimmed}
 
 

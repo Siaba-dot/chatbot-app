@@ -386,6 +386,8 @@ SUBTITLE_LOOKS = {
     "minimal": {"title": "Minimalūs", "font": "Montserrat SemiBold", "bold": 0, "size": 0.056, "upper": False,
                 "base": "FFFFFF", "box": False, "outline": 1 / 16, "shadow": 0.4, "dim": "38", "pop": False,
                 "ypos": 0.74},
+    "cinema": {"title": "Kino", "font": "Anton", "bold": 0, "size": 0.098, "upper": True, "base": "EDEDED",
+               "box": False, "outline": 1 / 28, "shadow": 1.6, "dim": "00", "pop": True, "ypos": None},
     # --- dinamiški stiliai (savas išdėstymas: žodžiai matuojami ir dedami po vieną) ---
     "popout": {"title": "Iššokantys", "font": FONT_NAME, "bold": 0, "size": 0.12, "upper": True, "base": "FFFFFF",
                "box": False, "outline": 1 / 10, "shadow": 0.6, "dim": "00", "pop": True, "ypos": None,
@@ -414,10 +416,11 @@ SUBTITLE_LOOKS = {
 FONT_FILES = {"Montserrat Black": "Montserrat_900Black.ttf", "Montserrat SemiBold": "Montserrat_600SemiBold.ttf",
               "Dancing Script": "DancingScript_700Bold.ttf", "Playfair Display": "PlayfairDisplay_700Bold.ttf",
               "Playfair Display Italic": "PlayfairDisplay_400Regular_Italic.ttf",
-              "Great Vibes": "GreatVibes_400Regular.ttf"}
+              "Great Vibes": "GreatVibes_400Regular.ttf", "Anton": "Anton_400Regular.ttf"}
 # libass ir PIL šrifto dydį supranta skirtingai – pataisos išmatuotos pagal tikrą libass atvaizdą
 FONT_WIDTH_FIX = {"Montserrat Black": 0.774, "Montserrat SemiBold": 0.763, "Dancing Script": 0.89,
-                  "Playfair Display": 0.93, "Playfair Display Italic": 0.955, "Great Vibes": 0.79}
+                  "Playfair Display": 0.93, "Playfair Display Italic": 0.955, "Great Vibes": 0.79,
+                  "Anton": 0.873}
 _FONT_CACHE = {}
 
 
