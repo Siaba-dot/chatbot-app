@@ -125,6 +125,27 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary p { font-fam
           mask: linear-gradient(90deg, transparent, #000 25%, #000 75%, transparent); }
 .lux-side-logo { display: flex; align-items: center; gap: .6rem; }
 .lux-side-logo svg { width: 38px; height: 38px; filter: drop-shadow(0 3px 10px rgba(227,155,46,.35)); }
+.st-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: .45rem; max-width: 52rem;
+            margin: .2rem auto .45rem; }
+.st-step { border: 1px solid rgba(227,155,46,.22); border-radius: 14px; padding: .5rem .55rem;
+           background: rgba(14,34,66,.45); display: flex; flex-direction: column; gap: .1rem; }
+.st-step .n { width: 1.55rem; height: 1.55rem; border-radius: 50%; display: inline-flex; align-items: center;
+              justify-content: center; font-weight: 700; font-size: .85rem; color: #B4C3D8;
+              border: 1px solid rgba(180,195,216,.35); }
+.st-step .t { font-family: 'Playfair Display', serif; font-weight: 700; color: #F3E7D3; font-size: 1rem; }
+.st-step .d { font-size: .74rem; color: #9FB0C8; line-height: 1.25; }
+.st-step.on { border-color: #E39B2E; box-shadow: 0 0 16px rgba(227,155,46,.25); background: rgba(227,155,46,.10); }
+.st-step.on .n { background: linear-gradient(135deg, #FFD58A, #E39B2E); color: #061226; border: 0; }
+.st-step.done .n { background: rgba(227,155,46,.25); color: #FFD58A; border: 0; }
+.st-gift { max-width: 52rem; margin: 0 auto .8rem; text-align: center; font-size: .86rem; color: #D9C9A8;
+           padding: .45rem .8rem; border-radius: 999px; border: 1px dashed rgba(227,155,46,.4); }
+.st-gift.on { border-style: solid; background: rgba(227,155,46,.14); color: #FFE7B0; }
+.lux-done { font-size: 1rem; color: #FFE7B0; margin-bottom: .5rem; }
+@media (max-width: 640px) {
+  .st-steps { grid-template-columns: repeat(2, 1fr); }
+  .st-step .d { display: none; }
+  .st-step { flex-direction: row; align-items: center; gap: .45rem; padding: .4rem .5rem; }
+}
 .lux-settings-hint { display: block; text-align: center; margin: .2rem auto .9rem; padding: .55rem .9rem;
   border: 1px solid rgba(227,155,46,.45); border-radius: 999px; max-width: 34rem; color: #FFD58A; font-size: .9rem;
   background: linear-gradient(100deg, rgba(227,155,46,.14), rgba(227,155,46,.04)); }
@@ -581,6 +602,10 @@ sb.markdown(f'<div class="lux-side-logo">{LOGO}<div class="lux-side-title" style
 sb.selectbox("Formatas", list(reels_studio.STUDIO_FORMATS), key=P + "format",
              help="9:16 – Reels, TikTok, Shorts; 16:9 – YouTube; 1:1 ir 4:5 – Instagram įrašai. "
                   "Kitokios orientacijos vaizdas dedamas per vidurį su sulietu fonu.")
+st.session_state.setdefault(P + "auto_formats", True)
+sb.toggle("📐 Kartu sukurti visus 3 formatus", key=P + "auto_formats",
+          help="Paspaudus „Kurti“ gausite iš karto 3 video: Reels / TikTok (9:16), YouTube (16:9) ir Instagram "
+               "įrašui (4:5) – su viršeliais ir ZIP paketu. Kūrimas trunka ilgiau.")
 
 # ---------- II. Stilius ----------
 with sb.expander("🎨  Stilius – šablonas, filtrai, efektai", expanded=True):
@@ -1004,9 +1029,39 @@ def ai_director_ui():
                 box.button("↶ Atšaukti AI pakeitimus", key=P + "ai_undo_btn", on_click=undo_ai)
 
 
+AUTO_FORMATS = ("9:16 · Reels, TikTok, Shorts", "16:9 · YouTube", "4:5 · Instagram įrašas")
+
+
+def make_formats(result, names, box):
+    """Sukuria nurodytus papildomus formatus (tas pats montažas) ir įrašo juos į result["formats"]."""
+    done = result.setdefault("formats", {})
+    bar = st.progress(0.0)
+    ok = True
+    for i, name in enumerate(names):
+        box.write(f"📐 {name}…")
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                out, cover = other_format(name, tmp, lambda p: bar.progress(min(1.0, (i + p) / len(names))))
+            except Exception as e:
+                box.update(label=f"Nepavyko: {name}", state="error")
+                st.error(str(e))
+                ok = False
+                break
+            tag = reels_studio.STUDIO_FORMATS[name][0].replace(":", "x")
+            vpath = os.path.join(work, f"{result['name']}_{tag}.mp4")
+            cpath = os.path.join(work, f"{result['name']}_{tag}_virselis.jpg")
+            shutil.copy(out, vpath)
+            shutil.copy(cover, cpath)
+            done[name] = {"video": vpath, "cover": cpath}
+    if ok:
+        box.update(label="Visi formatai paruošti", state="complete", expanded=False)
+    bar.empty()
+    return ok
+
+
 def all_formats_ui(result):
     """✦ Visi formatai vienu paspaudimu – tas pats video 16:9 (YouTube), 1:1, 4:5 ir 9:16 su ZIP paketu."""
-    st.markdown("**📐 Visi formatai vienu paspaudimu**")
+    st.markdown("**📐 Visi formatai** · <small>peržiūrėkite ir atsisiųskite kiekvieną atskirai arba visus ZIP paketu</small>", unsafe_allow_html=True)
     done = result.setdefault("formats", {})
     main_fmt = result.get("fmt_name", st.session_state[P + "format"])
     others = [n for n in reels_studio.STUDIO_FORMATS if n != main_fmt]
@@ -1022,25 +1077,7 @@ def all_formats_ui(result):
                  help="Tas pats montažas, titrai, muzika ir efektai – kiekvienam tinklui savo formatu. "
                       "Kalbos atpažinimas nekartojamas."):
         box = st.status("Kuriami formatai…", expanded=True)
-        bar = st.progress(0.0)
-        for i, name in enumerate(todo):
-            box.write(f"{name}…")
-            with tempfile.TemporaryDirectory() as tmp:
-                try:
-                    out, cover = other_format(name, tmp, lambda p: bar.progress(min(1.0, (i + p) / len(todo))))
-                except Exception as e:
-                    box.update(label=f"Nepavyko: {name}", state="error")
-                    st.error(str(e))
-                    break
-                tag = reels_studio.STUDIO_FORMATS[name][0].replace(":", "x")
-                vpath = os.path.join(work, f"{result['name']}_{tag}.mp4")
-                cpath = os.path.join(work, f"{result['name']}_{tag}_virselis.jpg")
-                shutil.copy(out, vpath)
-                shutil.copy(cover, cpath)
-                done[name] = {"video": vpath, "cover": cpath}
-        else:
-            box.update(label="Formatai paruošti", state="complete", expanded=False)
-        bar.empty()
+        make_formats(result, todo, box)
     ready_f = {n: d for n, d in done.items() if os.path.exists(d["video"])}
     if not ready_f:
         st.caption("Pažymėkite formatus ir spauskite – gausite tą patį Reels YouTube, Instagram įrašui ar kvadratu."
@@ -1297,7 +1334,31 @@ if clips:
 
 # ---------- Peržiūra ir rezultatas (viršuje) ----------
 portrait = cover_size[1] > cover_size[0]
+def steps_html():
+    """Žingsnių juosta: kas dabar daroma ir ką gausite pabaigoje."""
+    res = st.session_state.get(P + "result")
+    seen = bool(st.session_state.get(P + "quick_video")) or bool(res)
+    cur = 5 if res else 4 if seen else 2 if clips else 1
+    steps = [("1", "Medžiaga", "įkelkite ar nufilmuokite video"),
+             ("2", "Stilius", "» nustatymai: šablonas, filtrai, titrai, muzika"),
+             ("3", "Peržiūra", "pažiūrėkite, ar viskas patinka"),
+             ("4", "Kurti", "galutinis video pilna kokybe")]
+    if cur == 2:
+        cur_set = {2, 3}  # stilius neprivalomas – galima iškart peržiūrėti
+    else:
+        cur_set = {cur}
+    items = "".join(
+        f'<div class="st-step{" on" if int(n) in cur_set else " done" if int(n) < cur else ""}">'
+        f'<span class="n">{"✓" if int(n) < cur and int(n) not in cur_set else n}</span>'
+        f'<span class="t">{t}</span><span class="d">{d}</span></div>' for n, t, d in steps)
+    gift = (f'<div class="st-gift{" on" if cur == 5 else ""}">🎁 <b>Pabaigoje gausite:</b> '
+            "3 video formatai (Reels / TikTok 9:16 · YouTube 16:9 · Instagram 4:5) · viršelis · "
+            "paruoštas aprašymas su grotažymėmis · viskas viename ZIP</div>")
+    return f'<div class="st-steps">{items}</div>{gift}'
+
+
 with top:
+    st.markdown(steps_html(), unsafe_allow_html=True)
     with st.container(border=True):
         view = st.container(key=P + "view")
         row = st.container(horizontal=True, gap="small", key=P + "actions")  # telefone – irgi vienoje eilutėje
@@ -1382,7 +1443,11 @@ with top:
                         caption = reels_studio.write_caption(client, res.get("text", ""), hook, topic,
                                                              subtitle_language or "lt")
                     except Exception as e:
-                        say(f"Aprašymo sukurti nepavyko: {e}")
+                        say(f"AI aprašymo sukurti nepavyko ({e}) – paruošiu paprastą.")
+                if not caption:  # be AI – paprastas aprašymas iš kabliuko, temos ir kalbos
+                    caption = reels_studio.simple_caption(
+                        res.get("text", ""), hook, topic, cta,
+                        reels_studio.TEMPLATES.get(template, {}).get("cat", "Prabanga"), words or [])
             except Exception as e:
                 status.update(label="Nepavyko sukurti", state="error")
                 st.error(str(e))
@@ -1401,6 +1466,11 @@ with top:
                 "fmt_name": st.session_state[P + "format"], "link": link,
                 "yt_end": bool(end_on and yt_on)}
             st.session_state[P + "view"] = "result"
+            if st.session_state.get(P + "auto_formats", True):  # iškart ir kiti formatai
+                main = st.session_state[P + "format"]
+                extra = [n for n in AUTO_FORMATS if n != main][:2]
+                make_formats(st.session_state[P + "result"], extra,
+                             st.status("Kuriu kitus formatus (16:9 YouTube, 4:5 Instagram)…", expanded=True))
 
     result = st.session_state.get(P + "result")
     mode = st.session_state.get(P + "view")
@@ -1427,6 +1497,11 @@ with top:
 
     if result and mode == "result":
         with st.container(border=True):
+            nf = 1 + len([d for d in (result.get("formats") or {}).values() if os.path.exists(d["video"])])
+            st.markdown(f'<div class="lux-done">🎁 <b>Jūsų Reels paruoštas!</b> Žemiau: video ({nf} '
+                        f'format{"as" if nf == 1 else "ai"}), viršelis, aprašymas su grotažymėmis'
+                        + (', nuoroda' if result.get("link") else '') + ' ir ZIP su viskuo.</div>',
+                        unsafe_allow_html=True)
             d1, d2 = st.columns(2)
             d1.download_button("⬇  Atsisiųsti video", result["video"], file_name=result["name"] + ".mp4",
                                mime="video/mp4", type="primary", width="stretch")
@@ -1434,7 +1509,7 @@ with top:
                                mime="image/jpeg", width="stretch")
             cap = result.get("caption")
             if cap:
-                st.markdown("**Aprašymas**")
+                st.markdown("**✍️ Aprašymas su grotažymėmis**")
                 st.markdown(f'<div class="lux-caption">{html.escape(cap["caption"])}</div>'
                             f'<div class="lux-tags">{html.escape(" ".join(cap["hashtags"]))}</div>',
                             unsafe_allow_html=True)
@@ -1443,8 +1518,11 @@ with top:
                         + " ".join(cap["hashtags"]), language=None)
                 if cap.get("hooks"):
                     st.markdown("**Kabliukų idėjos kitam kartui:** " + " · ".join(f"„{h}“" for h in cap["hooks"]))
-            elif client is None and plan != "basic":
-                st.caption("Aprašymui ir grotažymėms sugeneruoti reikia OpenAI rakto.")
+                if cap.get("simple"):
+                    st.caption("Paprastas aprašymas (be AI) – iš jūsų kabliuko, temos ir kalbos. "
+                               + ("Su OpenAI raktu jį parašys dirbtinis intelektas." if plan != "basic"
+                                  else "Premium plane jį parašo dirbtinis intelektas."))
+                st.caption("📋 Nukopijuokite (mygtukas laukelio kampe) ir įklijuokite į Instagram / TikTok aprašymą.")
             link_help(result)
         with st.container(border=True):
             all_formats_ui(result)

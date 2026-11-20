@@ -1468,6 +1468,47 @@ def ai_moment(client, words, speed=1.0):
     return float(j.get("time", 0)), str(j.get("word", "")), str(j.get("why", ""))
 
 
+CATEGORY_TAGS = {
+    "Prabanga": ["#prabanga", "#stilius", "#elegancija", "#luxury"],
+    "Verslas": ["#verslas", "#smulkusverslas", "#verslasLietuvoje", "#marketingas", "#business"],
+    "Grožis": ["#grozis", "#groziopatarimai", "#savipriezura", "#beauty"],
+    "Maistas": ["#maistas", "#receptai", "#skanu", "#food"],
+    "Kelionės": ["#keliones", "#atostogos", "#lietuvoskeliones", "#travel"],
+    "Šventės": ["#sventes", "#dovanos", "#vakarelis", "#celebration"],
+}
+CATEGORY_EMOJI = {"Prabanga": "✨", "Verslas": "💼", "Grožis": "💄", "Maistas": "🍽️", "Kelionės": "✈️",
+                  "Šventės": "🎉"}
+BASE_TAGS = ["#reels", "#lietuva", "#instagramreels", "#reelsinstagram", "#fyp"]
+
+
+def _tag(text):
+    t = re.sub(r"[^\w]", "", text.lower(), flags=re.UNICODE)
+    return "#" + t if len(t) >= 3 else ""
+
+
+def simple_caption(text="", hook="", topic="", cta="", category="Prabanga", words=()):
+    """Aprašymas ir grotažymės BE dirbtinio intelekto: iš kabliuko, temos, kalbos ir svarbiausių žodžių.
+    Grąžina tą pačią struktūrą kaip write_caption()."""
+    emoji = CATEGORY_EMOJI.get(category, "✨")
+    sentences = [x.strip() for x in re.split(r"(?<=[.!?…])\s+", (text or "").strip()) if len(x.strip()) > 3]
+    first = hook.strip() or topic.strip() or (sentences[0] if sentences else "")
+    lines = []
+    if first:
+        lines.append(f"{first[:110].rstrip()} {emoji}")
+    extra = next((x for x in sentences if x != first), "")
+    if extra:
+        lines.append(extra[:140])
+    lines.append(cta.strip() + " 👇" if cta.strip() else "Išsaugok, kad nepamirštum! 💾")
+    lines.append("Ką manai? Parašyk komentaruose 💬")
+    tags = []
+    for t in ([_tag(topic)] + [_tag(w) for w in topic.split()[:3]]
+              + [_tag(video_editor.plain(w)) for w, _, _ in words if video_editor.is_key(w)][:3]
+              + CATEGORY_TAGS.get(category, []) + BASE_TAGS):
+        if t and t.lower() not in [x.lower() for x in tags]:
+            tags.append(t)
+    return {"caption": "\n".join(lines), "hashtags": tags[:12], "hooks": [], "simple": True}
+
+
 def write_caption(client, text="", hook="", topic="", language="lt", model=None):
     """Instagram aprašymas, grotažymės ir kabliukų idėjos per OpenAI.
     Grąžina {"caption": str, "hashtags": [str], "hooks": [str]}."""

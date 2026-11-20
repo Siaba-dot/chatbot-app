@@ -41,6 +41,11 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **Žingsnių juosta** viršuje: ① Medžiaga → ② Stilius → ③ Peržiūra → ④ Kurti, dabartinis žingsnis paryškintas, ir
+  „🎁 Pabaigoje gausite“: 3 video formatai, viršelis, paruoštas aprašymas su grotažymėmis, viskas viename ZIP;
+- **„Kurti“ iš karto sukuria 3 formatus** (Reels/TikTok 9:16, YouTube 16:9, Instagram 4:5; galima išjungti
+  šoninėje juostoje); **aprašymas su grotažymėmis – visada** (su AI raktu rašo AI, be jo – paprastas iš kabliuko,
+  temos, kalbos ir kategorijos grotažymių);
 - **Šablonai pagal kategorijas** – 15 šablonų skirtukuose **Verslas · Grožis · Maistas · Kelionės · Šventės**
   (pvz. „Verslo galia“, „Grožio salonas“, „Gardžiai!“, „Nuotykis“, „Vakarėlis“), naujas stambių raidžių stilius;
 - **13 titrų stilių**, tarp jų nauji: **Iššokantys** (vienas didelis žodis vienu metu), **Mišrūs** (svarbiausi
