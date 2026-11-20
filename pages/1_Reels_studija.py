@@ -359,6 +359,52 @@ def apply_ai_changes(changes):
     return [(AI_LABELS.get(k, k), v) for k, v in clean.items()]
 
 
+AUTOPILOT_REQUEST = ("Sukurk patraukliausią, profesionalų Reels šiam turiniui: parink jam tinkantį šabloną, filtrą, "
+                     "1–3 efektus, titrų stilių, muziką ir tempą; įjunk svarbiausius žodžius, akcentų priartėjimą ir "
+                     "debesėlius; jei nėra kabliuko – sugalvok trumpą intriguojantį kabliuką, jei nėra kvietimo veikti – "
+                     "sugalvok trumpą kvietimą.")
+
+
+def autopilot_plan(client, words):
+    """✨ Autopilotas: ką nustatyti. Su AI – parenka AI pagal turinį; be jo – patikrintas studijos derinys."""
+    ss = st.session_state
+    library = reels_studio.music_library()
+    ch = {"key_words": True, "punch": True, "bubbles": True, "look": "mixed",
+          "effects": sorted(set(ss.get(P + "effects", [])) | {"Švytėjimas", "Auksinės dulkės"})}
+    if (ss.get(P + "link") or "").strip():
+        ch["end_card"] = True
+    if library and ss.get(P + "music_choice") in (None, "Be muzikos"):
+        ch["music_choice"] = next(iter(library))
+    summary = ("parinktas patikrintas studijos derinys: mišrūs titrai, švytėjimas, auksinės dulkės, debesėliai, "
+               "svarbiausi žodžiai su priartėjimu.")
+    if client is not None:
+        try:
+            res = reels_studio.ai_direct(client, AUTOPILOT_REQUEST, ai_current(), ai_options(), words,
+                                         float(ss.get(P + "speed", 1.0)))
+            ch.update(res["changes"])
+            ch.update({"key_words": True, "bubbles": True})
+            summary = res["summary"] or summary
+        except Exception:
+            pass
+        if not (ss.get(P + "hook") or "").strip() and not ch.get("hook") and words:
+            try:
+                ideas = reels_studio.ai_hooks(client, words)
+                if ideas:
+                    ch["hook"] = ideas[0]
+                    ss[P + "hook_ideas"] = ideas
+            except Exception:
+                pass
+    if not (ss.get(P + "hook") or "").strip() and not ch.get("hook") and words:
+        # be AI – pirmas sakinys (iki 7 žodžių) tampa kabliuku
+        first = []
+        for w, _, _ in words:
+            first.append(video_editor.plain(w))
+            if len(first) >= 7 or re.search(r"[.!?…]$", first[-1]):
+                break
+        ch["hook"] = " ".join(first).rstrip(",;:")
+    return ch, summary
+
+
 def run_ai_director(client, words, preset=None):
     ss = st.session_state
     req = (preset or ss.get(P + "ai_req") or "").strip()
@@ -575,6 +621,13 @@ states = {c["audio"] for c in clips}
 # Įgarsinimas (atskiras balso įrašas) – titrams ir garsui naudojamas jis
 has_vo = st.session_state.get(P + "vo_file") is not None
 speech = "speech" in states or has_vo
+
+if st.session_state.get(P + "autopilot") == "apply":  # ✨ Autopilotas: nustatymai pritaikomi PRIEŠ piešiant valdiklius
+    _done = apply_ai_changes(st.session_state.pop(P + "autopilot_changes", {}))
+    st.session_state[P + "auto_formats"] = True
+    st.session_state[P + "ai_result"] = {"summary": "✨ Autopilotas: " + st.session_state.pop(P + "autopilot_summary", ""),
+                                         "done": _done}
+    st.session_state[P + "autopilot"] = "create"
 
 pick = tile_click(P + "style_tiles")  # Stiliaus langelių paspaudimas
 if pick:
@@ -1367,7 +1420,9 @@ def steps_html():
         f'<span class="t">{t}</span><span class="d">{d}</span></div>' for n, t, d in steps)
     gift = (f'<div class="st-gift{" on" if cur == 5 else ""}">🎁 <b>Pabaigoje gausite:</b> '
             "3 video formatai (Reels / TikTok 9:16 · YouTube 16:9 · Instagram 4:5) · viršelis · "
-            "paruoštas aprašymas su grotažymėmis · viskas viename ZIP</div>")
+            "paruoštas aprašymas su grotažymėmis · viskas viename ZIP"
+            "<br><small>Skubate? Įkėlę video spauskite <b>✨ Autopilotas</b> – studija padarys viską pati."
+            "</small></div>")
     return f'<div class="st-steps">{items}</div>{gift}'
 
 
@@ -1375,6 +1430,10 @@ with top:
     st.markdown(steps_html(), unsafe_allow_html=True)
     with st.container(border=True):
         view = st.container(key=P + "view")
+        autopilot_btn = st.button("✨ AUTOPILOTAS – padaryk viską už mane", type="primary", width="stretch",
+                                  disabled=not clips, key=P + "autopilot_btn",
+                                  help="Vienas paspaudimas: studija atpažins kalbą, parinks stilių, titrus, kabliuką, "
+                                       "efektus, debesėlius ir muziką, sukurs 3 formatus su viršeliais ir aprašymu.")
         row = st.container(horizontal=True, gap="small", key=P + "actions")  # telefone – irgi vienoje eilutėje
         cover_btn = row.button("👁 Viršelis", width="stretch", disabled=not clips, key=P + "cover_btn",
                                help="Viršelio peržiūra")
@@ -1383,8 +1442,28 @@ with top:
         create = row.button("✨ Kurti", type="primary", width="stretch", disabled=not clips, key=P + "create_btn",
                             help="Galutinis video pilna kokybe")
         quick_btn = quick_btn or bool(st.session_state.pop(P + "auto_preview", False) and clips)
+        create = create or bool(st.session_state.pop(P + "autopilot", None) == "create" and clips)
         ai_director_ui()
         work_area = st.container()
+        if autopilot_btn and clips:  # 1 etapas: paruošiam kalbą ir parenkam nustatymus, tada perkraunam
+            with work_area:
+                box = st.status("✨ Autopilotas dirba…", expanded=True)
+                pbar = st.progress(0.0)
+                try:
+                    if not ready:
+                        prep = prepare(box.write, lambda p: pbar.progress(min(1.0, p)))
+                        ready = True
+                    box.write("🎨 Renku stilių, titrus, kabliuką ir efektus…")
+                    ch, summ = autopilot_plan(client, list(prep["analysis"]["words"]))
+                    st.session_state[P + "autopilot_changes"] = ch
+                    st.session_state[P + "autopilot_summary"] = summ
+                    st.session_state[P + "autopilot"] = "apply"
+                    st.session_state.pop(P + "mblocks", None)
+                except Exception as e:
+                    box.update(label="Autopilotui nepavyko", state="error")
+                    st.error(str(e))
+                    st.stop()
+            st.rerun()
 
     def show(media, kind, caption=None):
         """Rodo vaizdą/video peržiūros lange tinkamu pločiu pagal formatą."""
