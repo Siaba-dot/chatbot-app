@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import accounts
 import clips_ui
+import animations
 import reels_studio
 import video_editor
 
@@ -339,7 +340,9 @@ AI_LABELS = {"template": "Šablonas", "accent": "Akcentas", "color": "Filtras", 
              "end_card": "Pabaigos kortelė", "yt_end": "YouTube pabaigos ekranas",
              "moment_at": "Gintaro akimirka (s)", "transition": "Perėjimas", "music_choice": "Muzika",
              "music_volume": "Muzikos garsumas", "length": "Ilgiausia trukmė", "speed": "Greitis",
-             "progress": "Progreso juostelė", "bubbles": "Debesėliai"}
+             "progress": "Progreso juostelė", "bubbles": "Debesėliai", "an_stickers": "Animuoti lipdukai",
+             "an_marks": "Ranka piešti žymėjimai", "an_cards": "Iššokančios kortelės", "an_intro": "Įžanga",
+             "an_outro": "Pabaiga"}
 
 
 def ai_options():
@@ -353,6 +356,10 @@ def ai_options():
         "subs_pos": list(reels_studio.SUBTITLE_POSITIONS), "text_size": "60-150 (%)", "subs_size": "60-150 (%)",
         "key_words": "bool", "punch": "bool", "end_card": "bool (end card with link and QR)",
         "bubbles": "bool (comic speech bubbles ?, !, WOW at emotional moments)",
+        "an_stickers": "bool (animated stickers: hearts, stars, confetti, fire)",
+        "an_marks": "bool (hand-drawn circle / arrow / underline at key moments)",
+        "an_cards": "bool (pop-up cards when the speaker lists points)", "an_intro": "bool (animated logo intro)",
+        "an_outro": "bool (animated thank-you outro)",
         "yt_end": "bool (16:9 YouTube end screen)", "moment_at": "0.5-60 seconds",
         "transition": list(video_editor.TRANSITIONS),
         "music_choice": ["Be muzikos"] + list(reels_studio.music_library()), "music_volume": "0-100 (%)",
@@ -431,7 +438,8 @@ def autopilot_plan(client, words):
     """✨ Autopilotas: ką nustatyti. Su AI – parenka AI pagal turinį; be jo – patikrintas studijos derinys."""
     ss = st.session_state
     library = reels_studio.music_library()
-    ch = {"key_words": True, "punch": True, "bubbles": True, "look": "mixed",
+    ch = {"key_words": True, "punch": True, "bubbles": True, "look": "mixed", "an_stickers": True, "an_marks": True,
+          "an_cards": True, "an_intro": True, "an_outro": True,
           "effects": sorted(set(ss.get(P + "effects", [])) | {"Švytėjimas", "Auksinės dulkės"})}
     if (ss.get(P + "link") or "").strip():
         ch["end_card"] = True
@@ -496,6 +504,31 @@ def undo_ai():
         else:
             ss[P + k] = v
     ss[P + "ai_result"] = {"summary": "↶ Pakeitimai atšaukti.", "done": []}
+
+
+def anim_spec(words):
+    """Animacijų planas build'ui: AI (Premium, įsimenama) arba pagal žodžius. None – visos išjungtos."""
+    if not (an_stickers or an_marks or an_cards or an_intro or an_outro):
+        return None
+    words = list(words or [])
+    plan = None
+    if words and (an_stickers or an_marks or an_cards):
+        if client is not None:
+            cache = st.session_state.setdefault(P + "ai_anims", {})
+            k = hash(tuple((w, round(a, 2)) for w, a, _ in words))
+            if k not in cache:
+                try:
+                    cache[k] = animations.ai_plan(client, words, reels_studio._ai_json)
+                except Exception:
+                    cache[k] = None
+            plan = cache[k]
+        if not plan or not any(plan.values()):
+            plan = animations.auto_plan(words)
+    plan = plan or {}
+    return {"plan": {"stickers": plan.get("stickers", []) if an_stickers else [],
+                     "marks": plan.get("marks", []) if an_marks else [],
+                     "cards": plan.get("cards", []) if an_cards else []},
+            "intro": an_intro, "outro": an_outro, "handle": handle}
 
 
 def bubble_list(words):
@@ -919,6 +952,23 @@ with sb.expander("✍️  Tekstai ir titrai"):
                 st.button(f"„{h}“", key=f"{P}hook_idea{i}", width="stretch", on_click=set_hook, args=(h,))
 
 # ---------- IV. Garsas ----------
+with sb.expander("🎬  Animacijos"):
+    st.caption("Animacijos dedamos ten, kur jos tinka pagal tai, ką sakote" +
+               (" – vietas parenka dirbtinis intelektas." if client is not None else
+                " (pagal žodžius: „patinka“ – širdelės, „super“ – žvaigždutės, „pirma, antra…“ – kortelės)."))
+    for k in ("an_stickers", "an_marks", "an_cards", "an_intro", "an_outro"):
+        st.session_state.setdefault(P + k, False)
+    an_stickers = st.toggle("✨ Animuoti lipdukai", key=P + "an_stickers",
+                            help="Kylančios širdelės, žvaigždučių sprogimas, krentantys konfeti, liepsnelės.")
+    an_marks = st.toggle("✏️ Ranka piešti žymėjimai", key=P + "an_marks",
+                         help="Apskritimas, rodyklė ir pabraukimas „nusipiešia“ ties svarbiausiais žodžiais.")
+    an_cards = st.toggle("🃏 Iššokančios kortelės", key=P + "an_cards",
+                         help="Kai vardijate („pirma…, antra…“ ar patarimus), kortelės su tekstu išslysta po vieną.")
+    c1, c2 = st.columns(2)
+    an_intro = c1.toggle("🎬 Įžanga", key=P + "an_intro", help="Logotipas ir jūsų paskyra įskrenda pradžioje (1,3 s).")
+    an_outro = c2.toggle("🙏 Pabaiga", key=P + "an_outro",
+                         help="Paskutinės 1,8 s – „AČIŪ!“, logotipas ir paskyra (jei nėra pabaigos kortelės).")
+
 with sb.expander("💎  Prekės ženklas"):
     st.caption("Jūsų logotipas ir spalva ant kiekvieno video. Išsaugokite – kitą kartą šablonas, spalvos, "
                "paskyra, kvietimas ir logotipas bus nustatyti automatiškai.")
@@ -1340,7 +1390,7 @@ def build(prep, words, tmp, out, quick, progress, fmt=fmt):
         subs_words=words, subs_look=look, subs_ypos=subs_y,
         hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
         voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch, logo=logo, end_card=end_card,
-        bubbles=bubble_list(words),
+        bubbles=bubble_list(words), anims=anim_spec(words),
         moment_at=st.session_state.get(P + "moment_at", 3.0) if "Gintaro akimirka" in effects else None)
     return res, fin
 

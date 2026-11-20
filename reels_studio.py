@@ -1109,7 +1109,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
            music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN, punch=False,
-           logo=None, end_card=None, bubbles=None):
+           logo=None, end_card=None, bubbles=None, anims=None):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
     natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
@@ -1161,6 +1161,16 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 with open(bp, "w", encoding="utf-8") as f:
                     f.write(bubbles_ass(bb, W, H, accent))
                 post.append(f"ass=filename='{_filter_path(bp)}':fontsdir='{_filter_path(FONT_DIR)}'")
+        if anims:  # animacijos: lipdukai, žymėjimai, kortelės, įžanga / pabaiga (laikai – montažo laiku)
+            import animations
+            pl = {k: [(t / speed, v) for t, v in anims.get("plan", {}).get(k, [])]
+                  for k in ("stickers", "marks", "cards")}
+            ap = os.path.join(tmp, "anims.ass")
+            with open(ap, "w", encoding="utf-8") as f:
+                f.write(animations.animations_ass(pl, W, H, duration, accent_colors(accent)[0], subs_ypos,
+                                                  anims.get("handle") or handle, anims.get("intro"),
+                                                  anims.get("outro") and not card_len))
+            post.append(f"ass=filename='{_filter_path(ap)}':fontsdir='{_filter_path(FONT_DIR)}'")
         # svarbiausių žodžių (*žodis*) laikai galutiniame video – akcentų priartėjimui
         punches = []
         if punch and subs_words:
@@ -1203,6 +1213,23 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             inputs.extend(args)
             return n
 
+        if anims and (anims.get("intro") or (anims.get("outro") and not card_len)):  # logotipas įžangoje / pabaigoje
+            import animations
+            lsrc = (logo or {}).get("path") if logo and os.path.exists((logo or {}).get("path", "")) else AMBER_LOGO
+            lp_, _, _ = logo_layer({"path": lsrc, "size": 0.26, "opacity": 1.0}, W, H, os.path.join(tmp, "alogo.png"))
+            windows = []
+            if anims.get("intro"):
+                windows.append((0.0, animations.INTRO_LEN))
+            if anims.get("outro") and not card_len and duration > animations.OUTRO_LEN + 2:
+                windows.append((duration - animations.OUTRO_LEN, animations.OUTRO_LEN + 1))
+            for wi, (st0, ln) in enumerate(windows):
+                k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{ln:.3f}", "-i", lp_)
+                fo = "" if wi else f",fade=t=out:st={ln - 0.35:.3f}:d=0.35:alpha=1"
+                graph.append(f"[{k}:v]format=yuva420p,fade=t=in:st=0:d=0.35:alpha=1{fo},"
+                             f"setpts=PTS-STARTPTS+{st0:.3f}/TB[al{wi}]")
+                graph.append(f"{vout}[al{wi}]overlay=x=(W-w)/2:y='H*0.47-h-{round(H * 0.03)}*min(1,(t-{st0:.3f})/0.4)'"
+                             f":eof_action=pass:format=auto[alo{wi}]")
+                vout = f"[alo{wi}]"
         if card_len:  # pabaigos kortelė: švelniai išryškėja ties video pabaiga; dulkės ir rėmelis – virš jos
             cp = end_card_image(end_card, W, H, os.path.join(tmp, "end_card.png"), accent)
             k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{card_len + 1:.3f}", "-i", cp)
