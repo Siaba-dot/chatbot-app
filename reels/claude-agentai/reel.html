@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<title>Kaip veikia Claude agentai</title>
+<style>
+@font-face{font-family:M;font-weight:600;src:url(../../fonts/Montserrat_600SemiBold.ttf)}
+@font-face{font-family:M;font-weight:900;src:url(../../fonts/Montserrat_900Black.ttf)}
+@font-face{font-family:P;font-style:italic;src:url(../../fonts/PlayfairDisplay_400Regular_Italic.ttf)}
+:root{--bg:#081426;--bg2:#0f2440;--amber:#f2a93b;--amber2:#ffd27a;--ink:#f5efe3;--mute:#9fb0c8;--card:rgba(255,255,255,.06);--line:rgba(242,169,59,.35)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1080px;height:1920px;overflow:hidden;background:var(--bg)}
+body{font-family:M,sans-serif;font-weight:600;color:var(--ink);position:relative}
+#bg{position:absolute;inset:0;background:radial-gradient(900px 900px at 50% 30%,#163257 0%,var(--bg) 70%)}
+#glow{position:absolute;width:1400px;height:1400px;left:-160px;top:300px;border-radius:50%;
+  background:radial-gradient(circle,rgba(242,169,59,.16),transparent 60%)}
+.scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 80px;text-align:center}
+.el{will-change:transform,opacity}
+.kicker{font-size:38px;letter-spacing:.32em;text-transform:uppercase;color:var(--amber);margin-bottom:36px}
+h1{font-weight:900;font-size:124px;line-height:1.02;letter-spacing:-.01em}
+h2{font-weight:900;font-size:84px;line-height:1.05;margin-bottom:60px}
+.amber{color:var(--amber)}
+.grad{background:linear-gradient(90deg,var(--amber2),var(--amber));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{font-size:46px;color:var(--mute);margin-top:44px;line-height:1.3}
+.serif{font-family:P;font-style:italic;font-weight:400}
+.card{background:var(--card);border:2px solid rgba(255,255,255,.1);border-radius:36px;padding:44px 48px;width:100%;text-align:left}
+.card .lab{font-size:34px;letter-spacing:.2em;text-transform:uppercase;color:var(--mute);margin-bottom:22px}
+.card.hi{border-color:var(--amber);background:rgba(242,169,59,.08);box-shadow:0 0 80px rgba(242,169,59,.2)}
+.card.hi .lab{color:var(--amber)}
+.flow{display:flex;align-items:center;gap:22px;font-size:46px;flex-wrap:wrap}
+.flow .chip{padding:14px 28px;border-radius:999px;background:rgba(255,255,255,.08)}
+.card.hi .chip{background:rgba(242,169,59,.18)}
+.arrow{color:var(--amber);font-weight:900}
+.vs{font-weight:900;font-size:56px;color:var(--mute);margin:34px 0}
+/* loop */
+#loop{position:relative;width:860px;height:860px}
+#loop svg{position:absolute;inset:0}
+.node{position:absolute;width:260px;padding:24px 16px;border-radius:32px;background:#0d1f38;border:3px solid rgba(255,255,255,.12);
+  text-align:center;transform:translate(-50%,-50%);transition:none}
+.node .n{font-weight:900;font-size:40px;color:var(--mute)}
+.node .t{font-size:38px;margin-top:6px}
+.node.on{border-color:var(--amber);background:#2a2412;box-shadow:0 0 70px rgba(242,169,59,.45)}
+.node.on .n{color:var(--amber)}
+#center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-weight:900;font-size:42px;line-height:1.15}
+#center small{display:block;font-size:30px;color:var(--mute);font-weight:600;margin-top:12px;letter-spacing:.1em}
+/* tools */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:34px;width:100%}
+.tool{background:var(--card);border:2px solid rgba(255,255,255,.1);border-radius:36px;padding:44px 30px;text-align:center}
+.tool .ic{font-size:96px;line-height:1}
+.tool .tt{font-weight:900;font-size:46px;margin-top:20px}
+.tool .dd{font-size:32px;color:var(--mute);margin-top:10px}
+.mcp{margin-top:50px;font-size:40px;color:var(--mute);line-height:1.35}
+.mcp b{color:var(--amber);font-weight:900}
+/* subagents */
+#tree{position:relative;width:920px;height:900px}
+#tree svg{position:absolute;inset:0}
+.boss{position:absolute;left:50%;top:0;transform:translateX(-50%);width:520px;padding:36px;border-radius:36px;
+  background:#2a2412;border:3px solid var(--amber);box-shadow:0 0 70px rgba(242,169,59,.35)}
+.boss .t{font-weight:900;font-size:50px}.boss .d{font-size:32px;color:var(--amber2);margin-top:8px}
+.sa{position:absolute;top:520px;width:280px;padding:30px 22px;border-radius:30px;background:#0d1f38;border:2px solid rgba(255,255,255,.14);text-align:center}
+.sa .t{font-weight:900;font-size:38px}.sa .d{font-size:30px;color:var(--mute);margin-top:6px}
+.bar{height:16px;border-radius:9px;background:rgba(255,255,255,.1);margin-top:22px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--amber),var(--amber2))}
+/* example */
+.prompt{font-size:44px;line-height:1.35;min-height:180px}
+.caret{display:inline-block;width:5px;height:48px;background:var(--amber);vertical-align:-8px;margin-left:4px}
+.steps{width:100%;margin-top:40px;display:flex;flex-direction:column;gap:22px}
+.step{display:flex;align-items:center;gap:26px;font-size:44px;text-align:left;padding:26px 34px;border-radius:28px;background:var(--card)}
+.step .ck{width:64px;height:64px;flex:none;border-radius:50%;border:3px solid rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:38px;color:var(--bg)}
+.step.done .ck{background:var(--amber);border-color:var(--amber)}
+.result{margin-top:40px;font-weight:900;font-size:56px}
+/* outro */
+.big{font-weight:900;font-size:90px;line-height:1.05}
+.pill{margin-top:60px;display:inline-block;padding:26px 50px;border-radius:999px;border:3px solid var(--amber);color:var(--amber);font-size:44px;font-weight:900}
+#prog{position:absolute;left:0;bottom:0;height:10px;background:var(--amber);width:0}
+</style>
+</head>
+<body>
+<div id="bg"></div><div id="glow"></div>
+
+<!-- 1. Hook -->
+<section class="scene">
+  <div class="el kicker" data-in="0.1" data-out="3.2" data-fx="fade">Dirbtinis intelektas</div>
+  <h1 class="el" data-in="0.3" data-out="3.2" data-fx="up">Kaip veikia<br><span class="grad">Claude</span><br>agentai?</h1>
+  <div class="el sub" data-in="1.2" data-out="3.2" data-fx="up">Ne tik atsako – <span class="amber">atlieka darbą</span></div>
+</section>
+
+<!-- 2. Chatbot vs agent -->
+<section class="scene">
+  <h2 class="el" data-in="3.3" data-out="7.5" data-fx="up">Kuo skiriasi?</h2>
+  <div class="el card" data-in="3.7" data-out="7.5" data-fx="left">
+    <div class="lab">Įprastas pokalbis</div>
+    <div class="flow"><span class="chip">Klausimas</span><span class="arrow">→</span><span class="chip">Atsakymas</span></div>
+  </div>
+  <div class="el vs" data-in="4.5" data-out="7.5" data-fx="fade">vs</div>
+  <div class="el card hi" data-in="5.0" data-out="7.5" data-fx="left">
+    <div class="lab">Agentas</div>
+    <div class="flow"><span class="chip">Tikslas</span><span class="arrow">→</span><span class="chip">Veiksmai</span><span class="arrow">→</span><span class="chip">Rezultatas</span></div>
+  </div>
+</section>
+
+<!-- 3. Agent loop -->
+<section class="scene">
+  <h2 class="el" data-in="7.6" data-out="15.5" data-fx="up" style="margin-bottom:40px">Agento <span class="amber">ciklas</span></h2>
+  <div id="loop" class="el" data-in="7.9" data-out="15.5" data-fx="scale">
+    <svg viewBox="0 0 860 860">
+      <circle cx="430" cy="430" r="300" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/>
+      <circle id="arc" cx="430" cy="430" r="300" fill="none" stroke="#f2a93b" stroke-width="8" stroke-linecap="round"
+        stroke-dasharray="1885" stroke-dashoffset="1885" transform="rotate(-90 430 430)"/>
+      <circle id="dot" r="18" fill="#ffd27a"/>
+    </svg>
+    <div class="node" style="left:430px;top:130px"><div class="n">1</div><div class="t">Supranta tikslą</div></div>
+    <div class="node" style="left:725px;top:430px"><div class="n">2</div><div class="t">Planuoja</div></div>
+    <div class="node" style="left:430px;top:730px"><div class="n">3</div><div class="t">Naudoja įrankius</div></div>
+    <div class="node" style="left:135px;top:430px"><div class="n">4</div><div class="t">Tikrina rezultatą</div></div>
+    <div id="center">kartoja,<br>kol baigta<small id="lap">1 RATAS</small></div>
+  </div>
+</section>
+
+<!-- 4. Tools -->
+<section class="scene">
+  <h2 class="el" data-in="15.6" data-out="20" data-fx="up">Agento <span class="amber">rankos</span> – įrankiai</h2>
+  <div class="grid">
+    <div class="el tool" data-in="16.0" data-out="20" data-fx="scale"><div class="ic">📁</div><div class="tt">Failai</div><div class="dd">skaito ir kuria</div></div>
+    <div class="el tool" data-in="16.3" data-out="20" data-fx="scale"><div class="ic">🌐</div><div class="tt">Internetas</div><div class="dd">ieško, naršo</div></div>
+    <div class="el tool" data-in="16.6" data-out="20" data-fx="scale"><div class="ic">💻</div><div class="tt">Kodas</div><div class="dd">rašo ir paleidžia</div></div>
+    <div class="el tool" data-in="16.9" data-out="20" data-fx="scale"><div class="ic">✉️</div><div class="tt">Paštas, kalendorius</div><div class="dd">per jungtis</div></div>
+  </div>
+  <div class="el mcp" data-in="17.6" data-out="20" data-fx="up">Programos prijungiamos per <b>MCP</b> –<br>bendrą jungčių standartą</div>
+</section>
+
+<!-- 5. Subagents -->
+<section class="scene">
+  <h2 class="el" data-in="20.1" data-out="24.5" data-fx="up">Didelis darbas?<br><span class="amber">Komanda agentų</span></h2>
+  <div id="tree" class="el" data-in="20.4" data-out="24.5" data-fx="fade">
+    <svg viewBox="0 0 920 900">
+      <path class="ln" d="M460 190 C460 360 150 360 150 520" fill="none" stroke="#f2a93b" stroke-width="5" stroke-dasharray="520" stroke-dashoffset="520"/>
+      <path class="ln" d="M460 190 L460 520" fill="none" stroke="#f2a93b" stroke-width="5" stroke-dasharray="520" stroke-dashoffset="520"/>
+      <path class="ln" d="M460 190 C460 360 770 360 770 520" fill="none" stroke="#f2a93b" stroke-width="5" stroke-dasharray="520" stroke-dashoffset="520"/>
+    </svg>
+    <div class="boss"><div class="t">Pagrindinis agentas</div><div class="d">paskirsto ir sujungia</div></div>
+    <div class="sa" style="left:10px"><div class="t">Paieška</div><div class="d">renka faktus</div><div class="bar"><i></i></div></div>
+    <div class="sa" style="left:320px"><div class="t">Analizė</div><div class="d">skaičiuoja</div><div class="bar"><i></i></div></div>
+    <div class="sa" style="left:630px"><div class="t">Tekstas</div><div class="d">rašo ataskaitą</div><div class="bar"><i></i></div></div>
+  </div>
+  <div class="el sub" data-in="21.6" data-out="24.5" data-fx="up" style="margin-top:0">Dirba <span class="amber">lygiagrečiai</span> – greičiau</div>
+</section>
+
+<!-- 6. Example -->
+<section class="scene">
+  <div class="el kicker" data-in="24.6" data-out="29" data-fx="fade">Pavyzdys</div>
+  <div class="el card hi" data-in="24.7" data-out="29" data-fx="up">
+    <div class="lab">Jūs rašote</div>
+    <div class="prompt"><span id="typed"></span><span class="caret" id="caret"></span></div>
+  </div>
+  <div class="steps">
+    <div class="el step" data-in="26.0" data-out="29" data-fx="left" data-done="26.6"><div class="ck">✓</div>Perskaito laišką</div>
+    <div class="el step" data-in="26.5" data-out="29" data-fx="left" data-done="27.1"><div class="ck">✓</div>Užpildo Word šabloną</div>
+    <div class="el step" data-in="27.0" data-out="29" data-fx="left" data-done="27.6"><div class="ck">✓</div>Patikrina sumas</div>
+  </div>
+  <div class="el result" data-in="27.8" data-out="29" data-fx="scale">📄 Aktas paruoštas</div>
+</section>
+
+<!-- 7. Outro -->
+<section class="scene">
+  <div class="el big" data-in="29.1" data-out="99" data-fx="up">Jūs – <span class="grad">tikslas</span>.</div>
+  <div class="el big" data-in="29.6" data-out="99" data-fx="up">Agentas – <span class="grad">darbas</span>.</div>
+  <div class="el sub serif" data-in="30.3" data-out="99" data-fx="up" style="font-size:54px;color:var(--ink)">o svarbius žingsnius patvirtinate jūs</div>
+  <div class="el pill" data-in="30.8" data-out="99" data-fx="scale">Išbandykite su Claude</div>
+</section>
+
+<div id="prog"></div>
+
+<script>
+const DUR = 32;
+const clamp = (x)=>Math.max(0,Math.min(1,x));
+const ease = (x)=>1-Math.pow(1-clamp(x),3);
+const els = [...document.querySelectorAll('.el')];
+const PROMPT = '„Iš kliento laiško paruošk atliktų darbų aktą“';
+
+function render(t){
+  for(const e of els){
+    const a=+e.dataset.in, b=+e.dataset.out, fx=e.dataset.fx;
+    const p=ease((t-a)/0.55), q=ease((t-(b-0.35))/0.35);
+    const o=p*(1-q);
+    e.style.opacity=o;
+    e.style.visibility = o<0.001?'hidden':'visible';
+    let tr='';
+    if(fx==='up') tr=`translateY(${(1-p)*70 - q*40}px)`;
+    else if(fx==='left') tr=`translateX(${(1-p)*-140 + q*80}px)`;
+    else if(fx==='scale') tr=`scale(${0.8+0.2*p - q*0.06})`;
+    e.style.transform=tr;
+    if(e.dataset.done) e.classList.toggle('done', t>=+e.dataset.done);
+  }
+  // loop scene
+  const L0=8.4, step=1.35, lt=t-L0;
+  const nodes=document.querySelectorAll('.node');
+  const k=lt<0?-1:Math.floor(lt/step);
+  nodes.forEach((n,i)=>n.classList.toggle('on', k>=0 && k%4===i));
+  const frac=lt<0?0:(lt/(step*4));
+  const lapFrac=frac%1;
+  document.getElementById('arc').setAttribute('stroke-dashoffset', 1885*(1-lapFrac));
+  const ang=-Math.PI/2 + lapFrac*2*Math.PI;
+  const dot=document.getElementById('dot');
+  dot.setAttribute('cx',430+300*Math.cos(ang)); dot.setAttribute('cy',430+300*Math.sin(ang));
+  dot.style.opacity = lt<0?0:1;
+  document.getElementById('lap').textContent = (Math.floor(frac)+1)+' RATAS';
+  // subagents
+  document.querySelectorAll('.ln').forEach((l,i)=>l.setAttribute('stroke-dashoffset',520*(1-ease((t-20.8-i*0.15)/0.7))));
+  const speeds=[1.0,0.8,0.65];
+  document.querySelectorAll('.bar i').forEach((b,i)=>b.style.width=(100*clamp((t-21.4)/(2.4/speeds[i]*0.9)))+'%');
+  // typing
+  const n=Math.round(PROMPT.length*clamp((t-25.0)/1.0));
+  document.getElementById('typed').textContent=PROMPT.slice(0,n);
+  document.getElementById('caret').style.opacity = (Math.floor(t*3)%2)?1:0.2;
+  // background drift + progress
+  document.getElementById('glow').style.transform=`translate(${Math.sin(t*0.4)*120}px,${Math.cos(t*0.3)*160}px)`;
+  document.getElementById('prog').style.width=(100*t/DUR)+'%';
+}
+window.render=render;
+render(0);
+</script>
+</body>
+</html>
