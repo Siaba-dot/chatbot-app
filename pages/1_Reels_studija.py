@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import accounts
 import clips_ui
 import animations
+import fxpack
 import reels_studio
 import video_editor
 
@@ -342,7 +343,7 @@ AI_LABELS = {"template": "Šablonas", "accent": "Akcentas", "color": "Filtras", 
              "music_volume": "Muzikos garsumas", "length": "Ilgiausia trukmė", "speed": "Greitis",
              "progress": "Progreso juostelė", "bubbles": "Debesėliai", "an_stickers": "Animuoti lipdukai",
              "an_marks": "Ranka piešti žymėjimai", "an_cards": "Iššokančios kortelės", "an_intro": "Įžanga",
-             "an_phone": "Nuotraukos į telefoną", "an_fx": "Efektų mozaika",
+             "an_phone": "Nuotraukos į telefoną", "an_fx": "Efektų mozaika", "gfx_kinds": "Grafikos efektai",
              "an_outro": "Pabaiga"}
 
 
@@ -362,6 +363,7 @@ def ai_options():
         "an_cards": "bool (pop-up cards when the speaker lists points)", "an_intro": "bool (animated logo intro)",
         "an_phone": "bool (photo cards fly out of one phone into another)",
         "an_fx": "bool (varied effects at different moments: shattering blocks, glitch, flash, light leak, b&w)",
+        "gfx_kinds": {k: v for k, v in fxpack.KINDS.items()},
         "an_outro": "bool (animated thank-you outro)",
         "yt_end": "bool (16:9 YouTube end screen)", "moment_at": "0.5-60 seconds",
         "transition": list(video_editor.TRANSITIONS),
@@ -379,6 +381,8 @@ def _ai_value(key, v, opts):
     o = opts[key]
     if key == "effects":
         return [e for e in (v if isinstance(v, list) else []) if e in reels_studio.EFFECTS]
+    if key == "gfx_kinds":
+        return [e for e in (v if isinstance(v, list) else []) if e in fxpack.KINDS]
     if key == "look":
         return v if v in o else next((k for k, t in o.items() if t == v), None)
     if isinstance(o, (list, dict)):
@@ -443,6 +447,7 @@ def autopilot_plan(client, words):
     library = reels_studio.music_library()
     ch = {"key_words": True, "punch": True, "bubbles": True, "look": "mixed", "an_stickers": True, "an_marks": True,
           "an_cards": True, "an_phone": True, "an_fx": True, "an_intro": True, "an_outro": True,
+          "gfx_kinds": list(fxpack.KINDS),
           "effects": sorted(set(ss.get(P + "effects", [])) | {"Švytėjimas", "Auksinės dulkės"})}
     if (ss.get(P + "link") or "").strip():
         ch["end_card"] = True
@@ -511,7 +516,7 @@ def undo_ai():
 
 def anim_spec(words):
     """Animacijų planas build'ui: AI (Premium, įsimenama) arba pagal žodžius. None – visos išjungtos."""
-    if not (an_stickers or an_marks or an_cards or an_phone or an_fx or an_intro or an_outro):
+    if not (an_stickers or an_marks or an_cards or an_phone or an_fx or an_intro or an_outro or gfx_kinds):
         return None
     words = list(words or [])
     plan = None
@@ -528,7 +533,23 @@ def anim_spec(words):
         if not plan or not any(plan.values()):
             plan = animations.auto_plan(words)
     plan = plan or {}
-    return {"plan": {"stickers": plan.get("stickers", []) if an_stickers else [],
+    gfx = []
+    if gfx_kinds and words:  # 🎁 grafikos efektai – ne ten, kur jau telefonas ar mozaikos efektas
+        busy = list(plan.get("phone", []) if an_phone else [])  # mozaika užleis vietą (žr. žemiau)
+        if client is not None:
+            cache = st.session_state.setdefault(P + "ai_gfx", {})
+            k = hash((tuple((w, round(a, 2)) for w, a, _ in words), tuple(gfx_kinds), tuple(busy)))
+            if k not in cache:
+                try:
+                    cache[k] = fxpack.ai_plan(client, words, gfx_kinds, reels_studio._ai_json, busy)
+                except Exception:
+                    cache[k] = None
+            gfx = cache[k] or []
+        if not gfx:
+            gfx = fxpack.auto_plan(words, gfx_kinds, busy)
+    if gfx and plan.get("fx"):  # turinio efektai svarbesni – mozaikos efektai šalia jų praleidžiami
+        plan = dict(plan, fx=[(t, k) for t, k in plan["fx"] if all(abs(t - g["t"]) >= 2.8 for g in gfx)])
+    return {"gfx": gfx, "plan": {"stickers": plan.get("stickers", []) if an_stickers else [],
                      "marks": plan.get("marks", []) if an_marks else [],
                      "cards": plan.get("cards", []) if an_cards else [],
                      "phone": plan.get("phone", []) if an_phone else [],
@@ -976,6 +997,12 @@ with sb.expander("🎬  Animacijos"):
     an_fx = st.toggle("🎆 Efektų mozaika", key=P + "an_fx",
                       help="Skirtingose vietose – vis kitas efektas: byrančios kaladėlės, glitch, blyksnis, šviesos "
                            "nutekėjimas, nespalvota akimirka. Dedama ties naujais sakiniais, ne dažniau kaip kas 3,5 s.")
+    st.session_state.setdefault(P + "gfx_kinds", [])
+    gfx_kinds = st.multiselect("🎁 Grafikos efektai", list(fxpack.KINDS), key=P + "gfx_kinds",
+                               format_func=lambda k: fxpack.KINDS[k], placeholder="Pasirinkite (galima kelis)",
+                               help="Pažymėkite, kurie leidžiami – studija viename video parinks tinkamiausius 3–4 "
+                                    "(pagal tai, ką sakote: skaičius – skaitiklis, % – grafikas, klausimas – žinutės, "
+                                    "atsiliepimas – kortelė su žvaigždutėmis…).")
     c1, c2 = st.columns(2)
     an_intro = c1.toggle("🎬 Įžanga", key=P + "an_intro", help="Logotipas ir jūsų paskyra įskrenda pradžioje (1,3 s).")
     an_outro = c2.toggle("🙏 Pabaiga", key=P + "an_outro",

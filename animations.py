@@ -245,7 +245,7 @@ def _intro_outro(lines, W, H, duration, acc, handle, intro, outro):
 
 
 def animations_ass(plan, W, H, duration, accent_rgb="E9A23B", subs_y=0.72, handle="", intro=False, outro=False,
-                   seed=7):
+                   seed=7, gfx=()):
     """ASS failo turinys su visomis animacijomis."""
     rnd = random.Random(seed)
     acc = _c(accent_rgb)
@@ -269,6 +269,10 @@ def animations_ass(plan, W, H, duration, accent_rgb="E9A23B", subs_y=0.72, handl
     for t, kind in (plan or {}).get("fx", []):
         if kind in ("flash", "leak") and t < duration - 0.5:
             _fx_ass(lines, t, kind, W, H, rnd)
+    import fxpack
+    for item in gfx or ():  # grafikos efektai (žinutės, atsiliepimas, grafikas, pranešimas, skaitiklis)
+        if item.get("kind") in fxpack.ASS_KINDS and item["t"] < duration - 0.5:
+            lines += fxpack.ass_events(item, W, H, accent_rgb)
     _intro_outro(lines, W, H, duration, acc, handle, intro, outro)
     return "\n".join(lines) + "\n"
 
