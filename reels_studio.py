@@ -1086,6 +1086,16 @@ def _run_once(cmd, total, progress, what, stall=12.0, hard=180.0, threads=None):
     if proc.returncode != 0 and not (stopped_at and proc.returncode in (0, 255)):
         if proc.returncode < 0 and not err.strip():  # nulūžo be pranešimo (signalas)
             err = f"ffmpeg aborted (signal {-proc.returncode})"
+        # diagnostikai – į serverio žurnalą (Streamlit Cloud: Manage app → logs)
+        import sys as _sys
+        try:
+            gi = cmd.index("-filter_complex_script") + 1
+            with open(cmd[gi], encoding="utf-8") as gf:
+                graph_txt = gf.read()
+        except Exception:
+            graph_txt = ""
+        print(f"[ffmpeg klaida] kodas={proc.returncode} gijos={threads}\n{' '.join(map(str, cmd))}\n"
+              f"{graph_txt}\n{err[-1500:]}", file=_sys.stderr, flush=True)
         raise RuntimeError(f"{what}:\n{err[-2000:]}")
     return {"stopped_early": bool(stopped_at), "reached": state["t"]}
 
