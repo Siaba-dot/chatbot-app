@@ -41,6 +41,11 @@ Viskas, ką daro automatinis montažas (pauzių kirpimas, triukšmo valymas, tit
 - **aukso ir sidabro gradientas** – metalinis blizgesys „įliejamas“ į kabliuką, kvietimą ir paryškintą titrų žodį;
 - **firminiai filtrai** (✦): „Paryžiaus rytas“ (švelnus rožinis pastelinis), „Milano naktis“ (tamsi kino nuotaika),
   „Baltijos auksas“ (šiltas gintarinis) ir efektas **„Auksinis rėmelis“** (dviguba metalinė linija su deimantėliais);
+- **🎬 Animacijos** (skiltis šoninėje juostoje): **animuoti lipdukai** (kylančios širdelės, žvaigždučių sprogimas,
+  konfeti, liepsnelės), **ranka piešti žymėjimai** (apskritimas, rodyklė, pabraukimas „nusipiešia“ ties svarbiausiais
+  žodžiais), **iššokančios kortelės** („1. …, 2. …“ kai vardijama), **įžanga** (logotipas ir paskyra įskrenda) ir
+  **pabaiga** („AČIŪ!“, logotipas, paskyra). Vietas parenka AI pagal kalbą arba taisyklės pagal žodžius;
+  viskas piešiama vektoriškai (libass) – veikia ir Streamlit Cloud; Autopilotas jas įjungia;
 - **✨ Autopilotas** – vienas mygtukas „padaryk viską už mane“: atpažįsta kalbą, parenka stilių, titrus, kabliuką,
   efektus, debesėlius ir muziką (su AI raktu – AI pagal turinį, be jo – patikrintas studijos derinys), sukuria
   3 formatus su viršeliais ir aprašymu; parodo, ką parinko, viską galima atšaukti;
