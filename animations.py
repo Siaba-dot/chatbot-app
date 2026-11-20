@@ -14,6 +14,10 @@ from video_editor import FONT_NAME, _ass_escape, _ass_time
 
 STICKERS = {"hearts": "Širdelės", "stars": "Žvaigždutės", "confetti": "Konfeti", "fire": "Liepsnelės"}
 MARKS = {"circle": "Apskritimas", "arrow": "Rodyklė", "underline": "Pabraukimas"}
+FX = {"shatter": "Byrančios kaladėlės", "glitch": "Glitch", "flash": "Blyksnis", "leak": "Šviesos nutekėjimas",
+      "bw": "Nespalvota akimirka"}
+FX_ORDER = ("shatter", "flash", "glitch", "leak", "bw")
+SHATTER_LEN, GLITCH_LEN, BW_LEN = 1.4, 0.45, 1.3
 INTRO_LEN, OUTRO_LEN = 1.3, 1.8
 
 # ---------- žodžiai, pagal kuriuos parenkama be AI ----------
@@ -262,8 +266,78 @@ def animations_ass(plan, W, H, duration, accent_rgb="E9A23B", subs_y=0.72, handl
     for i, (t, txt) in enumerate(cards):
         end = min(t + 2.6, cards[i + 1][0] if i + 1 < len(cards) else duration, duration)
         _card(lines, t, end, txt.strip()[:40], i, W, H, acc, rnd)
+    for t, kind in (plan or {}).get("fx", []):
+        if kind in ("flash", "leak") and t < duration - 0.5:
+            _fx_ass(lines, t, kind, W, H, rnd)
     _intro_outro(lines, W, H, duration, acc, handle, intro, outro)
     return "\n".join(lines) + "\n"
+
+
+# ---------- 🎆 Efektų mozaika ----------
+def render_shatter(img, out_path, fps=30):
+    """Byrančios kaladėlės: kadras (PIL, jau su filtrais) suskyla į kaladėles, kurios nubyra žemyn
+    (permatomas MOV qtrle sluoksnis; po juo video tęsiasi)."""
+    import os
+    import subprocess
+    import tempfile
+    from PIL import Image, ImageDraw
+    img = img.convert("RGBA")
+    w, h = img.size
+    cols, rows = 6, 10
+    tw, th = math.ceil(w / cols), math.ceil(h / rows)
+    rnd = random.Random(11)
+    tiles = []
+    for r in range(rows):
+        for c in range(cols):
+            box = (c * tw, r * th, min(w, (c + 1) * tw), min(h, (r + 1) * th))
+            tile = img.crop(box)
+            ImageDraw.Draw(tile).rectangle((0, 0, tile.width - 1, tile.height - 1), outline=(255, 214, 140, 160))
+            tiles.append({"img": tile, "x": box[0], "y": box[1],
+                          "delay": 0.12 + (rows - 1 - r) / rows * 0.35 + rnd.uniform(0, 0.15),
+                          "vx": rnd.uniform(-0.25, 0.25) * w, "vy": -rnd.uniform(0.05, 0.3) * h,
+                          "spin": rnd.uniform(-260, 260)})
+    g = h * 2.6
+    frames = round(SHATTER_LEN * fps)
+    tmp = tempfile.mkdtemp()
+    try:
+        for fi in range(frames):
+            t = fi / fps
+            canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            for tl in tiles:
+                dt = t - tl["delay"]
+                if dt <= 0:
+                    canvas.alpha_composite(tl["img"], (tl["x"], tl["y"]))
+                    continue
+                x = tl["x"] + tl["vx"] * dt
+                y = tl["y"] + tl["vy"] * dt + 0.5 * g * dt * dt
+                if y > h:
+                    continue
+                im = tl["img"].rotate(tl["spin"] * dt, expand=True, resample=Image.BILINEAR)
+                canvas.alpha_composite(im, (round(x - (im.width - tl["img"].width) / 2),
+                                            round(y - (im.height - tl["img"].height) / 2)))
+            canvas.save(os.path.join(tmp, f"f{fi:04d}.png"), compress_level=1)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(fps), "-i",
+                        os.path.join(tmp, "f%04d.png"), "-c:v", "qtrle", "-pix_fmt", "argb", out_path], check=True)
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out_path
+
+
+def _fx_ass(lines, t, kind, W, H, rnd):
+    """Blyksnis ir šviesos nutekėjimas (ASS); glitch, nespalvota ir kaladėlės – ffmpeg sluoksniai finish() metu."""
+    full = f"m 0 0 l {W} 0 l {W} {H} l 0 {H}"
+    if kind == "flash":
+        _ev(lines, 11, t, t + 0.45, "\\an7\\pos(0,0)\\1c&H00FFFFFF&\\alpha&H00&\\t(60,450,\\alpha&HFF&)"
+            "\\bord0\\shad0\\p1", full)
+    elif kind == "leak":
+        for i, col in enumerate(("&H003A8CFF&", "&H0066B4FF&", "&H00A0D8FF&")):
+            r = W * (0.55 - 0.12 * i)
+            x0, x1 = -r * 0.6 + i * 40, W + r * 0.4
+            y = H * (0.25 + 0.2 * i)
+            _ev(lines, 11, t + i * 0.08, t + 1.5, f"\\an5\\move({_f(x0)},{_f(y)},{_f(x1)},{_f(y - H * 0.1)})"
+                f"\\1c{col}\\alpha&H70&\\bord0\\shad0\\blur{round(W * 0.06)}\\fad(300,500)\\p1",
+                _ellipse(0, 0, r, r * 0.8))
 
 
 # ---------- 📱 Nuotraukos skrenda į telefoną ----------
@@ -401,7 +475,7 @@ def render_phone_burst(thumbs, out_path, W, H, fps=30, accent_rgb="E9A23B"):
 # ---------- kur dėti animacijas ----------
 def auto_plan(words, gap=2.6):
     """Planas BE AI: lipdukai pagal žodžius, žymėjimai ties svarbiausiais žodžiais, kortelės pagal „pirma, antra…“."""
-    plan = {"stickers": [], "marks": [], "cards": [], "phone": []}
+    plan = {"stickers": [], "marks": [], "cards": [], "phone": [], "fx": []}
     last_s = last_m = -1e9
     mark_kinds = ["circle", "arrow", "underline"]
     for i, (w, a, b) in enumerate(words):
@@ -430,6 +504,12 @@ def auto_plan(words, gap=2.6):
             txt = " ".join(r for r in rest if r)
             if txt:
                 plan["cards"].append((round(a, 2), f"{num}. {txt}"))
+    last_f = -1e9  # efektų mozaika – ties naujais sakiniais, vis kitas efektas
+    for ph_ in video_editor.group_phrases(list(words)):
+        a = ph_[0][1]
+        if a >= 1.0 and a - last_f >= 3.5 and len(plan["fx"]) < 5:
+            plan["fx"].append((round(a, 2), FX_ORDER[len(plan["fx"]) % len(FX_ORDER)]))
+            last_f = a
     ph = next((a for w, a, b in words if re.search(_PHONE_WORDS, video_editor.plain(w).lower())), None)
     if ph is None and words:
         ph = words[len(words) // 3][1]
@@ -450,12 +530,16 @@ def ai_plan(client, words, ai_json):
               json.dumps(MARKS, ensure_ascii=False) + "), and pop-up cards ONLY if the speaker lists points/tips/"
               "steps/prices (up to 5, text max 4 words in the transcript language, start with the number, e.g. "
               "\"1. Kokybė\"), and ONE moment for a 'photos fly into a phone' effect (when photos, videos, gallery, "
-              "memories or content are mentioned, otherwise a strong moment). Reply only with JSON: {\"stickers\": [{\"time\": 0, \"kind\": \"hearts\"}], "
-              "\"marks\": [{\"time\": 0, \"kind\": \"circle\"}], \"cards\": [{\"time\": 0, \"text\": \"1. ...\"}], \"phone\": 0}")
+              "memories or content are mentioned, otherwise a strong moment), and up to 5 varied visual effects at "
+              "the starts of new sentences, at least 3.5 s apart, each different (kinds: " +
+              json.dumps(FX, ensure_ascii=False) + "). Reply only with JSON: {\"stickers\": [{\"time\": 0, \"kind\": \"hearts\"}], "
+              "\"marks\": [{\"time\": 0, \"kind\": \"circle\"}], \"cards\": [{\"time\": 0, \"text\": \"1. ...\"}], \"phone\": 0, "
+              "\"fx\": [{\"time\": 0, \"kind\": \"shatter\"}]}")
     j = ai_json(client, system, {"transcript": lines})
     end = words[-1][2] if words else 0
     out = {"stickers": [], "marks": [], "cards": []}
-    for key, valid, field in (("stickers", STICKERS, "kind"), ("marks", MARKS, "kind"), ("cards", None, "text")):
+    for key, valid, field in (("stickers", STICKERS, "kind"), ("marks", MARKS, "kind"), ("cards", None, "text"),
+                              ("fx", FX, "kind")):
         for it in j.get(key, []) if isinstance(j.get(key), list) else []:
             try:
                 t, v = float(it["time"]), str(it[field]).strip()
