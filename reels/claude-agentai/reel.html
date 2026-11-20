@@ -62,7 +62,7 @@ h2{font-weight:900;font-size:84px;line-height:1.05;margin-bottom:60px}
 .bar{height:16px;border-radius:9px;background:rgba(255,255,255,.1);margin-top:22px;overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--amber),var(--amber2))}
 /* example */
-.prompt{font-size:44px;line-height:1.35;min-height:180px}
+.prompt{font-size:44px;line-height:1.35;min-height:120px}
 .caret{display:inline-block;width:5px;height:48px;background:var(--amber);vertical-align:-8px;margin-left:4px}
 .steps{width:100%;margin-top:40px;display:flex;flex-direction:column;gap:22px}
 .step{display:flex;align-items:center;gap:26px;font-size:44px;text-align:left;padding:26px 34px;border-radius:28px;background:var(--card)}
@@ -154,11 +154,11 @@ h2{font-weight:900;font-size:84px;line-height:1.05;margin-bottom:60px}
     <div class="prompt"><span id="typed"></span><span class="caret" id="caret"></span></div>
   </div>
   <div class="steps">
-    <div class="el step" data-in="26.0" data-out="29" data-fx="left" data-done="26.6"><div class="ck">✓</div>Perskaito laišką</div>
-    <div class="el step" data-in="26.5" data-out="29" data-fx="left" data-done="27.1"><div class="ck">✓</div>Užpildo Word šabloną</div>
-    <div class="el step" data-in="27.0" data-out="29" data-fx="left" data-done="27.6"><div class="ck">✓</div>Patikrina sumas</div>
+    <div class="el step" data-in="26.0" data-out="29" data-fx="left" data-done="26.6"><div class="ck">✓</div>Ieško transporto ir nakvynės</div>
+    <div class="el step" data-in="26.5" data-out="29" data-fx="left" data-done="27.1"><div class="ck">✓</div>Palygina kainas ir atsiliepimus</div>
+    <div class="el step" data-in="27.0" data-out="29" data-fx="left" data-done="27.6"><div class="ck">✓</div>Sudėlioja planą pagal biudžetą</div>
   </div>
-  <div class="el result" data-in="27.8" data-out="29" data-fx="scale">📄 Aktas paruoštas</div>
+  <div class="el result" data-in="27.8" data-out="29" data-fx="scale">🗺️ Kelionės planas paruoštas</div>
 </section>
 
 <!-- 7. Outro -->
@@ -176,7 +176,7 @@ const DUR = 32;
 const clamp = (x)=>Math.max(0,Math.min(1,x));
 const ease = (x)=>1-Math.pow(1-clamp(x),3);
 const els = [...document.querySelectorAll('.el')];
-const PROMPT = '„Iš kliento laiško paruošk atliktų darbų aktą“';
+const PROMPT = '„Suplanuok savaitgalio kelionę į Rygą iki 300 €“';
 
 function render(t){
   for(const e of els){
