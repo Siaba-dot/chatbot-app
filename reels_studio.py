@@ -18,6 +18,7 @@ import tempfile
 import time
 
 import animations
+import fxpack
 import video_editor
 from PIL import Image as PILImage
 from video_editor import FONT_DIR, FONT_NAME, TRAINING_FONT, _ass_escape, _ass_time, _filter_path
@@ -1145,6 +1146,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
     outro_len = 0.0
     phone_times = []
     fx_list = []
+    gfx = []
     if anims and anims.get("outro") and not card_len:
         outro_len = animations.OUTRO_LEN
     total = duration + card_len + outro_len
@@ -1173,6 +1175,8 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             pl = {k: [(t / speed, v) for t, v in anims.get("plan", {}).get(k, [])]
                   for k in ("stickers", "marks", "cards", "fx")}
             fx_list = [(t, k) for t, k in pl["fx"] if t < duration - 0.6]
+            gfx = [dict(it, t=it["t"] / speed) for it in anims.get("gfx", [])
+                   if it["t"] / speed < duration - fxpack.LEN.get(it.get("kind"), 2.5) * 0.6]
             for t, k in fx_list:  # glitch ir nespalvota akimirka – laiko lange (pastovus kadro dydis)
                 if k == "glitch":
                     e = f"enable='between(t,{t:.3f},{t + animations.GLITCH_LEN:.3f})'"
@@ -1185,7 +1189,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             with open(ap, "w", encoding="utf-8") as f:
                 f.write(animations.animations_ass(pl, W, H, duration + outro_len, accent_colors(accent)[0], subs_ypos,
                                                   anims.get("handle") or handle, anims.get("intro"),
-                                                  anims.get("outro") and not card_len))
+                                                  anims.get("outro") and not card_len, gfx=gfx))
             post.append(f"ass=filename='{_filter_path(ap)}':fontsdir='{_filter_path(FONT_DIR)}'")
         # svarbiausių žodžių (*žodis*) laikai galutiniame video – akcentų priartėjimui
         punches = []
@@ -1229,14 +1233,29 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             inputs.extend(args)
             return n
 
-        if anims and phone_times:  # 📱 nuotraukos skrenda į telefoną – kortelėse video kadrai
+        thumbs = []
+        if anims and (phone_times or any(it["kind"] in fxpack.OVERLAY_KINDS for it in gfx)):  # kadrai kortelėms
             tdir = os.path.join(tmp, "thumbs")
             os.makedirs(tdir, exist_ok=True)
             src_dur = max(1.0, info["duration"])
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vf",
-                            f"fps=12/{src_dur:.3f},scale=270:-2", "-frames:v", "12", os.path.join(tdir, "t%02d.jpg")],
+                            f"fps=12/{src_dur:.3f},scale=360:-2", "-frames:v", "12", os.path.join(tdir, "t%02d.jpg")],
                            check=False)
             thumbs = [PILImage.open(os.path.join(tdir, f)) for f in sorted(os.listdir(tdir))]
+        for gi_, it in enumerate([x for x in gfx if x["kind"] == "pip"][:1]):  # 🔲 kadras kadre
+            dp, box = fxpack.device_png(os.path.join(tmp, "device.png"), W, H)
+            graph += fxpack.pip_chains(vout, f"[pipo{gi_}]", it["t"], W, H, fps, _filter_path(dp), box, f"pp{gi_}")
+            vout = f"[pipo{gi_}]"
+        for gi_, it in enumerate([x for x in gfx if x["kind"] in fxpack.OVERLAY_KINDS][:4]):  # efektai su kadrais
+            if not thumbs:
+                break
+            op_ = fxpack.render_overlay(it["kind"], thumbs, os.path.join(tmp, f"gfx{gi_}.mov"), W, H, fps,
+                                        accent_colors(accent)[0])
+            k_ = add_input("-i", op_)
+            graph.append(f"[{k_}:v]scale={W}:{H},format=yuva420p,setpts=PTS-STARTPTS+{it['t']:.3f}/TB[gx{gi_}]")
+            graph.append(f"{vout}[gx{gi_}]overlay=eof_action=pass:format=auto[gxo{gi_}]")
+            vout = f"[gxo{gi_}]"
+        if anims and phone_times:  # 📱 nuotraukos skrenda į telefoną – kortelėse video kadrai
             if thumbs:
                 bp_ = animations.render_phone_burst(thumbs, os.path.join(tmp, "phone.mov"), W, H, fps,
                                                     accent_colors(accent)[0])
