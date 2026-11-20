@@ -140,6 +140,12 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary p { font-fam
 .st-gift { max-width: 52rem; margin: 0 auto .8rem; text-align: center; font-size: .86rem; color: #D9C9A8;
            padding: .45rem .8rem; border-radius: 999px; border: 1px dashed rgba(227,155,46,.4); }
 .st-gift.on { border-style: solid; background: rgba(227,155,46,.14); color: #FFE7B0; }
+.lux-howto { font-size: .88rem; color: #D6DFEC; background: rgba(14,34,66,.55); border: 1px solid rgba(227,155,46,.3);
+             border-radius: 12px; padding: .6rem .85rem; margin-bottom: .6rem; }
+.lux-howto ul { margin: .3rem 0 0 1.1rem; padding: 0; }
+.lux-howto li { margin: .15rem 0; }
+.lux-howto code { color: #FFD58A; background: rgba(227,155,46,.12); padding: 0 .25rem; border-radius: 4px; }
+.lux-howto .k { color: #FFD58A; font-weight: 800; }
 .lux-done { font-size: 1rem; color: #FFE7B0; margin-bottom: .5rem; }
 @media (max-width: 640px) {
   .st-steps { grid-template-columns: repeat(2, 1fr); }
@@ -417,7 +423,7 @@ def marked(words):
                 cache[k] = None
         if cache[k]:
             return reels_studio.mark_indices(words, cache[k])
-    return marked(words)
+    return video_editor.mark_key_words(words)  # be AI – pagal taisyklę
 
 
 def pick_look(name):
@@ -1243,9 +1249,17 @@ if clips and subtitles:
             lines = video_editor.edit_lines(base_words)
             if lines:
                 import pandas as pd
-                st.caption("Spustelėkite tekstą ir pataisykite; ištrintas tekstas – eilutė nerodoma."
-                           + (" Svarbiausi žodžiai pažymėti *žvaigždutėmis* – pridėkite ar nuimkite jas patys."
-                              if key_words else ""))
+                st.markdown(
+                    '<div class="lux-howto"><b>✏️ Kaip taisyti titrus</b><ul>'
+                    "<li><b>Neteisingai atpažintą žodį</b> – spustelėkite eilutę ir parašykite teisingai.</li>"
+                    "<li><b>Nereikalingą eilutę</b> – ištrinkite visą jos tekstą (video ji nebus rodoma).</li>"
+                    + ("<li><b>✦ Žodžiai tarp žvaigždučių</b>, pvz. <code>*svarbiausia*</code>, video bus "
+                       "<span class='k'>DIDESNI ir auksiniai</span>, o kadras ties jais trumpam priartės. "
+                       "Žvaigždučių video nesimatys. Norite paryškinti kitą žodį – apgaubkite jį "
+                       "<code>*žvaigždutėmis*</code>; nenorite – ištrinkite jas. Išjungti visai: "
+                       "⚙️ Nustatymai → Tekstai ir titrai → „Svarbiausi žodžiai“.</li>" if key_words else "")
+                    + "<li>Pataisę spauskite <b>▶ Peržiūra</b> viršuje.</li></ul></div>",
+                    unsafe_allow_html=True)
                 df = pd.DataFrame([{"Nuo": round(x, 1), "Iki": round(y, 1), "Tekstas": t} for x, y, t in lines])
                 edited = st.data_editor(
                     df, key=f"{P}lines_{prep['n']}_{int(key_words)}", hide_index=True, width="stretch", num_rows="fixed",
