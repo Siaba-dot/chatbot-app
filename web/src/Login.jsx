@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { api, setToken } from "./api.js";
+import Story from "./Story.jsx";
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState("");
@@ -28,7 +29,9 @@ export default function Login({ onLogin }) {
         <img className="logo" src="/logo.svg" alt="" />
         <div className="kicker">LIETUVIŠKA STUDIJA · BALTIJOS GINTARO DVASIA</div>
         <h1 className="goldtext">Reels montavimo studija</h1>
-        <div className="quote">Jūsų akimirkos – kaip gintaras: išsaugotos gražiausios.</div>
+        <div className="quote">Gintaras milijonus metų saugo sustabdytą akimirką.<br />Mes darome tą patį su jūsų video.</div>
+        <div className="quote goldtext" style={{ fontStyle: "normal", marginTop: -12 }}>Jūsų akimirkos – kaip gintaras: išsaugotos gražiausios.</div>
+        <Story />
         <form className="card" onSubmit={submit}>
           <div className="field">
             <label htmlFor="u">Prisijungimo vardas</label>

@@ -264,3 +264,12 @@ textarea.input { resize: vertical; min-height: 70px; }
 }
 .nav-back { margin-left: 8px; }
 @media (max-width: 900px) { .nav-back { margin-left: 0; } }
+
+/* gintaro istorija */
+.story { text-align: left; margin: 0 0 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(14, 34, 66, .55); }
+.story-head { width: 100%; text-align: left; background: none; border: none; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+.story-head span { display: inline-block; width: 14px; color: var(--honey); }
+.story-body { padding: 0 18px 14px; font-family: var(--serif); font-size: 15.5px; line-height: 1.6; color: var(--text); }
+.story-body p { margin: 0 0 10px; }
+.story-body b { color: var(--honey); }
+.story-end { font-style: italic; text-align: center; color: var(--honey); }
