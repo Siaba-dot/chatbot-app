@@ -61,13 +61,26 @@ DEFAULTS = {
     "image_duration": video_editor.IMAGE_DURATION,
     "moment_at": None,         # „Gintaro akimirka“ – sekundė galutiniame video
     "category": "Prabanga",
+    # 🎙 AI įgarsinimas (OpenAI balsas): tekstas skaitomas vietoj / šalia jūsų balso
+    "voiceover": {"on": False, "text": "", "voice": "coral"},
+    "clip_gain": 20,           # originalaus garso garsumas, kai yra įgarsinimas (%)
 }
+
+VOICES = {"coral": "Koralas – šilta moteris", "nova": "Nova – žvali moteris", "shimmer": "Šimeris – švelni moteris",
+          "sage": "Sage – rami moteris", "alloy": "Alloy – neutralus", "ash": "Ash – ramus vyras",
+          "echo": "Echo – gilus vyras", "onyx": "Onyx – žemas vyras", "fable": "Fable – pasakotojas"}
+TTS_INSTRUCTIONS = ("Speak in natural, fluent {lang} with correct pronunciation and stress. Warm, confident, "
+                    "energetic social-media tone, clear diction, natural pauses at punctuation.")
 
 
 def settings_with_defaults(settings):
     s = dict(DEFAULTS)
     s.update({k: v for k, v in (settings or {}).items() if k in DEFAULTS and v is not None})
     s["anims"] = dict(DEFAULTS["anims"], **(settings or {}).get("anims", {}) or {})
+    s["voiceover"] = dict(DEFAULTS["voiceover"], **(settings or {}).get("voiceover", {}) or {})
+    if s["voiceover"]["voice"] not in VOICES:
+        s["voiceover"]["voice"] = "coral"
+    s["voiceover"]["text"] = str(s["voiceover"]["text"])[:4000]
     tpl = reels_studio.TEMPLATES.get(s["template"]) or reels_studio.TEMPLATES[DEFAULTS["template"]]
     if s["template"] not in reels_studio.TEMPLATES:
         s["template"] = DEFAULTS["template"]
@@ -106,6 +119,7 @@ def options():
         "subtitle_languages": SUBTITLE_LANGUAGES,
         "lengths": list(reels_studio.LENGTHS),
         "music": {k: v["desc"] for k, v in reels_studio.music_library().items()},
+        "voices": VOICES,
         "stickers": animations.STICKERS, "marks": animations.MARKS, "fx": animations.FX,
         "gfx": {k: v if isinstance(v, str) else v.get("title", k) for k, v in fxpack.KINDS.items()},
         "defaults": DEFAULTS,
@@ -165,8 +179,36 @@ def _segments(c):
     return [(float(a), float(b))]
 
 
-def prepare(clips, settings, workdir, client=None, status=None, progress=None):
-    """Sujungia medžiagą, suranda pauzes, atpažįsta kalbą (titrai). Grąžina prep žodyną (JSON-draugišką)."""
+def tts(client, text, voice, out_path, language="lt"):
+    """AI įgarsinimas (OpenAI): tekstas -> MP3. Naujesnis modelis priima nurodymus (tarimas, tonas)."""
+    lang = video_editor.LANGUAGES.get(language, "Lithuanian")
+    try:
+        with client.audio.speech.with_streaming_response.create(
+                model="gpt-4o-mini-tts", voice=voice, input=text, response_format="mp3",
+                instructions=TTS_INSTRUCTIONS.format(lang=lang)) as r:
+            r.stream_to_file(out_path)
+    except Exception:
+        with client.audio.speech.with_streaming_response.create(
+                model="tts-1-hd", voice=voice if voice in ("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+                else "nova", input=text, response_format="mp3") as r:
+            r.stream_to_file(out_path)
+    return out_path
+
+
+def voice_text(client, topic, language="lt", seconds=30):
+    """AI parašo įgarsinimo tekstą Reels'ui (kabliukas, 2–3 mintys, kvietimas)."""
+    lang = video_editor.LANGUAGES.get(language, "Lithuanian")
+    j = reels_studio._ai_json(client, (
+        f"You write voiceover scripts for short vertical videos (Reels/TikTok) in {lang}, with perfect grammar and "
+        f"diacritics. About {int(seconds * 2.2)} words (~{seconds} s). Start with a strong hook sentence, then 2–4 short, "
+        "concrete sentences, end with a short call to action. Natural spoken language, no emojis, no hashtags. "
+        "Reply only JSON: {\"text\": \"...\"}"), {"topic": topic})
+    return str(j.get("text", "")).strip()
+
+
+def prepare(clips, settings, workdir, client=None, status=None, progress=None, vo_path=None):
+    """Sujungia medžiagą, suranda pauzes, atpažįsta kalbą (titrai). Grąžina prep žodyną (JSON-draugišką).
+    vo_path – įgarsinimas: tada pauzės nekerpamos, o titrai daromi iš įgarsinimo (jo laiko skalė)."""
     s = settings_with_defaults(settings)
     say = status or (lambda m: None)
     prog = progress or (lambda p: None)
@@ -180,12 +222,61 @@ def prepare(clips, settings, workdir, client=None, status=None, progress=None):
                                            fill=s["fit"] == "fill")
     protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
     say("Ieškau pauzių ir atpažįstu kalbą…")
-    analysis = video_editor.analyze(src, remove_silence=s["remove_silence"], subtitles=s["subtitles"],
+    analysis = video_editor.analyze(src, remove_silence=s["remove_silence"] and not vo_path,
+                                    subtitles=s["subtitles"] and not vo_path,
                                     client=client, subtitle_language=s["subtitle_language"],
                                     subtitle_text=s["subtitle_text"], protect=protect, status=say)
+    if vo_path:  # titrai iš įgarsinimo: AI atpažįsta tikslius laikus, be AI – žinomas tekstas pagal pauzes
+        words, mode = video_editor.analyze_voice(vo_path, s["subtitles"], client, None, s["subtitle_language"],
+                                                 "" if client is not None else s["voiceover"]["text"], status=say)
+        analysis["words"], analysis["subtitle_mode"] = words, mode
     prog(1.0)
-    return {"src": src, "analysis": analysis, "format": s["format"],
+    return {"src": src, "analysis": analysis, "format": s["format"], "vo": vo_path,
             "lines": video_editor.edit_lines(analysis["words"])}
+
+
+# ---------- 🎞 intarpai (Pexels ir kt.) ----------
+def _to_src(t, keep):
+    """Sumontuoto video laikas -> paruoštos medžiagos laikas (pauzės iškirptos)."""
+    acc = 0.0
+    for a, b in keep or []:
+        if t <= acc + (b - a):
+            return a + (t - acc)
+        acc += b - a
+    return keep[-1][1] if keep else t
+
+
+def overlay_broll(src, out_path, items, keep=None, speed=1.0, fade=0.25):
+    """Intarpai ant medžiagos (garsas lieka jūsų). items – [{"path", "t", "d"}], laikai – galutinio video
+    (įgarsinimo atveju) arba sumontuoto video laiku; užpildo visą kadrą, švelniai išnyra ir išnyksta."""
+    info = video_editor.probe(src)
+    W, H, fps = info["width"], info["height"], info["fps"] or 30
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", src]
+    chains, last, n = [], "0:v", 0
+    for it in items:
+        if not it.get("path") or not os.path.exists(it["path"]):
+            continue
+        t0 = _to_src(float(it["t"]) * speed, keep)
+        t1 = _to_src((float(it["t"]) + float(it["d"])) * speed, keep)
+        d = max(0.6, t1 - t0)
+        if t0 >= info["duration"] - 0.3:
+            continue
+        n += 1
+        cmd += ["-stream_loop", "-1", "-i", it["path"]]
+        f = min(fade, d / 3)
+        chains.append(f"[{n}:v]trim=duration={d:.3f},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio="
+                      f"increase,crop={W}:{H},fps={fps},format=yuva420p,fade=t=in:st=0:d={f:.2f}:alpha=1,"
+                      f"fade=t=out:st={d - f:.3f}:d={f:.2f}:alpha=1,setpts=PTS+{t0:.3f}/TB[b{n}]")
+        chains.append(f"[{last}][b{n}]overlay=eof_action=pass:format=auto[o{n}]")
+        last = f"o{n}"
+    if not n:
+        return src
+    cmd += ["-filter_complex", ";".join(chains), "-map", f"[{last}]", "-map", "0:a?", "-c:v", "libx264",
+            "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", out_path]
+    r = subprocess.run(video_editor.limit_threads(cmd), capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("Nepavyko įdėti intarpų: " + r.stderr[-300:])
+    return out_path
 
 
 # ---------- AI / taisyklės ----------
@@ -247,20 +338,30 @@ def anim_spec(words, s, client=None):
 
 # ---------- montažas ----------
 def build(prep, settings, out_path, workdir, client=None, words=None, quick=False, progress=None,
-          logo=None, end_card=None, music_file=None):
-    """Montažas + Reels apdaila. words – pataisyti titrai (None – atpažinti). quick – greita peržiūra."""
+          logo=None, end_card=None, music_file=None, broll=None):
+    """Montažas + Reels apdaila. words – pataisyti titrai (None – atpažinti). quick – greita peržiūra.
+    broll – intarpai [{"path", "t", "d"}] (laikai – kaip titrų)."""
     s = settings_with_defaults(settings)
     prog = progress or (lambda p: None)
     tmp = tempfile.mkdtemp(dir=workdir)
+    vo = prep.get("vo") if prep.get("vo") and os.path.exists(prep["vo"]) else None
     try:
         words = prep["analysis"]["words"] if words is None else words
         words = (marked(words, client) if s["key_words"]
                  else [(video_editor.plain(w), a, b) for w, a, b in words])
+        if vo:  # įgarsinimo titrai – galutinio video laiku; montaže jie pagreitinami kartu su vaizdu
+            words = [(w, a * s["speed"], b * s["speed"]) for w, a, b in words]
+        bubble_list, anims = bubbles(words, s, client), anim_spec(words, s, client)
+        src = prep["src"]
+        if broll:
+            prog(0.02)
+            src = overlay_broll(src, os.path.join(tmp, "broll.mkv"), broll,
+                                None if vo else prep["analysis"].get("keep"), s["speed"] if vo else 1.0)
         highlight = reels_studio._ass_color(reels_studio.accent_colors(s["accent"])[0])[4:]
         subs_y = reels_studio.SUBTITLE_POSITIONS.get(s["subs_pos"], 0.72)
         edited = os.path.join(tmp, "edited.mp4")
         video_editor.render_edit(
-            prep["src"], edited, prep["analysis"], words, fmt=prep.get("format", s["format"]),
+            src, edited, prep["analysis"], words, fmt=prep.get("format", s["format"]),
             denoise=s["denoise"] and not quick, loudnorm=not quick, subtitle_style="modern", highlight=highlight,
             subtitle_look=s["look"], ypos=subs_y, subtitle_size=s["subs_size"] / 100,
             progress=lambda p: prog(p * 0.6), max_side=640 if quick else 1920,
@@ -274,7 +375,7 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
             preview=quick, subs_words=words, subs_look=s["look"], subs_ypos=subs_y,
             hook_ypos=reels_studio.HOOK_POSITIONS.get(s["hook_pos"], 0.2), subs_size=s["subs_size"] / 100,
             text_size=s["text_size"] / 100, punch=s["key_words"] and s["punch"], logo=logo, end_card=end_card,
-            bubbles=bubbles(words, s, client), anims=anim_spec(words, s, client),
+            bubbles=bubble_list, anims=anims, voiceover=vo, clip_gain=s["clip_gain"] / 100 if vo else 1.0,
             moment_at=(s["moment_at"] if s["moment_at"] is not None else 3.0)
             if "Gintaro akimirka" in s["effects"] else None)
         prog(1.0)

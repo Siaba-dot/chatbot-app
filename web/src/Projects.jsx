@@ -52,7 +52,8 @@ export default function Projects({ user, onUserChange }) {
       <h2>Kurkime naują Reels ✨</h2>
       <div className="hint">Visi jūsų video išsaugomi čia – galite grįžti, pataisyti ir sukurti iš naujo.</div>
       {error && <div className="error">{error}</div>}
-      {user && user.plan === "admin" && <AdminKey onChange={onUserChange} />}
+      {user && user.plan === "admin" && <AdminKey kind="openai" onChange={onUserChange} />}
+      {user && user.plan === "admin" && <AdminKey kind="pexels" onChange={onUserChange} />}
       <div className="grid-projects">
         <div className="proj new" onClick={() => setNaming("")}>
           <div><span>＋</span>{busy ? "Kuriama…" : "Naujas Reels"}</div>
