@@ -77,10 +77,8 @@ button[data-testid="stBaseButton-primary"] {
 /* tekstas aukso mygtukuose – visada tamsus ir įskaitomas (ir neaktyviuose) */
 button[data-testid="stBaseButton-primary"] p, button[data-testid="stBaseButton-primary"] div,
 .stDownloadButton > button[kind="primary"] p { color: #061226 !important; font-weight: 700; }
-button[data-testid="stBaseButton-primary"]:disabled {
-  background: linear-gradient(100deg, #8C6A44, #C9AE84 45%, #B08A5A 70%, #8C6A44) !important;
-  opacity: .75; box-shadow: none; cursor: not-allowed; }
-button[data-testid="stBaseButton-primary"]:disabled p { color: #1B2436 !important; }
+button[data-testid="stBaseButton-primary"]:disabled {  /* tas pats auksas – keičiamas tik šriftas */
+  background: linear-gradient(100deg, #B85F12, #FFD58A 45%, #E39B2E 70%, #B85F12) !important; opacity: 1; }
 .stButton > button[kind="secondary"], .stDownloadButton > button[kind="secondary"],
 button[data-testid="stBaseButton-secondary"] {
   border-color: rgba(227,155,46,.45); background: rgba(14,34,66,.55); }
@@ -455,12 +453,12 @@ def autopilot_plan(client, words):
     ch = {"key_words": True, "punch": True, "bubbles": True, "look": "mixed", "an_stickers": True, "an_marks": True,
           "an_cards": True, "an_phone": True, "an_fx": True, "an_intro": True, "an_outro": True,
           "gfx_kinds": list(fxpack.KINDS),
-          "effects": sorted(set(ss.get(P + "effects", [])) | {"Švytėjimas", "Auksinės dulkės"})}
+          "effects": sorted(set(ss.get(P + "effects", [])) | {"Švytėjimas"})}
     if (ss.get(P + "link") or "").strip():
         ch["end_card"] = True
     if library and ss.get(P + "music_choice") in (None, "Be muzikos"):
         ch["music_choice"] = next(iter(library))
-    summary = ("parinktas patikrintas studijos derinys: mišrūs titrai, švytėjimas, auksinės dulkės, debesėliai, "
+    summary = ("parinktas patikrintas studijos derinys: mišrūs titrai, švytėjimas, debesėliai, "
                "svarbiausi žodžiai su priartėjimu.")
     if client is not None:
         try:
@@ -774,6 +772,8 @@ if pick and pick[2:] in video_editor.SUBTITLE_LOOKS:
 template = st.session_state[P + "template"]
 accent = st.session_state[P + "accent"]
 st.session_state.setdefault(P + "effects", [])
+# pašalinti efektai (pvz. „Auksinės dulkės“) nuimami iš ankstesnių nustatymų
+st.session_state[P + "effects"] = [e for e in st.session_state[P + "effects"] if e in reels_studio.EFFECTS]
 base = None
 if clips:
     c0 = clips[0]
