@@ -26,7 +26,7 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
       <div className="card section">
         <h3>🎙 AI įgarsinimas</h3>
         <p className="hint">Parašykite tekstą – natūralus AI balsas jį perskaitys, o titrai susidės patys. Galima kurti
-          video net nefilmuojant savęs (pvz. su Pexels kadrais).</p>
+          video net nefilmuojant savęs (pvz. su nemokamais video kadrais).</p>
         <p className="hint">{user.plan === "admin" ? "Įjunkite: „← Mano projektai“ → „🔑 OpenAI raktas“." : "Įgarsinimas – Premium plane."}</p>
       </div>
     );

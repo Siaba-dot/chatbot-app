@@ -53,6 +53,7 @@ export default function Projects({ user, onUserChange }) {
       <div className="hint">Visi jūsų video išsaugomi čia – galite grįžti, pataisyti ir sukurti iš naujo.</div>
       {error && <div className="error">{error}</div>}
       {user && user.plan === "admin" && <AdminKey kind="openai" onChange={onUserChange} />}
+      {user && user.plan === "admin" && <AdminKey kind="pixabay" onChange={onUserChange} />}
       {user && user.plan === "admin" && <AdminKey kind="pexels" onChange={onUserChange} />}
       <div className="grid-projects">
         <div className="proj new" onClick={() => setNaming("")}>

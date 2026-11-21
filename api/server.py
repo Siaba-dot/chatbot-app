@@ -96,7 +96,7 @@ def _user_info(username):
     left = None if minutes is None else max(0.0, minutes - accounts.used_minutes(username))
     return {"username": username, "name": cfg.get("name") or username, "plan": plan,
             "plan_title": accounts.PLANS[plan], "ai": plan in AI_PLANS and bool(clips_ui.configured_key()),
-            "pexels": bool(pexels_key()),
+            "pexels": bool(stock_provider()), "stock": STOCK.get(stock_provider() or "", ""),
             "minutes_left": left}
 
 
@@ -172,55 +172,150 @@ def openai_save(body: KeyBody, user=Depends(admin_user)):
     return openai_status(user)
 
 
-# ---------- 🎞 Pexels intarpai ----------
-def pexels_key():
-    if os.environ.get("PEXELS_API_KEY"):
-        return os.environ["PEXELS_API_KEY"].strip()
+# ---------- 🎞 Nemokami video intarpai: Pexels arba Pixabay ----------
+STOCK = {"pexels": "Pexels", "pixabay": "Pixabay"}
+
+
+def stock_key(provider):
+    env = {"pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY"}[provider]
+    if os.environ.get(env):
+        return os.environ[env].strip()
     try:
-        with open(os.path.join(DATA, "pexels_key"), encoding="utf-8") as f:
+        with open(os.path.join(DATA, provider + "_key"), encoding="utf-8") as f:
             return f.read().strip() or None
     except OSError:
         return None
 
 
-def _pexels(path, params=None, key=None):
-    import urllib.parse
+def pexels_key():  # suderinamumui
+    return stock_key("pexels")
+
+
+def stock_provider():
+    """Kuris šaltinis naudojamas: Pexels (jei yra raktas), kitaip Pixabay. None – nė vieno."""
+    return next((p for p in STOCK if stock_key(p)), None)
+
+
+def _http_json(url, headers=None, what="Šaltinis"):
     import urllib.request
-    key = key or pexels_key()
-    if not key:
-        raise HTTPException(400, "Pexels raktas neįrašytas (administratorius: „Mano projektai“ → Pexels raktas).")
-    url = "https://api.pexels.com" + path + ("?" + urllib.parse.urlencode(params) if params else "")
-    req = urllib.request.Request(url, headers={"Authorization": key, "User-Agent": "ReelsStudija/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "ReelsStudija/1.0", **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.loads(r.read().decode())
     except Exception as e:
         code = getattr(e, "code", None)
-        raise HTTPException(400 if code in (401, 403) else 502,
-                            "Pexels raktas neveikia" if code in (401, 403) else f"Pexels nepasiekiamas ({e})")
+        if code in (400, 401, 403):
+            raise HTTPException(400, f"{what} raktas neveikia – patikrinkite, ar nukopijavote visą.")
+        raise HTTPException(502, f"{what} nepasiekiamas ({e})")
+
+
+def _pexels(path, params=None, key=None):
+    import urllib.parse
+    key = key or stock_key("pexels")
+    if not key:
+        raise HTTPException(400, "Pexels raktas neįrašytas.")
+    return _http_json("https://api.pexels.com" + path + ("?" + urllib.parse.urlencode(params) if params else ""),
+                      {"Authorization": key}, "Pexels")
+
+
+def _pixabay(params, key=None):
+    import urllib.parse
+    key = key or stock_key("pixabay")
+    if not key:
+        raise HTTPException(400, "Pixabay raktas neįrašytas.")
+    return _http_json("https://pixabay.com/api/videos/?" + urllib.parse.urlencode({"key": key, **params}),
+                      what="Pixabay")
 
 
 def _orientation(fmt):
     return {"16:9": "landscape", "1:1": "square"}.get(fmt, "portrait")
 
 
-def _video_brief(v):
-    return {"id": v["id"], "image": v.get("image"), "duration": v.get("duration"), "width": v.get("width"),
-            "height": v.get("height"), "user": (v.get("user") or {}).get("name", ""), "url": v.get("url")}
+def _pexels_brief(v):
+    return {"provider": "pexels", "id": v["id"], "image": v.get("image"), "duration": v.get("duration"),
+            "width": v.get("width"), "height": v.get("height"), "user": (v.get("user") or {}).get("name", ""),
+            "url": v.get("url")}
 
 
-@app.get("/api/admin/pexels")
-def pexels_status(user=Depends(admin_user)):
-    k = pexels_key()
+def _pixabay_files(v):
+    return [dict(f, quality=q) for q, f in (v.get("videos") or {}).items() if f and f.get("url") and f.get("width")]
+
+
+def _pixabay_brief(v):
+    files = _pixabay_files(v)
+    big = max(files, key=lambda f: f["width"] * f["height"]) if files else {}
+    thumb = next((f.get("thumbnail") for q in ("medium", "small", "tiny", "large")
+                  for f in [(v.get("videos") or {}).get(q) or {}] if f.get("thumbnail")), None)
+    if not thumb and v.get("picture_id"):
+        thumb = f"https://i.vimeocdn.com/video/{v['picture_id']}_295x166.jpg"
+    return {"provider": "pixabay", "id": v["id"], "image": thumb, "duration": v.get("duration"),
+            "width": big.get("width"), "height": big.get("height"), "user": v.get("user", ""),
+            "url": v.get("pageURL")}
+
+
+def stock_search(q, fmt="9:16", page=1, per_page=18, provider=None):
+    provider = provider or stock_provider()
+    if not provider:
+        raise HTTPException(400, "Video intarpų raktas neįrašytas (administratorius: „Mano projektai“).")
+    if provider == "pexels":
+        j = _pexels("/videos/search", {"query": q[:80], "orientation": _orientation(fmt), "per_page": per_page,
+                                       "page": max(1, min(page, 20)), "size": "medium"})
+        vids = [_pexels_brief(v) for v in j.get("videos", [])]
+    else:  # Pixabay neturi orientacijos filtro – tinkamos formos video rodom pirmus
+        j = _pixabay({"q": q[:80], "per_page": max(3, min(per_page, 200)), "page": max(1, min(page, 20)),
+                      "safesearch": "true"})
+        vids = [_pixabay_brief(v) for v in j.get("hits", [])]
+        want = _orientation(fmt)
+        shape = lambda v: ("portrait" if (v["height"] or 0) > (v["width"] or 0) * 1.1 else  # noqa: E731
+                           "landscape" if (v["width"] or 0) > (v["height"] or 0) * 1.1 else "square")
+        vids.sort(key=lambda v: shape(v) != want)
+    return [v for v in vids if (v.get("duration") or 0) >= 2]
+
+
+def stock_download(user, pid, provider, vid, fmt):
+    """Parsisiunčia tinkamiausią failą (~1080p, ne didesnį nei reikia) į projektą. Grąžina (kelias, aprašas)."""
+    import urllib.request
+    target = 1920 if fmt in ("9:16", "16:9") else 1350
+    if provider == "pixabay":
+        hits = _pixabay({"id": int(vid)}).get("hits") or []
+        if not hits:
+            raise HTTPException(404, "Šio video nerasta")
+        v = hits[0]
+        files = [{"link": f["url"], "width": f["width"], "height": f["height"]} for f in _pixabay_files(v)]
+        brief = _pixabay_brief(v)
+    else:
+        v = _pexels(f"/videos/videos/{int(vid)}")
+        files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4" and f.get("link")
+                 and f.get("width") and f.get("height")]
+        brief = _pexels_brief(v)
+    if not files:
+        raise HTTPException(404, "Šio video failo nerasta")
+    files.sort(key=lambda f: (max(f["width"], f["height"]) > 2200, abs(max(f["width"], f["height"]) - target)))
+    d = os.path.join(_pdir(user, pid), "broll")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{provider[:2]}{int(vid)}.mp4")
+    if not os.path.exists(path):
+        req = urllib.request.Request(files[0]["link"], headers={"User-Agent": "ReelsStudija/1.0"})
+        tmp = path + ".part"
+        with urllib.request.urlopen(req, timeout=90) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f, 1 << 20)
+        os.replace(tmp, path)
+    return path, brief
+
+
+def _key_status(provider):
+    k = stock_key(provider)
     return {"set": bool(k), "tail": k[-4:] if k else ""}
 
 
-@app.post("/api/admin/pexels")
-def pexels_save(body: KeyBody, user=Depends(admin_user)):
-    key = body.key.strip()
-    if key:
-        _pexels("/videos/search", {"query": "nature", "per_page": 1}, key=key)
-    path = os.path.join(DATA, "pexels_key")
+def _key_save(provider, key):
+    key = key.strip()
+    if key:  # patikrinam prieš išsaugant
+        if provider == "pexels":
+            _pexels("/videos/search", {"query": "nature", "per_page": 1}, key=key)
+        else:
+            _pixabay({"q": "nature", "per_page": 3}, key=key)
+    path = os.path.join(DATA, provider + "_key")
     os.makedirs(DATA, exist_ok=True)
     if key:
         with open(path, "w", encoding="utf-8") as f:
@@ -228,41 +323,39 @@ def pexels_save(body: KeyBody, user=Depends(admin_user)):
         os.chmod(path, 0o600)
     elif os.path.exists(path):
         os.remove(path)
-    return pexels_status(user)
+    return _key_status(provider)
 
 
+@app.get("/api/admin/pexels")
+def pexels_status(user=Depends(admin_user)):
+    return _key_status("pexels")
+
+
+@app.post("/api/admin/pexels")
+def pexels_save(body: KeyBody, user=Depends(admin_user)):
+    return _key_save("pexels", body.key)
+
+
+@app.get("/api/admin/pixabay")
+def pixabay_status(user=Depends(admin_user)):
+    return _key_status("pixabay")
+
+
+@app.post("/api/admin/pixabay")
+def pixabay_save(body: KeyBody, user=Depends(admin_user)):
+    return _key_save("pixabay", body.key)
+
+
+@app.get("/api/stock/search")
 @app.get("/api/pexels/search")
-def pexels_search(q: str, fmt: str = "9:16", page: int = 1, user=Depends(current_user)):
-    j = _pexels("/videos/search", {"query": q[:80], "orientation": _orientation(fmt), "per_page": 18,
-                                   "page": max(1, min(page, 20)), "size": "medium"})
-    return {"videos": [_video_brief(v) for v in j.get("videos", []) if (v.get("duration") or 0) >= 2],
-            "has_pexels": True}
-
-
-def _download_pexels(user, pid, vid, fmt):
-    """Parsisiunčia tinkamiausią Pexels failą (~1080p, ne didesnį nei reikia). Grąžina (kelias, aprašas)."""
-    import urllib.request
-    v = _pexels(f"/videos/videos/{int(vid)}")
-    files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4" and f.get("link")
-             and f.get("width") and f.get("height")]
-    if not files:
-        raise HTTPException(404, "Šio video failo nerasta")
-    target = 1920 if fmt in ("9:16", "16:9") else 1350
-    files.sort(key=lambda f: (max(f["width"], f["height"]) > 2200, abs(max(f["width"], f["height"]) - target)))
-    d = os.path.join(_pdir(user, pid), "broll")
-    os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, f"px{int(vid)}.mp4")
-    if not os.path.exists(path):
-        req = urllib.request.Request(files[0]["link"], headers={"User-Agent": "ReelsStudija/1.0"})
-        tmp = path + ".part"
-        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
-            shutil.copyfileobj(r, f, 1 << 20)
-        os.replace(tmp, path)
-    return path, _video_brief(v)
+def stock_search_api(q: str, fmt: str = "9:16", page: int = 1, user=Depends(current_user)):
+    p = stock_provider()
+    return {"videos": stock_search(q, fmt, page), "provider": p, "provider_name": STOCK.get(p, "")}
 
 
 class BrollBody(BaseModel):
-    pexels_id: int
+    pexels_id: int                  # video id šaltinyje
+    provider: str | None = None     # pexels | pixabay (None – kuris įjungtas)
     t: float = 0.0
     d: float = 2.5
     query: str = ""
@@ -272,22 +365,26 @@ class BrollBody(BaseModel):
 @app.post("/api/projects/{pid}/broll")
 def add_broll(pid: str, body: BrollBody, user=Depends(current_user)):
     proj = _load(user, pid)
-    path, brief = _download_pexels(user, pid, body.pexels_id, proj["settings"]["format"])
+    provider = body.provider if body.provider in STOCK else stock_provider()
+    if not provider:
+        raise HTTPException(400, "Video intarpų raktas neįrašytas.")
+    path, brief = stock_download(user, pid, provider, body.pexels_id, proj["settings"]["format"])
     proj = _load(user, pid)
-    if body.as_clip:  # kaip įprastas įrašas (pvz. video be filmavimo: Pexels kadrai + AI įgarsinimas)
-        clip_path = os.path.join(_pdir(user, pid), "clips", f"px{body.pexels_id}_{uuid.uuid4().hex[:4]}.mp4")
+    name = STOCK[provider]
+    if body.as_clip:  # kaip įprastas įrašas (pvz. video be filmavimo: kadrai + AI įgarsinimas)
+        clip_path = os.path.join(_pdir(user, pid), "clips", f"{provider[:2]}{body.pexels_id}_{uuid.uuid4().hex[:4]}.mp4")
         os.makedirs(os.path.dirname(clip_path), exist_ok=True)
         shutil.copy(path, clip_path)
-        clip = engine.add_clip(clip_path, f"Pexels · {brief['user'] or body.pexels_id}")
+        clip = engine.add_clip(clip_path, f"{name} · {brief['user'] or body.pexels_id}")
         clip["id"] = uuid.uuid4().hex[:10]
         clip["audio"] = "none" if clip["audio"] != "speech" else clip["audio"]
         proj["clips"].append(clip)
         proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     else:
         proj.setdefault("broll", []).append({
-            "id": uuid.uuid4().hex[:8], "pexels_id": body.pexels_id, "t": round(max(0.0, body.t), 2),
-            "d": round(max(1.0, min(6.0, body.d)), 2), "query": body.query[:60], "image": brief["image"],
-            "user": brief["user"], "url": brief["url"], "path": path})
+            "id": uuid.uuid4().hex[:8], "provider": provider, "pexels_id": body.pexels_id,
+            "t": round(max(0.0, body.t), 2), "d": round(max(1.0, min(6.0, body.d)), 2), "query": body.query[:60],
+            "image": brief["image"], "user": brief["user"], "url": brief["url"], "path": path})
         proj["broll"].sort(key=lambda b: b["t"])
     _save(user, proj)
     return _public(proj)
@@ -322,22 +419,25 @@ def delete_broll(pid: str, bid: str, user=Depends(current_user)):
 
 @app.post("/api/projects/{pid}/broll/auto")
 def auto_broll(pid: str, user=Depends(current_user)):
-    """AI pagal tai, ką sakote, parenka 3–4 momentus ir Pexels kadrus jiems."""
+    """AI pagal tai, ką sakote, parenka 3–4 momentus ir nemokamus video kadrus jiems."""
     proj = _load(user, pid)
     client = openai_client(user)
     if client is None:
         raise HTTPException(400, "Automatiniams intarpams reikia AI (Premium). Galite ieškoti ir įterpti ranka.")
     if not proj.get("words"):
         raise HTTPException(400, "Pirmiausia paruoškite titrus (💬 Titrai → Paruošti titrus).")
+    provider = stock_provider()
+    if not provider:
+        raise HTTPException(400, "Video intarpų raktas neįrašytas.")
     lines = " ".join(f"[{a:.1f}] {video_editor.plain(w)}" for w, a, _ in proj["words"][:300])
     end = proj["words"][-1][2]
     j = reels_studio._ai_json(client, (
         "You pick B-roll cutaways for a short talking video. From the timed transcript choose 3-4 moments (not in the "
         "first 2.5 s, at least 4 s apart) where a stock video would illustrate what is said. For each give an "
-        "English Pexels search query of 2-4 concrete, visual words (e.g. 'winter car tires', 'coffee pouring'), "
+        "English stock-video search query of 1-3 concrete, visual words (e.g. 'winter tires', 'coffee'), "
         "duration 2-3.5 s. Reply only JSON: {\"broll\": [{\"time\": 0, \"duration\": 2.5, \"query\": \"...\"}]}"),
         {"transcript": lines})
-    used = {b["pexels_id"] for b in proj.get("broll", [])}
+    used = {(b.get("provider", "pexels"), b["pexels_id"]) for b in proj.get("broll", [])}
     added = 0
     for it in (j.get("broll") or [])[:4]:
         try:
@@ -346,13 +446,13 @@ def auto_broll(pid: str, user=Depends(current_user)):
             continue
         if not (1.5 <= t <= end - 1.0):
             continue
-        res = _pexels("/videos/search", {"query": q, "orientation": _orientation(proj["settings"]["format"]),
-                                         "per_page": 6, "size": "medium"})
-        cand = [v for v in res.get("videos", []) if v["id"] not in used and (v.get("duration") or 0) >= 3]
+        res = stock_search(q, proj["settings"]["format"], 1, 8, provider)
+        cand = [v for v in res if (provider, v["id"]) not in used and (v.get("duration") or 0) >= 3]
         if not cand:
             continue
-        used.add(cand[0]["id"])
-        add_broll(pid, BrollBody(pexels_id=cand[0]["id"], t=t, d=min(dur, end - t), query=q), user)
+        used.add((provider, cand[0]["id"]))
+        add_broll(pid, BrollBody(pexels_id=cand[0]["id"], provider=provider, t=t, d=min(dur, end - t), query=q),
+                  user)
         added += 1
     proj = _load(user, pid)
     if not added:
