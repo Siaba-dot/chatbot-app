@@ -3,5 +3,10 @@
 	request_body {
 		max_size 450MB
 	}
-	reverse_proxy studija:8501
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy studija:8501
+	}
 }
