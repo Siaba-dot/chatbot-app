@@ -52,31 +52,10 @@ export default function Recorder({ projectId, format = "9:16", onClose, onRecord
   useEffect(() => () => { stopAll(); }, []);  // uždarius – kamera išjungiama
   useEffect(() => save("script_" + projectId, script), [script, projectId]);
 
-  // Kamera dažnai duoda gulsčią vaizdą (kompiuteryje – visada). Tada įrašui iškerpam vidurį pagal formatą
-  // (pvz. 9:16), kad failas būtų statmenas – kaip matote peržiūroje.
+  // Įrašoma tiesiai iš kameros (patikimiausia – ir iPhone). Stačią kadrą pagal formatą iškerpa serveris –
+  // tiksliai tą vidurį, kurį matote filmavimo lange.
   function recordStream() {
-    const s = stream.current;
-    const set = s.getVideoTracks()[0] ? s.getVideoTracks()[0].getSettings() : {};
-    const v = video.current;
-    const sw = (v && v.videoWidth) || set.width, sh = (v && v.videoHeight) || set.height;
-    if (!sw || !sh || Math.abs(sw / sh - ratio) / ratio < 0.06) return s;  // jau tinkamos formos
-    let cw, ch;
-    if (sw / sh > ratio) { ch = sh; cw = Math.round(sh * ratio / 2) * 2; } else { cw = sw; ch = Math.round(sw / ratio / 2) * 2; }
-    const canvas = document.createElement("canvas");
-    canvas.width = cw; canvas.height = ch;
-    const ctx = canvas.getContext("2d");
-    const sx = (sw - cw) / 2, sy = (sh - ch) / 2;
-    const state = { on: true };
-    const draw = () => {
-      if (!state.on) return;
-      ctx.drawImage(v, sx, sy, cw, ch, 0, 0, cw, ch);
-      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(draw); else setTimeout(draw, 33);
-    };
-    draw();
-    const out = canvas.captureStream(30);
-    s.getAudioTracks().forEach(t => out.addTrack(t));
-    crop.current = { state, out };
-    return out;
+    return stream.current;
   }
   function stopCrop() {
     if (crop.current) { crop.current.state.on = false; crop.current.out.getVideoTracks().forEach(t => t.stop()); crop.current = null; }
