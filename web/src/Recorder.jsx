@@ -17,7 +17,10 @@ function pickMime() {
   return types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
 }
 
-export default function Recorder({ projectId, onClose, onRecorded }) {
+const RATIOS = { "9:16": 9 / 16, "16:9": 16 / 9, "1:1": 1, "4:5": 4 / 5 };
+
+export default function Recorder({ projectId, format = "9:16", onClose, onRecorded }) {
+  const ratio = RATIOS[format] || 9 / 16;   // plotis / aukštis – kaip bus filmuojama
   const [stage, setStage] = useState("setup");       // setup | live | rec | review
   const [script, setScript] = useState(() => load("script_" + projectId, ""));
   const [facing, setFacing] = useState("user");
@@ -42,13 +45,45 @@ export default function Recorder({ projectId, onClose, onRecorded }) {
   const off = useRef(0);
   const run = useRef(false);
   const timer = useRef(null);
+  const crop = useRef(null);  // drobė, kuri iškerpa stačią kadrą iš gulsčios kameros
   const st = useRef({ rate, paused });
   st.current = { rate, paused };
 
   useEffect(() => () => { stopAll(); }, []);  // uždarius – kamera išjungiama
   useEffect(() => save("script_" + projectId, script), [script, projectId]);
 
+  // Kamera dažnai duoda gulsčią vaizdą (kompiuteryje – visada). Tada įrašui iškerpam vidurį pagal formatą
+  // (pvz. 9:16), kad failas būtų statmenas – kaip matote peržiūroje.
+  function recordStream() {
+    const s = stream.current;
+    const set = s.getVideoTracks()[0] ? s.getVideoTracks()[0].getSettings() : {};
+    const v = video.current;
+    const sw = (v && v.videoWidth) || set.width, sh = (v && v.videoHeight) || set.height;
+    if (!sw || !sh || Math.abs(sw / sh - ratio) / ratio < 0.06) return s;  // jau tinkamos formos
+    let cw, ch;
+    if (sw / sh > ratio) { ch = sh; cw = Math.round(sh * ratio / 2) * 2; } else { cw = sw; ch = Math.round(sw / ratio / 2) * 2; }
+    const canvas = document.createElement("canvas");
+    canvas.width = cw; canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    const sx = (sw - cw) / 2, sy = (sh - ch) / 2;
+    const state = { on: true };
+    const draw = () => {
+      if (!state.on) return;
+      ctx.drawImage(v, sx, sy, cw, ch, 0, 0, cw, ch);
+      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(draw); else setTimeout(draw, 33);
+    };
+    draw();
+    const out = canvas.captureStream(30);
+    s.getAudioTracks().forEach(t => out.addTrack(t));
+    crop.current = { state, out };
+    return out;
+  }
+  function stopCrop() {
+    if (crop.current) { crop.current.state.on = false; crop.current.out.getVideoTracks().forEach(t => t.stop()); crop.current = null; }
+  }
+
   function stopAll() {
+    stopCrop();
     run.current = false;
     clearInterval(timer.current);
     if (recorder.current && recorder.current.state !== "inactive") {
@@ -91,7 +126,9 @@ export default function Recorder({ projectId, onClose, onRecorded }) {
     setMsg("Laukiu leidimo naudoti kamerą ir mikrofoną…");
     try {
       stream.current = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: face, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: ratio < 1
+          ? { facingMode: face, width: { ideal: 1080 }, height: { ideal: 1920 }, aspectRatio: { ideal: ratio } }
+          : { facingMode: face, width: { ideal: 1280 }, height: { ideal: ratio === 1 ? 1280 : 720 }, aspectRatio: { ideal: ratio } },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (e) {
@@ -152,7 +189,7 @@ export default function Recorder({ projectId, onClose, onRecorded }) {
     chunks.current = [];
     const mime = pickMime();
     try {
-      recorder.current = new MediaRecorder(stream.current, { videoBitsPerSecond: 2500000, ...(mime ? { mimeType: mime } : {}) });
+      recorder.current = new MediaRecorder(recordStream(), { videoBitsPerSecond: 2500000, ...(mime ? { mimeType: mime } : {}) });
     } catch (e) {
       setErr("Nepavyko pradėti filmuoti: " + e.message);
       return;
@@ -178,6 +215,7 @@ export default function Recorder({ projectId, onClose, onRecorded }) {
   }
   function finishRec() {
     clearInterval(timer.current);
+    stopCrop();
     run.current = false;
     const type = (recorder.current && recorder.current.mimeType) || (chunks.current[0] && chunks.current[0].type) || "video/webm";
     blob.current = new Blob(chunks.current, { type });
@@ -232,7 +270,7 @@ export default function Recorder({ projectId, onClose, onRecorded }) {
         )}
 
         {stage !== "setup" && (
-          <div className="rec-stage">
+          <div className="rec-stage" style={{ aspectRatio: String(ratio), maxWidth: ratio < 1 ? `calc(62vh * ${ratio})` : undefined, margin: "0 auto" }}>
             {stage === "review"
               ? <video className="rec-video" src={blobUrl} controls playsInline autoPlay />
               : <video ref={video} className={"rec-video" + (facing === "user" ? " mirror" : "")} muted playsInline autoPlay />}
