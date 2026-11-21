@@ -8,7 +8,7 @@ function fmt(t) {
 }
 
 const MODES = [["card", "🪟 Kortelė"], ["split", "◧ Pusė ekrano"], ["full", "⬛ Visas kadras"]];
-const MODE_HELP = { card: "Mažas kadras kampe – jūs matotės visą laiką.", split: "Intarpas viršuje, jūs – apačioje.",
+const MODE_HELP = { card: "Mažas kadras kampe – jūs matotės visą laiką; studija pati randa kampą, kur nėra jūsų veido.", split: "Intarpas viršuje, jūs – apačioje.",
                     full: "Intarpas uždengia visą kadrą (balsas ir titrai lieka)." };
 
 function ModeChips({ value, onChange }) {
@@ -124,6 +124,14 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
                   <b>{fmt(b.t)} · {b.query || "intarpas"}</b>
                   <span>„{lineAt(b.t).slice(0, 60)}“</span>
                   <div style={{ marginTop: 4 }}><ModeChips value={b.mode || "full"} onChange={m => edit(b, { mode: m })} /></div>
+                  {(b.mode || "full") === "card" && (
+                    <div className="chips" style={{ marginBottom: 0, marginTop: 4 }}>
+                      {[["auto", "✨ Kur nėra veido"], ["tl", "↖ Kairėje"], ["tr", "↗ Dešinėje"]].map(([k, l]) => (
+                        <button key={k} type="button" className={"chip" + ((b.pos || "auto") === k ? " on" : "")}
+                                style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => edit(b, { pos: k })}>{l}</button>
+                      ))}
+                    </div>
+                  )}
                   <div className="row" style={{ gap: 6, marginTop: 4 }}>
                     <span className="hint">Trukmė</span>
                     {[2, 2.5, 3, 4].map(d => (

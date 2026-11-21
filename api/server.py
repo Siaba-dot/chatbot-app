@@ -361,6 +361,7 @@ class BrollBody(BaseModel):
     query: str = ""
     as_clip: bool = False
     mode: str = "card"              # card | split | full
+    pos: str = "auto"               # kortelės vieta: auto (be veido) | tl | tr
 
 
 @app.post("/api/projects/{pid}/broll")
@@ -386,6 +387,7 @@ def add_broll(pid: str, body: BrollBody, user=Depends(current_user)):
             "id": uuid.uuid4().hex[:8], "provider": provider, "pexels_id": body.pexels_id,
             "t": round(max(0.0, body.t), 2), "d": round(max(1.0, min(6.0, body.d)), 2), "query": body.query[:60],
             "mode": body.mode if body.mode in engine.BROLL_MODES else "card",
+            "pos": body.pos if body.pos in ("auto", "tl", "tr") else "auto",
             "image": brief["image"], "user": brief["user"], "url": brief["url"], "path": path})
         proj["broll"].sort(key=lambda b: b["t"])
     _save(user, proj)
@@ -396,6 +398,7 @@ class BrollEdit(BaseModel):
     t: float | None = None
     d: float | None = None
     mode: str | None = None
+    pos: str | None = None
 
 
 @app.put("/api/projects/{pid}/broll/{bid}")
@@ -409,6 +412,8 @@ def edit_broll(pid: str, bid: str, body: BrollEdit, user=Depends(current_user)):
                 b["d"] = round(max(1.0, min(6.0, body.d)), 2)
             if body.mode in engine.BROLL_MODES:
                 b["mode"] = body.mode
+            if body.pos in ("auto", "tl", "tr"):
+                b["pos"] = body.pos
     proj["broll"].sort(key=lambda b: b["t"])
     _save(user, proj)
     return _public(proj)
@@ -751,7 +756,8 @@ def _run_job(jid, user, pid, kind, quick, words):
         name = "preview.mp4" if quick else "reels.mp4"
         out = os.path.join(d, name)
         logo = os.path.join(DATA, "brand", re.sub(r"[^\w.@-]", "_", user["username"]) + "_logo.png")
-        broll = [{"path": b["path"], "t": b["t"], "d": b["d"], "mode": b.get("mode", "full")} for b in proj.get("broll", [])
+        broll = [{"path": b["path"], "t": b["t"], "d": b["d"], "mode": b.get("mode", "full"),
+                  "pos": b.get("pos", "auto")} for b in proj.get("broll", [])
                  if os.path.exists(b.get("path", ""))]
         if broll:
             say("Dedu intarpus…")
