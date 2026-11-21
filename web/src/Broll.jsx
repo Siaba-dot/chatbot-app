@@ -7,7 +7,24 @@ function fmt(t) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+const MODES = [["card", "🪟 Kortelė"], ["split", "◧ Pusė ekrano"], ["full", "⬛ Visas kadras"]];
+const MODE_HELP = { card: "Mažas kadras kampe – jūs matotės visą laiką.", split: "Intarpas viršuje, jūs – apačioje.",
+                    full: "Intarpas uždengia visą kadrą (balsas ir titrai lieka)." };
+
+function ModeChips({ value, onChange }) {
+  return (
+    <div className="chips" style={{ marginBottom: 0 }}>
+      {MODES.map(([k, l]) => (
+        <button key={k} type="button" className={"chip" + (value === k ? " on" : "")} style={{ padding: "3px 9px", fontSize: 12 }}
+                onClick={() => onChange(k)}>{l}</button>
+      ))}
+    </div>
+  );
+}
+
 export default function Broll({ id, proj, setProj, s, user, setToast, setError }) {
+  const [mode, setMode] = useState(() => { try { return localStorage.getItem("brollMode") || "card"; } catch { return "card"; } });
+  const chooseMode = m => { setMode(m); try { localStorage.setItem("brollMode", m); } catch { /* */ } };
   const [q, setQ] = useState("");
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState("");
@@ -46,7 +63,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
       const t = line ? line[0] : 0;
       const d = line ? Math.min(3.5, Math.max(2, line[1] - line[0])) : 2.5;
       const p = await api(`/projects/${id}/broll`, { method: "POST",
-        body: { pexels_id: pick.id, provider: pick.provider, t, d, query: q, as_clip: asClip } });
+        body: { pexels_id: pick.id, provider: pick.provider, t, d, query: q, as_clip: asClip, mode } });
       setProj(p);
       setToast(asClip ? "Pridėta kaip įrašas 🎬" : "Intarpas įterptas 🎞");
       setPick(null);
@@ -57,7 +74,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
   async function auto() {
     setBusy("auto");
     try {
-      const p = await api(`/projects/${id}/broll/auto`, { method: "POST" });
+      const p = await api(`/projects/${id}/broll/auto?mode=${mode}`, { method: "POST" });
       setProj(p);
       setToast("AI parinko intarpus ✨");
     } catch (e) { setError(e.message); }
@@ -89,6 +106,11 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
             {busy === "auto" ? "Ieškoma…" : "✨ Parinkti"}</button>
         </div>
         {!proj.prepared && <div className="hint" style={{ marginTop: 6 }}>💬 Titrai → „Paruošti titrus“ – tada AI žinos, ką sakote.</div>}
+        <div style={{ marginTop: 12 }}>
+          <div className="hint" style={{ marginBottom: 6 }}>Kaip rodyti naujus intarpus:</div>
+          <ModeChips value={mode} onChange={chooseMode} />
+          <div className="hint" style={{ marginTop: 4 }}>{MODE_HELP[mode]}</div>
+        </div>
       </div>
 
       {(proj.broll || []).length > 0 && (
@@ -101,6 +123,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
                 <div className="info">
                   <b>{fmt(b.t)} · {b.query || "intarpas"}</b>
                   <span>„{lineAt(b.t).slice(0, 60)}“</span>
+                  <div style={{ marginTop: 4 }}><ModeChips value={b.mode || "full"} onChange={m => edit(b, { mode: m })} /></div>
                   <div className="row" style={{ gap: 6, marginTop: 4 }}>
                     <span className="hint">Trukmė</span>
                     {[2, 2.5, 3, 4].map(d => (
@@ -115,7 +138,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
               </div>
             ))}
           </div>
-          <div className="hint">Intarpo metu matosi kadras, o jūsų balsas ir titrai lieka. Pakeitimai matysis sukūrus peržiūrą.</div>
+          <div className="hint">Jūsų balsas ir titrai lieka. Pakeitimai matysis sukūrus peržiūrą.</div>
         </div>
       )}
 
@@ -160,6 +183,11 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
                 </select>
               </div>
             ) : <p className="hint">Paruošus titrus, galėsite pasirinkti sakinį. Dabar intarpas bus pradžioje.</p>}
+            <div className="field">
+              <label>Kaip rodyti</label>
+              <ModeChips value={mode} onChange={chooseMode} />
+              <div className="hint">{MODE_HELP[mode]}</div>
+            </div>
             <div className="row">
               <button className="btn gold" onClick={() => add(false)} disabled={!!busy}>{busy === "add" ? "Atsisiunčiama…" : "🎞 Įterpti kaip intarpą"}</button>
               <button className="btn" onClick={() => add(true)} disabled={!!busy}>🎬 Pridėti kaip įrašą</button>

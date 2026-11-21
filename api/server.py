@@ -360,6 +360,7 @@ class BrollBody(BaseModel):
     d: float = 2.5
     query: str = ""
     as_clip: bool = False
+    mode: str = "card"              # card | split | full
 
 
 @app.post("/api/projects/{pid}/broll")
@@ -384,6 +385,7 @@ def add_broll(pid: str, body: BrollBody, user=Depends(current_user)):
         proj.setdefault("broll", []).append({
             "id": uuid.uuid4().hex[:8], "provider": provider, "pexels_id": body.pexels_id,
             "t": round(max(0.0, body.t), 2), "d": round(max(1.0, min(6.0, body.d)), 2), "query": body.query[:60],
+            "mode": body.mode if body.mode in engine.BROLL_MODES else "card",
             "image": brief["image"], "user": brief["user"], "url": brief["url"], "path": path})
         proj["broll"].sort(key=lambda b: b["t"])
     _save(user, proj)
@@ -393,6 +395,7 @@ def add_broll(pid: str, body: BrollBody, user=Depends(current_user)):
 class BrollEdit(BaseModel):
     t: float | None = None
     d: float | None = None
+    mode: str | None = None
 
 
 @app.put("/api/projects/{pid}/broll/{bid}")
@@ -404,6 +407,8 @@ def edit_broll(pid: str, bid: str, body: BrollEdit, user=Depends(current_user)):
                 b["t"] = round(max(0.0, body.t), 2)
             if body.d is not None:
                 b["d"] = round(max(1.0, min(6.0, body.d)), 2)
+            if body.mode in engine.BROLL_MODES:
+                b["mode"] = body.mode
     proj["broll"].sort(key=lambda b: b["t"])
     _save(user, proj)
     return _public(proj)
@@ -418,7 +423,7 @@ def delete_broll(pid: str, bid: str, user=Depends(current_user)):
 
 
 @app.post("/api/projects/{pid}/broll/auto")
-def auto_broll(pid: str, user=Depends(current_user)):
+def auto_broll(pid: str, mode: str = "card", user=Depends(current_user)):
     """AI pagal tai, ką sakote, parenka 3–4 momentus ir nemokamus video kadrus jiems."""
     proj = _load(user, pid)
     client = openai_client(user)
@@ -451,8 +456,8 @@ def auto_broll(pid: str, user=Depends(current_user)):
         if not cand:
             continue
         used.add((provider, cand[0]["id"]))
-        add_broll(pid, BrollBody(pexels_id=cand[0]["id"], provider=provider, t=t, d=min(dur, end - t), query=q),
-                  user)
+        add_broll(pid, BrollBody(pexels_id=cand[0]["id"], provider=provider, t=t, d=min(dur, end - t), query=q,
+                                 mode=mode if mode in engine.BROLL_MODES else "card"), user)
         added += 1
     proj = _load(user, pid)
     if not added:
@@ -746,7 +751,7 @@ def _run_job(jid, user, pid, kind, quick, words):
         name = "preview.mp4" if quick else "reels.mp4"
         out = os.path.join(d, name)
         logo = os.path.join(DATA, "brand", re.sub(r"[^\w.@-]", "_", user["username"]) + "_logo.png")
-        broll = [{"path": b["path"], "t": b["t"], "d": b["d"]} for b in proj.get("broll", [])
+        broll = [{"path": b["path"], "t": b["t"], "d": b["d"], "mode": b.get("mode", "full")} for b in proj.get("broll", [])
                  if os.path.exists(b.get("path", ""))]
         if broll:
             say("Dedu intarpus…")
