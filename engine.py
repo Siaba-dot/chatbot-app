@@ -133,24 +133,30 @@ def _ffmpeg(args):
                           capture_output=True, text=True)
 
 
-def _video_frames(path, limit=5):
-    """Kiek pirmųjų vaizdo kadrų pavyksta perskaityti (0 – vaizdo nėra arba jis tuščias)."""
-    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#" + str(limit),
-                        "-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", path],
+def _video_frames(path, limit=3):
+    """Kiek pirmųjų vaizdo kadrų pavyksta IŠKODUOTI (0 – vaizdo nėra arba jo neperskaitom). Tikrinama dekoduojant,
+    nes naršyklių (ypač iPhone) įrašų antraštėse kadrų skaičiaus dažnai nėra."""
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", "0:v:0", "-frames:v", str(limit),
+                        "-vf", "scale=16:16,format=gray", "-f", "rawvideo", "-"], capture_output=True)
+    return len(r.stdout) // 256
+
+
+def _streams_info(path):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,"
+                        "r_frame_rate,nb_frames:format=format_name,duration", "-of", "compact", path],
                        capture_output=True, text=True)
-    try:
-        return int((r.stdout.strip().split("\n") or ["0"])[0] or 0)
-    except ValueError:
-        return 0
+    return (r.stdout + r.stderr).strip()[:600]
 
 
 def add_clip(path, name=None, recorded=False):
     """Patikrina įkeltą / nufilmuotą failą. Grąžina klipo žodyną (kaip studijoje) arba kelia ValueError."""
-    if recorded:  # naršyklės įrašuose dažnai trūksta trukmės – perpakuojam
+    original = path
+    if recorded:  # naršyklės įrašuose dažnai trūksta trukmės – perpakuojam (jei vaizdas po to lieka)
         mkv = path + ".mkv"
-        if _ffmpeg(["-i", path, "-c", "copy", mkv]).returncode == 0:
-            os.unlink(path)
+        if _ffmpeg(["-i", path, "-c", "copy", mkv]).returncode == 0 and _video_frames(mkv) > 0:
             path = mkv
+        elif os.path.exists(mkv):
+            os.unlink(mkv)
     try:
         info = video_editor.probe(path)
         if not info.get("duration"):
@@ -165,13 +171,37 @@ def add_clip(path, name=None, recorded=False):
             raise ValueError("Įrašo nepavyko perskaityti: " + (r.stderr[-200:] or "nežinoma klaida"))
         os.unlink(path)
         path = fixed
-        info = video_editor.probe(path)
+        try:
+            info = video_editor.probe(path)
+        except Exception:
+            import sys
+            print("Įrašas be vaizdo:", _streams_info(path), file=sys.stderr)
+            os.unlink(path)
+            raise ValueError("Įraše nėra vaizdo (juodas ekranas). Patikrinkite, ar naršyklei leista naudoti kamerą, "
+                             "ir nufilmuokite dar kartą.")
     image = video_editor.is_image(path)
     duration = info["duration"]
+    if not image and _video_frames(path) == 0 and recorded and os.path.exists(original):
+        # perkoduojam iš originalo – kai kurie telefonai įrašo neįprastos struktūros failus
+        fixed = original + ".fixed.mp4"
+        _ffmpeg(["-fflags", "+genpts", "-i", original, "-map", "0:v:0?", "-map", "0:a:0?", "-vf", "format=yuv420p",
+                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k", fixed])
+        if os.path.exists(fixed) and _video_frames(fixed) > 0:
+            if path != original and os.path.exists(path):
+                os.unlink(path)
+            path = fixed
+            info = video_editor.probe(path)
+            duration = info["duration"]
     if not image and _video_frames(path) == 0:
-        os.unlink(path)
+        import sys
+        print("Įrašas be vaizdo:", _streams_info(original if os.path.exists(original) else path), file=sys.stderr)
+        for f in {path, original}:
+            if os.path.exists(f):
+                os.unlink(f)
         raise ValueError("Įraše nėra vaizdo (juodas ekranas). Patikrinkite, ar naršyklei leista naudoti kamerą, "
                          "ir nufilmuokite dar kartą.")
+    if path != original and os.path.exists(original):
+        os.unlink(original)
     if not image and max(info["width"], info["height"]) > 1920:  # 4K → 1080p darbinė kopija
         small = path + ".1080.mp4"
         scale = "scale=-2:1920" if info["height"] >= info["width"] else "scale=1920:-2"
