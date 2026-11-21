@@ -451,7 +451,9 @@ def ai_plan(client, words, allowed, ai_json, busy=(), limit=4):
               + json.dumps(kinds, ensure_ascii=False) + ". For chat: title = the question, text = short answer; "
               "review: text = short client quote, title = client first name; chart: value like \"+50%\" or \"×3\", "
               "title = short label; notif: title = short notification title, text = body; counter: value = the "
-              "number (+ unit), title = what is counted; others need no text. Texts in the transcript language "
+              "number (+ unit), title = what is counted; others need no text. Use chart/counter ONLY for numbers the "
+              "speaker really says, review ONLY for a real client opinion, chat ONLY for a real question, notif ONLY "
+              "for orders/messages/sign-ups – never invent; if nothing fits, return fewer effects. Texts in the transcript language "
               "with correct diacritics, short. Reply only with JSON: {\"effects\": [{\"time\": 0, \"kind\": \"\", "
               "\"title\": \"\", \"text\": \"\", \"value\": \"\"}]}")
     j = ai_json(client, system, {"transcript": lines, "avoid_times": list(busy)})

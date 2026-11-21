@@ -133,14 +133,29 @@ def _stickers(lines, t, kind, W, H, acc, rnd):
 
 
 # ---------- ranka piešti žymėjimai („nusipiešia“ iš kairės į dešinę) ----------
-def _marks(lines, t, kind, W, H, acc, subs_y, rnd):
+def _word_label(lines, t, dur, word, cx, cy, fs, rot=0):
+    """Pasakytas svarbus žodis – didelis, baltas, su šešėliu (kad žymėjimas rodytų į tai, apie ką kalbama)."""
+    _ev(lines, 8, t, t + dur, f"\\an5\\pos({_f(cx)},{_f(cy)})\\fn{FONT_NAME}\\fs{fs}\\frz{rot}\\1c&H00FFFFFF&"
+        f"\\bord{max(3, fs // 14)}\\3c&H00101010&\\shad3\\4c&H80000000&\\fscx60\\fscy60"
+        f"\\t(0,220,\\fscx110\\fscy110)\\t(220,360,\\fscx100\\fscy100)\\fad(0,300)", _ass_escape(word))
+
+
+def _marks(lines, t, kind, W, H, acc, subs_y, rnd, word=""):
     ref = min(W, H * 0.75)
     th = max(4, round(ref * 0.012))
     dur = 1.8
-    if kind == "circle":
-        cx, cy = W * 0.5, H * 0.42
-        rx, ry = W * 0.34, H * 0.17
-        shape = _ellipse(cx, cy, rx, ry) + " " + _ellipse(cx + rx * 0.04, cy - ry * 0.05, rx * 1.02, ry * 0.97)
+    word = (word or "").strip().upper()[:18]
+    if kind in ("circle", "arrow") and not word:  # be žodžio nebėra ką žymėti – pabraukiam titrus
+        kind = "underline"
+    if kind == "circle":  # ranka apvestas svarbus žodis viršutinėje kadro dalyje
+        fs = round(ref * 0.085)
+        tw = video_editor.text_width(FONT_NAME, fs, word)
+        fs = round(fs * min(1.0, W * 0.7 / max(1, tw)))
+        tw = video_editor.text_width(FONT_NAME, fs, word)
+        cx, cy = W * 0.5, H * 0.2
+        rx, ry = tw / 2 + fs * 0.75, fs * 1.05
+        _word_label(lines, t, dur, word, cx, cy, fs, rot=rnd.choice((-3, -2, 2, 3)))
+        shape = _ellipse(cx, cy, rx, ry) + " " + _ellipse(cx + rx * 0.03, cy - ry * 0.07, rx * 1.03, ry * 0.95)
         x0, x1 = cx - rx * 1.1, cx + rx * 1.1
     elif kind == "underline":
         y = H * min(0.93, subs_y + 0.055)
@@ -153,10 +168,17 @@ def _marks(lines, t, kind, W, H, acc, subs_y, rnd):
         _ev(lines, 7, t, t + dur, f"\\an7\\pos(0,0)\\1c{acc}\\bord1\\3c&H00101010&\\shad0"
             f"\\clip({_f(x0)},0,{_f(x0)},{H})\\t(0,350,\\clip({_f(x0)},0,{_f(x1 + 5)},{H}))\\fad(0,300)\\p1", shape)
         return
-    else:  # rodyklė iš šono į centrą
+    else:  # rodyklė iš šono į svarbų žodį
         left = rnd.random() < 0.5
-        sx, sy = (W * 0.08, H * 0.24) if left else (W * 0.92, H * 0.24)
-        ex, ey = W * 0.5 + (-1 if left else 1) * W * 0.12, H * 0.38
+        fs = round(ref * 0.075)
+        tw = video_editor.text_width(FONT_NAME, fs, word)
+        fs = round(fs * min(1.0, W * 0.55 / max(1, tw)))
+        tw = video_editor.text_width(FONT_NAME, fs, word)
+        lx, ly = (W * 0.62 if left else W * 0.38), H * 0.3
+        lx = min(max(lx, tw / 2 + W * 0.04), W - tw / 2 - W * 0.04)
+        _word_label(lines, t + 0.3, dur - 0.3, word, lx, ly, fs)
+        sx, sy = (W * 0.08, H * 0.14) if left else (W * 0.92, H * 0.14)
+        ex, ey = (lx - tw / 2 - fs * 0.3, ly - fs * 0.4) if left else (lx + tw / 2 + fs * 0.3, ly - fs * 0.4)
         nx, ny = ex - sx, ey - sy
         ln = math.hypot(nx, ny)
         ux, uy = nx / ln, ny / ln
@@ -260,8 +282,9 @@ def animations_ass(plan, W, H, duration, accent_rgb="E9A23B", subs_y=0.72, handl
         if kind in STICKERS and t < duration - 0.5:
             _stickers(lines, t, kind, W, H, acc, rnd)
     for t, kind in (plan or {}).get("marks", []):
+        kind, _, word = str(kind).partition(":")  # „circle:AUTOMOBILIS“ – žymimas žodis
         if kind in MARKS and t < duration - 0.5:
-            _marks(lines, t, kind, W, H, acc, subs_y, rnd)
+            _marks(lines, t, kind, W, H, acc, subs_y, rnd, word)
     cards = [(t, txt) for t, txt in (plan or {}).get("cards", []) if t < duration - 0.5 and txt.strip()]
     for i, (t, txt) in enumerate(cards):
         end = min(t + 2.6, cards[i + 1][0] if i + 1 < len(cards) else duration, duration)
@@ -346,7 +369,7 @@ def _fx_ass(lines, t, kind, W, H, rnd):
 
 # ---------- 📱 Nuotraukos skrenda į telefoną ----------
 PHONE_LEN = 3.0
-_PHONE_WORDS = r"^(nuotrauk|foto|galerij|telefon|video|įraš|turin|kadr|prisimin|akimirk|reels|instagram)"
+_PHONE_WORDS = r"^(nuotrauk|foto|galerij|telefon|prisimin|turin|instagram|tiktok|socialin)"
 
 
 def _ease(x):
@@ -490,7 +513,8 @@ def auto_plan(words, gap=2.6):
                 last_s = a
                 break
         if video_editor.is_key(w) and a - last_m >= 3.0 and len(plan["marks"]) < 4:
-            plan["marks"].append((round(a, 2), mark_kinds[len(plan["marks"]) % 3]))
+            kw = video_editor.plain(w).strip(".,!?…;:\"„“()")
+            plan["marks"].append((round(a, 2), mark_kinds[len(plan["marks"]) % 3] + ":" + kw))
             last_m = a
         num = next((n for k, n in _NUMBERS.items() if p.startswith(k)), None)
         if num is None and re.fullmatch(r"\d", p):
@@ -502,7 +526,8 @@ def auto_plan(words, gap=2.6):
                 ql = q.lower().strip(".,!?…;:")
                 if any(ql.startswith(k) for k in _NUMBERS) or re.fullmatch(r"\d", ql):
                     break
-                rest.append(q.strip(".,!?…;:"))
+                if q.strip("–—-.,:;"):
+                    rest.append(q.strip(".,!?…;:–—"))
                 if re.search(r"[.!?…]$", q):
                     break
             txt = " ".join(r for r in rest if r)
@@ -514,9 +539,8 @@ def auto_plan(words, gap=2.6):
         if a >= 1.0 and a - last_f >= 3.5 and len(plan["fx"]) < 5:
             plan["fx"].append((round(a, 2), FX_ORDER[len(plan["fx"]) % len(FX_ORDER)]))
             last_f = a
+    # telefono efektas – tik kai kalbama apie nuotraukas, galeriją, turinį (kitaip jis nieko nereiškia)
     ph = next((a for w, a, b in words if re.search(_PHONE_WORDS, video_editor.plain(w).lower())), None)
-    if ph is None and words:
-        ph = words[len(words) // 3][1]
     if ph is not None:
         plan["phone"] = [round(ph, 2)]
     if not plan["stickers"] and words:  # bent vienas lipdukas – ties pirmu šauktuku arba pabaigoje
@@ -531,13 +555,16 @@ def ai_plan(client, words, ai_json):
     system = ("You add tasteful animations to a short social video. From the timed transcript ([seconds] word) "
               "choose: stickers (up to 4, at least 3 s apart; kinds: " + json.dumps(STICKERS, ensure_ascii=False) +
               "), hand-drawn marks at the most important moments (up to 4, kinds: " +
-              json.dumps(MARKS, ensure_ascii=False) + "), and pop-up cards ONLY if the speaker lists points/tips/"
+              json.dumps(MARKS, ensure_ascii=False) + "; each mark circles or points at ONE key word the speaker "
+              "says at that moment – give it in \"word\", 1 word, max 14 letters, from the transcript), and pop-up cards ONLY if the speaker lists points/tips/"
               "steps/prices (up to 5, text max 4 words in the transcript language, start with the number, e.g. "
-              "\"1. Kokybė\"), and ONE moment for a 'photos fly into a phone' effect (when photos, videos, gallery, "
-              "memories or content are mentioned, otherwise a strong moment), and up to 5 varied visual effects at "
+              "\"1. Kokybė\"), and a moment for a 'photos fly into a phone' effect ONLY if photos, videos, gallery, "
+              "memories, social media or content are actually mentioned – otherwise \"phone\": null. Everything you "
+              "pick must match what is said (the topic), never decorate randomly; fewer is better than unrelated. Add "
+              "up to 5 varied visual effects at "
               "the starts of new sentences, at least 3.5 s apart, each different (kinds: " +
               json.dumps(FX, ensure_ascii=False) + "). Reply only with JSON: {\"stickers\": [{\"time\": 0, \"kind\": \"hearts\"}], "
-              "\"marks\": [{\"time\": 0, \"kind\": \"circle\"}], \"cards\": [{\"time\": 0, \"text\": \"1. ...\"}], \"phone\": 0, "
+              "\"marks\": [{\"time\": 0, \"kind\": \"circle\", \"word\": \"...\"}], \"cards\": [{\"time\": 0, \"text\": \"1. ...\"}], \"phone\": null, "
               "\"fx\": [{\"time\": 0, \"kind\": \"shatter\"}]}")
     j = ai_json(client, system, {"transcript": lines})
     end = words[-1][2] if words else 0
@@ -550,6 +577,8 @@ def ai_plan(client, words, ai_json):
             except (KeyError, TypeError, ValueError):
                 continue
             if 0 <= t <= end and v and (valid is None or v in valid):
+                if key == "marks":
+                    v += ":" + str(it.get("word") or "").strip()[:18]
                 out[key].append((round(t, 2), v[:40]))
         out[key] = sorted(out[key])[:5]
     try:
