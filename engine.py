@@ -31,6 +31,7 @@ DEFAULTS = {
     "color": None,             # None – pagal šabloną
     "effects": ["Lėtas priartėjimas"],
     "transition": "Be perėjimo",
+    "fit": "fill",             # kitokios orientacijos įrašai: fill – užpildo kadrą (apkarpo), blur – su sulietu fonu
     "look": "modern",          # titrų stilius (video_editor.SUBTITLE_LOOKS)
     "subs_pos": "Žemiau",      # reels_studio.SUBTITLE_POSITIONS
     "subs_size": 100,
@@ -79,6 +80,8 @@ def settings_with_defaults(settings):
         s["look"] = "modern"
     if s["format"] not in FORMATS:
         s["format"] = "9:16"
+    if s["fit"] not in ("fill", "blur"):
+        s["fit"] = "fill"
     if s["transition"] not in video_editor.TRANSITIONS:
         s["transition"] = DEFAULTS["transition"]
     s["speed"] = max(0.5, min(2.0, float(s["speed"])))
@@ -89,6 +92,7 @@ def options():
     """Visi pasirinkimai svetainei (šablonai, filtrai, efektai, titrų stiliai, muzika…)."""
     return {
         "formats": FORMATS,
+        "fits": {"fill": "Užpildyti kadrą", "blur": "Visas vaizdas + sulietas fonas"},
         "templates": {k: {"category": v.get("cat"), "accent": v["accent"], "color": v["color"], "kind": v["kind"]}
                       for k, v in reels_studio.TEMPLATES.items()},
         "template_categories": list(reels_studio.TEMPLATE_CATEGORIES),
@@ -172,7 +176,8 @@ def prepare(clips, settings, workdir, client=None, status=None, progress=None):
     src = os.path.join(workdir, f"joined_{s['format'].replace(':', 'x')}.mkv")
     src, spans = video_editor.concat_clips([c["path"] for c in clips], src, s["format"],
                                            progress=lambda p: prog(p * 0.5), image_duration=s["image_duration"],
-                                           segments=[_segments(c) for c in clips], transition=s["transition"])
+                                           segments=[_segments(c) for c in clips], transition=s["transition"],
+                                           fill=s["fit"] == "fill")
     protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
     say("Ieškau pauzių ir atpažįstu kalbą…")
     analysis = video_editor.analyze(src, remove_silence=s["remove_silence"], subtitles=s["subtitles"],

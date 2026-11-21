@@ -911,7 +911,8 @@ def xfade_filter(transition, duration, offset):
     return f"xfade=transition={kind}:duration={duration:.3f}:offset={offset:.3f}"
 
 
-def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, segments, transition, td, size, fps):
+def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, segments, transition, td, size, fps,
+                             fill=False):
     """Perėjimai dviem žingsniais: kiekvienas įrašas pirma paruošiamas atskirai (vienodas dydis, pastovus kadrų
     dažnis), o tada tarp paruoštų failų daromas xfade. Taip xfade gauna įprastus failus su žinomu kadrų dažniu –
     įvairios ffmpeg versijos kitaip negauna pastovaus kadrų dažnio iš sudėtinės filtrų grandinės."""
@@ -923,7 +924,8 @@ def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, seg
         for k, p in enumerate(paths):
             part = os.path.join(tmp, f"part{k}.mkv")
             concat_clips([p], part, fmt, (lambda x, k=k: progress(0.6 * (k + x) / n)) if progress else None,
-                         image_duration, [segments[k] if k < len(segments) else None], size=(W, H), rate=fps)
+                         image_duration, [segments[k] if k < len(segments) else None], size=(W, H), rate=fps,
+                         fill=fill)
             parts_paths.append(part)
             lens.append(probe(part)["duration"])
         td = max(0.2, min(td, min(lens) / 2.5))
@@ -964,12 +966,13 @@ def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, seg
 
 
 def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION, segments=None,
-                 transition=None, transition_duration=TRANSITION_DURATION, size=None, rate=None):
+                 transition=None, transition_duration=TRANSITION_DURATION, size=None, rate=None, fill=False):
     """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
     pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
     Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų. Nuotraukos rodomos
     image_duration sekundžių. segments – kiekvienam įrašui paliekamos dalys [(nuo, iki), ...]
     (None – visas įrašas); taip įrašą galima apkarpyti ar iškirpti jo vidurį.
+    fill – kitokios orientacijos įrašas užpildo visą kadrą (kraštai apkarpomi) vietoj sulieto fono.
     Grąžina (kelias, [(pradžia, pabaiga)] – kiekvieno įrašo vieta sujungtame video)."""
     infos = [probe(p) for p in paths]
     images = [is_image(p) for p in paths]
@@ -992,7 +995,7 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
     segments = list(segments or [None] * len(paths))
     if TRANSITIONS.get(transition, transition) and len(paths) > 1:
         return _concat_with_transitions(paths, out_path, fmt, progress, image_duration, segments, transition,
-                                        transition_duration, (W, H), fps)
+                                        transition_duration, (W, H), fps, fill)
     # Kiekviena paliekama dalis – atskiras įėjimas (tas pats failas su -ss / -t).
     pieces = []  # (įrašo nr., kelias, nuotrauka?, pradžia, trukmė)
     for k, (p, inf, img) in enumerate(zip(paths, infos, images)):
@@ -1012,7 +1015,7 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
         total += d
         src_ar = infos[k]["width"] / max(1, infos[k]["height"])
         tail = f"setsar=1,fps={fps},format=yuv420p,trim=duration={d:.3f},setpts=PTS-STARTPTS[v{i}]"
-        if ratio and abs(math.log(src_ar / ratio)) > math.log(1.3):
+        if ratio and not fill and abs(math.log(src_ar / ratio)) > math.log(1.3):
             # Labai kitokia orientacija (pvz. vertikalus video YouTube'ui): vaizdas per vidurį, o fone –
             # tas pats vaizdas, išplėstas ir sulietas (užuot nukirpus galvą ir kojas).
             bw, bh = max(2, W // 8) // 2 * 2, max(2, H // 8) // 2 * 2
