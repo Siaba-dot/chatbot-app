@@ -388,7 +388,9 @@ export default function Editor({ id, user }) {
           <>
             <div className="section card">
               <Switch on={s.subtitles} onChange={v => set({ subtitles: v })} title="Titrai iš kalbos"
-                      desc={user.ai ? "Kalba atpažįstama automatiškai." : "Automatinis atpažinimas – Premium plane."} />
+                      desc={user.ai ? "Kalba atpažįstama automatiškai." : user.plan === "admin"
+                        ? "Automatinis atpažinimas neveikia – „Mano projektuose“ įrašykite OpenAI raktą."
+                        : "Automatinis atpažinimas – Premium plane."} />
               <div className="field" style={{ marginTop: 10 }}>
                 <label>Titrų kalba</label>
                 <select className="input" value={s.subtitle_language} onChange={e => set({ subtitle_language: e.target.value })}>
