@@ -229,3 +229,16 @@ textarea.input { resize: vertical; min-height: 70px; }
   .chip { flex: none; }
   .result .row .btn { flex: 1; }
 }
+
+/* pavadinimas – aiškiai redaguojamas */
+.title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; cursor: text;
+  border: 1px solid transparent; border-radius: 12px; padding: 2px 10px; margin-left: -10px; transition: border-color .15s, background .15s; }
+.title-wrap:hover, .title-wrap:focus-within { border-color: var(--line); background: rgba(14, 34, 66, .6); }
+.title-wrap .pen { font-size: 16px; opacity: .7; }
+.title-wrap:focus-within .pen { opacity: 0; }
+.title-input { min-width: 0; }
+
+/* langas */
+.modal { position: fixed; inset: 0; z-index: 60; background: rgba(3, 9, 20, .7); backdrop-filter: blur(4px);
+  display: grid; place-items: center; padding: 16px; }
+.modal .card { width: 100%; max-width: 440px; }

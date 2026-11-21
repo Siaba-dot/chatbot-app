@@ -16,15 +16,26 @@ export default function Projects() {
 
   useEffect(() => { api("/projects").then(setList).catch(e => setError(e.message)); }, []);
 
-  async function create() {
+  const [naming, setNaming] = useState(null);  // naujo projekto pavadinimas (langas)
+
+  async function create(e) {
+    e && e.preventDefault();
     setBusy(true);
     try {
-      const p = await api("/projects", { method: "POST", body: { title: "Naujas Reels" } });
+      const p = await api("/projects", { method: "POST", body: { title: (naming || "").trim() || "Naujas Reels" } });
       window.location.hash = "#/p/" + p.id;
     } catch (e) {
       setError(e.message);
       setBusy(false);
     }
+  }
+
+  async function rename(e, p) {
+    e.stopPropagation();
+    const title = window.prompt("Naujas pavadinimas:", p.title);
+    if (!title || !title.trim() || title === p.title) return;
+    await api(`/projects/${p.id}/settings`, { method: "PUT", body: { settings: {}, title } });
+    setList(list.map(x => (x.id === p.id ? { ...x, title: title.trim() } : x)));
   }
 
   async function remove(e, p) {
@@ -41,7 +52,7 @@ export default function Projects() {
       <div className="hint">Visi jūsų video išsaugomi čia – galite grįžti, pataisyti ir sukurti iš naujo.</div>
       {error && <div className="error">{error}</div>}
       <div className="grid-projects">
-        <div className="proj new" onClick={busy ? undefined : create}>
+        <div className="proj new" onClick={() => setNaming("")}>
           <div><span>＋</span>{busy ? "Kuriama…" : "Naujas Reels"}</div>
         </div>
         {(list || []).map(p => {
@@ -56,12 +67,30 @@ export default function Projects() {
               <div className="meta">
                 <b>{p.title}</b>
                 <span>{p.clips} įraš. · {ago(p.updated)}</span>
-                <div><button className="btn small ghost danger" onClick={e => remove(e, p)}>Ištrinti</button></div>
+                <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                  <button className="btn small ghost" onClick={e => rename(e, p)}>✏️ Pervadinti</button>
+                  <button className="btn small ghost danger" onClick={e => remove(e, p)}>🗑 Ištrinti</button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
+      {naming !== null && (
+        <div className="modal" onClick={() => !busy && setNaming(null)}>
+          <form className="card" onClick={e => e.stopPropagation()} onSubmit={create}>
+            <h3 className="serif" style={{ marginTop: 0, fontSize: 22 }}>Kaip pavadinsime šį Reels?</h3>
+            <input className="input" autoFocus value={naming} maxLength={80} placeholder="Pvz.: Automobilių priežiūra"
+                   onChange={e => setNaming(e.target.value)} />
+            <div className="hint" style={{ margin: "6px 0 14px" }}>Pavadinimą matysite tik jūs – „Mano projektuose“.</div>
+            <div className="row">
+              <button type="button" className="btn ghost" onClick={() => setNaming(null)} disabled={busy}>Atšaukti</button>
+              <span className="spacer" />
+              <button className="btn gold" disabled={busy}>{busy ? "Kuriama…" : "Sukurti"}</button>
+            </div>
+          </form>
+        </div>
+      )}
       {list && list.length === 0 && (
         <p className="hint" style={{ marginTop: 18 }}>Dar neturite projektų – spauskite „Naujas Reels“.</p>
       )}

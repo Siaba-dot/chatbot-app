@@ -101,6 +101,13 @@ export default function Editor({ id, user }) {
     if (!title.trim() || title === proj.title) return;
     const p = await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: {}, title } });
     setProj(p);
+    setToast("Pavadinimas išsaugotas ✓");
+  }
+
+  async function removeProject() {
+    if (!window.confirm(`Ištrinti „${proj.title}“? Video ir įrašai bus pašalinti.`)) return;
+    await api("/projects/" + id, { method: "DELETE" });
+    window.location.hash = "";
   }
 
   // ---------- medžiaga ----------
@@ -230,8 +237,14 @@ export default function Editor({ id, user }) {
 
       {/* ---------- dešinė: nustatymai ---------- */}
       <div>
-        <input className="title-input" defaultValue={proj.title} onBlur={e => rename(e.target.value)}
-               onKeyDown={e => e.key === "Enter" && e.target.blur()} aria-label="Projekto pavadinimas" />
+        <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+          <label className="title-wrap" title="Spustelėkite, kad pervadintumėte">
+            <input className="title-input" defaultValue={proj.title} onBlur={e => rename(e.target.value)}
+                   onKeyDown={e => e.key === "Enter" && e.target.blur()} aria-label="Projekto pavadinimas" maxLength={80} />
+            <span className="pen">✏️</span>
+          </label>
+          <button className="btn small ghost danger" onClick={removeProject} title="Ištrinti projektą">🗑 Ištrinti</button>
+        </div>
         <div className="steps">
           {steps.map(([t, d, done], i) => (
             <div key={t} className={"step" + (done ? " done" : i === now ? " now" : "")}><b>{i + 1}. {t}</b>{d}</div>
