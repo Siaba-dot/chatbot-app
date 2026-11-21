@@ -377,20 +377,28 @@ def _run_job(jid, user, pid, kind, quick, words):
         say = lambda m: _job_update(jid, message=m)  # noqa: E731
         if not proj["clips"]:
             raise ValueError("Pirmiausia įkelkite video ar nuotraukų")
-        prep = _load_prep(user, proj)
+        left = _user_info(user["username"])["minutes_left"]
+        if client is not None and proj["settings"]["subtitles"] and left is not None and left <= 0:
+            client = None  # minutės baigėsi – titrai be AI atpažinimo
+        prep = None if kind == "prepare" else _load_prep(user, proj)  # „Atpažinti iš naujo“ – visada iš naujo
+        if prep is not None and client is not None and proj["settings"]["subtitles"] and not proj.get("prep_ai"):
+            prep = None  # paruošta dar be AI (pvz. prieš įrašant raktą) – dabar atpažinsim kalbą
         if prep is None:
-            left = _user_info(user["username"])["minutes_left"]
-            if client is not None and proj["settings"]["subtitles"] and left is not None and left <= 0:
-                client = None  # minutės baigėsi – titrai be AI atpažinimo
             prep = engine.prepare(proj["clips"], proj["settings"], d, client, say,
                                   lambda p: _job_update(jid, progress=round(p * (1 if kind == "prepare" else 0.35),
                                                                             3)))
             if prep["analysis"].get("subtitle_mode") in ("voice", "translated"):
                 accounts.add_minutes_for(user["username"], prep["analysis"]["info"]["duration"] / 60)
             _save_prep(user, proj, prep)
+            proj["prep_ai"] = client is not None
             _save(user, proj)
         if kind == "prepare":
-            _job_update(jid, status="done", progress=1.0, message="Paruošta", result={"words": proj["words"]})
+            mode = prep["analysis"].get("subtitle_mode")
+            _job_update(jid, status="done", progress=1.0, message="Paruošta",
+                        result={"words": proj["words"], "mode": mode,
+                                "note": "" if proj["words"] else
+                                ("Kalbos neaptikta – patikrinkite, ar įraše girdisi balsas." if client is not None
+                                 else "Automatinis atpažinimas neįjungtas – įrašykite titrų tekstą ranka.")})
             return
         if words is None and proj.get("line_texts") and proj.get("lines"):
             words = video_editor.apply_line_edits(
