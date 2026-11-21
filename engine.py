@@ -316,7 +316,17 @@ def _card_images(cw, ch, tmp):
 
 
 def _face_box(src, t0, d, W, H):
-    """Veido sritis intarpo metu (dalimis 0–1) arba None. OpenCV, jei įdiegtas; kitaip None."""
+    """Veido sritis intarpo metu (dalimis 0–1) arba None. Papildoma funkcija: bet kokia klaida – None
+    (kortelė tada dedama įprastai), video kūrimas niekada nesustoja."""
+    try:
+        return _face_box_cv(src, t0, d, W, H)
+    except Exception as e:  # pvz. kitokia OpenCV versija
+        import sys
+        print("Veido paieška neveikia:", e, file=sys.stderr)
+        return None
+
+
+def _face_box_cv(src, t0, d, W, H):
     try:
         import cv2
         import numpy as np
