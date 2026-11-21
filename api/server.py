@@ -138,6 +138,39 @@ def me(user=Depends(current_user)):
     return user
 
 
+# ---------- administravimas ----------
+def admin_user(user=Depends(current_user)):
+    if user["plan"] != "admin":
+        raise HTTPException(403, "Tik administratoriui")
+    return user
+
+
+@app.get("/api/admin/openai")
+def openai_status(user=Depends(admin_user)):
+    k = clips_ui.configured_key()
+    return {"set": bool(k), "tail": k[-4:] if k else ""}
+
+
+class KeyBody(BaseModel):
+    key: str
+
+
+@app.post("/api/admin/openai")
+def openai_save(body: KeyBody, user=Depends(admin_user)):
+    """Raktas patikrinamas ir išsaugomas serveryje (tas pats failas kaip senosios studijos administravime)."""
+    key = body.key.strip()
+    if key:
+        if not key.startswith("sk-"):
+            raise HTTPException(400, "Raktas turi prasidėti „sk-“")
+        try:
+            import openai
+            openai.OpenAI(api_key=key).models.list()
+        except Exception as e:
+            raise HTTPException(400, f"Raktas neveikia ({type(e).__name__}) – patikrinkite, ar nukopijavote visą.")
+    clips_ui.save_key(key)
+    return openai_status(user)
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True}

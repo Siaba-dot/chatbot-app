@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, fileUrl } from "./api.js";
+import AdminKey from "./AdminKey.jsx";
 
 function ago(t) {
   const s = Date.now() / 1000 - t;
@@ -9,7 +10,7 @@ function ago(t) {
   return new Date(t * 1000).toLocaleDateString("lt-LT");
 }
 
-export default function Projects() {
+export default function Projects({ user, onUserChange }) {
   const [list, setList] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,6 +52,7 @@ export default function Projects() {
       <h2>Kurkime naują Reels ✨</h2>
       <div className="hint">Visi jūsų video išsaugomi čia – galite grįžti, pataisyti ir sukurti iš naujo.</div>
       {error && <div className="error">{error}</div>}
+      {user && user.plan === "admin" && <AdminKey onChange={onUserChange} />}
       <div className="grid-projects">
         <div className="proj new" onClick={() => setNaming("")}>
           <div><span>＋</span>{busy ? "Kuriama…" : "Naujas Reels"}</div>

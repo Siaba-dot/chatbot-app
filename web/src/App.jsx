@@ -50,7 +50,7 @@ export default function App() {
       </header>
       {route.page === "editor"
         ? <Editor key={route.id} id={route.id} user={user} />
-        : <Projects user={user} />}
+        : <Projects user={user} onUserChange={() => api("/me").then(setUser)} />}
     </>
   );
 }
