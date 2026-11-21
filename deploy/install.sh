@@ -37,6 +37,7 @@ if [ ! -f secrets.toml ]; then
 fi
 echo "==> Paleidžiu studiją (pirmą kartą – kelios minutės)…"
 docker compose up -d --build
+docker compose restart caddy >/dev/null  # Caddyfile galėjo pasikeisti – perskaitomas iš naujo
 docker image prune -f >/dev/null
 . ./.env
 echo
