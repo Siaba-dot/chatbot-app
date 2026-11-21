@@ -83,7 +83,11 @@ def current():
         return None
     plan = str(cfg.get("plan", "basic")).lower()
     plan = plan if plan in ("basic", "premium", "admin") else "basic"
-    return {"username": u, "name": cfg.get("name") or u, "plan": plan,
+    view = st.session_state.get("view_as") if plan == "admin" else None
+    if view in ("basic", "premium"):  # administratorius žiūri, ką mato klientas (minutės neskaičiuojamos)
+        return {"username": u, "name": cfg.get("name") or u, "plan": view, "minutes": None,
+                "preview": True, "admin": True}
+    return {"username": u, "name": cfg.get("name") or u, "plan": plan, "admin": plan == "admin",
             "minutes": None if plan == "admin" else float(cfg.get("minutes", DEFAULT_MINUTES))}
 
 
@@ -150,6 +154,12 @@ def require_login():
         if u["plan"] != "open":
             with st.sidebar:
                 st.markdown(f"**{u['name']}**  \n{PLANS[u['plan']]} planas")
+                if u.get("admin"):
+                    st.selectbox("👁 Žiūrėti kaip klientas", ["admin", "premium", "basic"], key="view_as",
+                                 format_func=lambda p: {"admin": "Administratorius (aš)",
+                                                        "premium": "Premium klientas",
+                                                        "basic": "Pagrindinio plano klientas"}[p],
+                                 help="Pamatykite studiją taip, kaip ją mato klientas. Jūsų minutės neskaičiuojamos.")
                 if st.button("Atsijungti", key="logout"):
                     st.session_state.pop("account", None)
                     st.rerun()
@@ -298,7 +308,7 @@ def remaining_minutes():
 def add_minutes(minutes):
     """Užskaito panaudotas balso atpažinimo minutes prisijungusiam naudotojui."""
     u = current()
-    if not u or u["plan"] == "open" or minutes <= 0:
+    if not u or u["plan"] == "open" or u.get("preview") or minutes <= 0:
         return
     with _lock:
         data = _load()
