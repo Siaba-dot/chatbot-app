@@ -44,5 +44,6 @@ echo "✅ Studija veikia: https://$DOMAIN"
 if [ -n "$NEW_PW" ]; then
   echo "   Prisijungimas: admin / $NEW_PW   (išsisaugokite – daugiau nerodomas)"
 fi
-echo "   Nustatymai (OpenAI raktas, klientai): nano $DIR/deploy/secrets.toml"
+echo "   OpenAI raktą įklijuokite studijoje: 👑 Administravimas → OpenAI raktas
+   Kiti nustatymai (klientai): nano $DIR/deploy/secrets.toml"
 echo "   Pakeitus nustatymus: cd $DIR/deploy && docker compose restart studija"

@@ -1790,6 +1790,28 @@ with top:
 
 if plan == "admin":
     with st.expander("👑 Administravimas – klientai ir naudojimas šį mėnesį"):
+        k = clips_ui.configured_key()
+        st.markdown("**🔑 OpenAI raktas** – " + (f"✅ įrašytas (…{k[-4:]})" if k else "❌ neįrašytas – AI funkcijos neveikia"))
+        with st.form("admin_key", clear_on_submit=True, border=False):
+            new_key = st.text_input("Naujas OpenAI raktas", type="password", placeholder="sk-…",
+                                    help="Įklijuokite raktą iš platform.openai.com → API keys. Jis išsaugomas serveryje "
+                                         "ir naudojamas visiems Premium klientams.")
+            c1, c2 = st.columns(2)
+            save = c1.form_submit_button("💾 Išsaugoti raktą", width="stretch")
+            remove = c2.form_submit_button("🗑 Pašalinti raktą", width="stretch")
+        if save or remove:
+            nk = "" if remove else new_key.strip()
+            if save and not nk.startswith("sk-"):
+                st.error("Raktas turi prasidėti „sk-“.")
+            else:
+                try:
+                    if nk:
+                        import openai
+                        openai.OpenAI(api_key=nk).models.list()
+                    clips_ui.save_key(nk)
+                    st.success("Raktas išsaugotas ir veikia ✅" if nk else "Raktas pašalintas.")
+                except Exception as e:
+                    st.error(f"Raktas neveikia: {type(e).__name__}. Patikrinkite, ar nukopijavote visą.")
         st.dataframe(accounts.usage_table(), hide_index=True, width="stretch")
         st.caption("Klientai pridedami ir šalinami Streamlit Secrets (⋮ → Settings → Secrets). "
                    "Minučių apskaita išsivalo, kai programa perkraunama ar atnaujinama – "
