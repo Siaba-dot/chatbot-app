@@ -41,6 +41,7 @@ docker image prune -f >/dev/null
 . ./.env
 echo
 echo "✅ Studija veikia: https://$DOMAIN"
+echo "   Naujos programos API: https://$DOMAIN/api/docs"
 if [ -n "$NEW_PW" ]; then
   echo "   Prisijungimas: admin / $NEW_PW   (išsisaugokite – daugiau nerodomas)"
 fi

@@ -48,6 +48,16 @@ DATA_DIR = os.environ.get("REELS_DATA_DIR") or os.path.join(os.path.dirname(os.p
 _lock = threading.Lock()
 
 
+def users():
+    """Visi klientai iš Secrets: {vardas: {password, plan, minutes, name, active}}."""
+    return _secrets_users()
+
+
+def check_password(username, password):
+    """Grąžina kliento vardą, jei slaptažodis teisingas (naudoja ir API serveris)."""
+    return _check(username, password)
+
+
 def _secrets_users():
     try:
         users = st.secrets.get("users")
@@ -310,10 +320,17 @@ def add_minutes(minutes):
     u = current()
     if not u or u["plan"] == "open" or u.get("preview") or minutes <= 0:
         return
+    add_minutes_for(u["username"], minutes)
+
+
+def add_minutes_for(username, minutes):
+    """Užskaito minutes nurodytam naudotojui (naudoja ir API serveris)."""
+    if not username or minutes <= 0:
+        return
     with _lock:
         data = _load()
         m = data.setdefault(_month(), {})
-        m[u["username"]] = round(m.get(u["username"], 0.0) + minutes, 2)
+        m[username] = round(m.get(username, 0.0) + minutes, 2)
         os.makedirs(DATA_DIR, exist_ok=True)
         tmp = _usage_file() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
