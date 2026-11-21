@@ -133,6 +133,17 @@ def _ffmpeg(args):
                           capture_output=True, text=True)
 
 
+def _video_frames(path, limit=5):
+    """Kiek pirmųjų vaizdo kadrų pavyksta perskaityti (0 – vaizdo nėra arba jis tuščias)."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#" + str(limit),
+                        "-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", path],
+                       capture_output=True, text=True)
+    try:
+        return int((r.stdout.strip().split("\n") or ["0"])[0] or 0)
+    except ValueError:
+        return 0
+
+
 def add_clip(path, name=None, recorded=False):
     """Patikrina įkeltą / nufilmuotą failą. Grąžina klipo žodyną (kaip studijoje) arba kelia ValueError."""
     if recorded:  # naršyklės įrašuose dažnai trūksta trukmės – perpakuojam
@@ -157,6 +168,10 @@ def add_clip(path, name=None, recorded=False):
         info = video_editor.probe(path)
     image = video_editor.is_image(path)
     duration = info["duration"]
+    if not image and _video_frames(path) == 0:
+        os.unlink(path)
+        raise ValueError("Įraše nėra vaizdo (juodas ekranas). Patikrinkite, ar naršyklei leista naudoti kamerą, "
+                         "ir nufilmuokite dar kartą.")
     if not image and max(info["width"], info["height"]) > 1920:  # 4K → 1080p darbinė kopija
         small = path + ".1080.mp4"
         scale = "scale=-2:1920" if info["height"] >= info["width"] else "scale=1920:-2"
@@ -340,6 +355,8 @@ def overlay_broll(src, out_path, items, keep=None, speed=1.0, fade=0.25):
     (intarpas viršuje, jūs apačioje), full – visas kadras. Švelniai išnyra ir išnyksta."""
     info = video_editor.probe(src)
     W, H, fps = info["width"], info["height"], info["fps"] or 30
+    if _video_frames(src) == 0:
+        raise ValueError("Medžiagoje nėra vaizdo (juodas įrašas) – pašalinkite jį ir nufilmuokite iš naujo.")
     tall = H >= W
     tmp = tempfile.mkdtemp(dir=os.path.dirname(out_path) or None)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", src]
