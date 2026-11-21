@@ -66,6 +66,7 @@ export default function Editor({ id, user }) {
   const camInput = useRef(null);
   const [over, setOver] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [autoplay, setAutoplay] = useState(false);  // groti tik ką tik sukurtą peržiūrą
 
   useEffect(() => {
     Promise.all([api("/projects/" + id), api("/options")]).then(([p, o]) => {
@@ -154,14 +155,19 @@ export default function Editor({ id, user }) {
     setError("");
     try {
       if (kind === "prepare") {
+        setAutoplay(false);
         const j = await api(`/projects/${id}/prepare`, { method: "POST" });
         setJob(j);
-        await waitJob(j.id, setJob);
+        const done = await waitJob(j.id, setJob);
+        const r = done.result || {};
+        setToast(r.note || `Titrai paruošti: ${(r.words || []).length} žodž. ✓`);
+        setTab("subs");
       } else {
         await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: s } });
         const j = await api(`/projects/${id}/render`, { method: "POST", body: { quick: kind === "preview" } });
         setJob(j);
         await waitJob(j.id, setJob);
+        setAutoplay(kind === "preview");
         setShow(kind === "preview" ? "preview" : "final");
         if (kind === "final") setToast("Video paruoštas! 🎉");
       }
@@ -220,7 +226,7 @@ export default function Editor({ id, user }) {
                      controls playsInline poster={out.final.cover ? fileUrl(`/projects/${id}/files/cover.jpg`, stamp(out.final)) : undefined} />
             ) : show === "preview" && out.preview ? (
               <video key={"p" + out.preview.at} src={fileUrl(`/projects/${id}/files/preview.mp4`, stamp(out.preview))}
-                     controls autoPlay playsInline />
+                     controls autoPlay={autoplay} playsInline />
             ) : (
               <>
                 <img src={live} alt="Peržiūra" />
