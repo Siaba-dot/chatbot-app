@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 
 import animations
@@ -974,9 +975,21 @@ def media_duration(path):
 CRASH_SIGNS = ("corrupted", "double free", "free()", "malloc", "segmentation", "aborted", "core dumped")
 
 
+# Serveryje (REELS_MAX_RENDERS=1) vienu metu kuriamas tiek video – kiti palaukia eilėje (RAM neperpildoma)
+_RENDER_SLOTS = threading.BoundedSemaphore(int(os.environ["REELS_MAX_RENDERS"])) \
+    if os.environ.get("REELS_MAX_RENDERS", "").isdigit() and int(os.environ["REELS_MAX_RENDERS"]) > 0 else None
+
+
 def _run(cmd, total, progress, what, stall=12.0, hard=180.0):
     """Kaip _run_once; jei ffmpeg nulūžta (vidinė atminties klaida – pasitaiko kai kuriose versijose su keliomis
     gijomis), automatiškai kartojama viena gija."""
+    if _RENDER_SLOTS is not None:
+        with _RENDER_SLOTS:
+            return _run_unlocked(cmd, total, progress, what, stall, hard)
+    return _run_unlocked(cmd, total, progress, what, stall, hard)
+
+
+def _run_unlocked(cmd, total, progress, what, stall=12.0, hard=180.0):
     try:
         return _run_once(cmd, total, progress, what, stall, hard)
     except RuntimeError as e:

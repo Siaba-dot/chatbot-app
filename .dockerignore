@@ -1,0 +1,6 @@
+.git
+**/__pycache__
+.data
+tools
+deploy/secrets.toml
+deploy/.env
