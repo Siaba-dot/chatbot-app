@@ -16,6 +16,7 @@ import pickle
 import re
 import secrets as _secrets
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -198,6 +199,9 @@ def _save_prep(user, proj, prep):
         pickle.dump(prep, f)
     proj["prepared"] = True
     proj["words"] = [[w, round(float(a), 3), round(float(b), 3)] for w, a, b in prep["analysis"]["words"]]
+    proj["lines"] = [[round(float(a), 3), round(float(b), 3), t] for a, b, t in
+                     video_editor.edit_lines(prep["analysis"]["words"])]
+    proj["line_texts"] = None  # naudotojo pataisyti sakiniai
 
 
 def _public(proj):
@@ -262,7 +266,7 @@ def update_settings(pid: str, body: SettingsBody, user=Depends(current_user)):
     # pasikeitus formatui, perėjimui ar kalbai – medžiagą reikės paruošti iš naujo
     if any(proj["settings"].get(k) != old.get(k) for k in ("format", "transition", "remove_silence", "subtitles",
                                                              "subtitle_language", "subtitle_text")):
-        proj["prepared"], proj["words"] = False, None
+        proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     if body.title is not None:
         proj["title"] = body.title.strip()[:80] or proj["title"]
     _save(user, proj)
@@ -294,7 +298,7 @@ def upload_clip(pid: str, file: UploadFile = File(...), recorded: bool = Form(Fa
         raise HTTPException(400, str(e))
     clip["id"] = cid
     proj["clips"].append(clip)
-    proj["prepared"], proj["words"] = False, None
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     _save(user, proj)
     return _public(proj)
 
@@ -306,7 +310,7 @@ def delete_clip(pid: str, cid: str, user=Depends(current_user)):
         if c["path"].startswith(_pdir(user, pid)) and os.path.exists(c["path"]):
             os.unlink(c["path"])
     proj["clips"] = [c for c in proj["clips"] if c["id"] != cid]
-    proj["prepared"], proj["words"] = False, None
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     _save(user, proj)
     return _public(proj)
 
@@ -321,7 +325,7 @@ def reorder_clips(pid: str, body: ClipOrder, user=Depends(current_user)):
     by_id = {c["id"]: c for c in proj["clips"]}
     proj["clips"] = [by_id[i] for i in body.order if i in by_id] + [c for c in proj["clips"]
                                                                      if c["id"] not in body.order]
-    proj["prepared"], proj["words"] = False, None
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     _save(user, proj)
     return _public(proj)
 
@@ -355,6 +359,9 @@ def _run_job(jid, user, pid, kind, quick, words):
         if kind == "prepare":
             _job_update(jid, status="done", progress=1.0, message="Paruošta", result={"words": proj["words"]})
             return
+        if words is None and proj.get("line_texts") and proj.get("lines"):
+            words = video_editor.apply_line_edits(
+                prep["analysis"]["words"], [(a, b, t) for (a, b, _), t in zip(proj["lines"], proj["line_texts"])])
         base = 0.35
         say("Kuriu video…" if not quick else "Kuriu peržiūrą…")
         name = "preview.mp4" if quick else "reels.mp4"
@@ -368,7 +375,7 @@ def _run_job(jid, user, pid, kind, quick, words):
         if not quick:
             say("Kuriu viršelį ir aprašymą…")
             try:
-                engine.cover(out, os.path.join(d, "cover.jpg"), proj["settings"],
+                engine.cover(prep["src"], os.path.join(d, "cover.jpg"), proj["settings"],
                              width=fin.get("width") or 1080, height=fin.get("height") or 1920)
                 result["cover"] = "cover.jpg"
             except Exception:
@@ -387,6 +394,91 @@ class RenderBody(BaseModel):
     quick: bool = False
     words: list | None = None     # pataisyti titrai [[žodis, nuo, iki], ...]
     settings: dict | None = None
+
+
+class LinesBody(BaseModel):
+    lines: list[str]
+
+
+@app.put("/api/projects/{pid}/lines")
+def update_lines(pid: str, body: LinesBody, user=Depends(current_user)):
+    """Pataisyti titrų sakiniai (tuščias – sakinys pašalinamas)."""
+    proj = _load(user, pid)
+    if not proj.get("lines"):
+        raise HTTPException(400, "Pirmiausia paruoškite titrus")
+    texts = [str(t)[:300] for t in body.lines][:len(proj["lines"])]
+    texts += [t for _, _, t in proj["lines"][len(texts):]]
+    proj["line_texts"] = None if texts == [t for _, _, t in proj["lines"]] else texts
+    _save(user, proj)
+    return _public(proj)
+
+
+# ---------- stilių peržiūros (plytelės) ----------
+def _base_frame(user, proj):
+    """Pirmo įrašo kadras – pagrindas plytelėms; be įrašų – pavyzdinis kadras."""
+    for c in proj["clips"]:
+        thumb = c["path"] + ".base.jpg"
+        if not os.path.exists(thumb):
+            reels_studio.grab_frame(c["path"], thumb, at=0 if c.get("image") else min(1.0, c["duration"] / 2))
+        return thumb, c["id"]
+    sample = os.path.join(DATA, "sample_frame.jpg")
+    if not os.path.exists(sample):
+        os.makedirs(DATA, exist_ok=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                        "gradients=s=360x640:c0=0xE8A060:c1=0x2F6F7F:c2=0xF4D9B0:n=3:x0=0:y0=0:x1=360:y1=640:d=1",
+                        "-vf", "drawbox=x=110:y=260:w=140:h=200:color=0x3A2A20:t=fill,"
+                               "drawbox=x=150:y=200:w=60:h=60:color=0xF1C9A0:t=fill",
+                        "-frames:v", "1", sample], check=True)
+    return sample, "sample"
+
+
+_tile_lock = threading.Lock()
+
+
+@app.get("/api/projects/{pid}/tile/{kind}")
+def tile(pid: str, kind: str, name: str = "", user=Depends(current_user)):
+    """Plytelė: kind = template | look | color | effect | live (dabartiniai nustatymai su kabliuku ir titrais)."""
+    proj = _load(user, pid)
+    st_ = proj["settings"]
+    base, bid = _base_frame(user, proj)
+    if kind == "template":
+        if name not in reels_studio.TEMPLATES:
+            raise HTTPException(404, "Nėra tokio šablono")
+        t = reels_studio.TEMPLATES[name]
+        args = ("style", name, t["accent"], t["color"], (), "Kabliukas", None)
+    elif kind == "look":
+        if name not in video_editor.SUBTITLE_LOOKS:
+            raise HTTPException(404, "Nėra tokio stiliaus")
+        args = ("style", st_["template"], st_["accent"], st_["color"], (), "", name)
+    elif kind == "color":
+        if name not in reels_studio.COLOR_FILTERS:
+            raise HTTPException(404, "Nėra tokio filtro")
+        args = ("thumb", name, (), st_["accent"])
+    elif kind == "effect":
+        if name not in reels_studio.EFFECTS:
+            raise HTTPException(404, "Nėra tokio efekto")
+        args = ("thumb", st_["color"], (name,), st_["accent"])
+    elif kind == "live":
+        args = ("style", st_["template"], st_["accent"], st_["color"], tuple(st_["effects"]),
+                st_["hook"] or "", st_["look"], st_["subs_pos"], st_["hook_pos"], st_["subs_size"], st_["text_size"])
+    else:
+        raise HTTPException(404, "Nėra tokios plytelės")
+    key = hashlib.sha1(json.dumps([bid, args], ensure_ascii=False).encode()).hexdigest()[:16]
+    d = os.path.join(_pdir(user, pid), "tiles")
+    out = os.path.join(d, key + ".jpg")
+    if not os.path.exists(out):
+        os.makedirs(d, exist_ok=True)
+        with _tile_lock:
+            if args[0] == "style":
+                extra = {}
+                if kind == "live":
+                    extra = dict(subs_ypos=reels_studio.SUBTITLE_POSITIONS.get(args[7], 0.72),
+                                 hook_ypos=reels_studio.HOOK_POSITIONS.get(args[8], 0.2),
+                                 subs_size=args[9] / 100, text_size=args[10] / 100, width=360, height=640)
+                reels_studio.style_preview(base, out, args[1], args[2], args[3], args[4], args[5], args[6], **extra)
+            else:
+                reels_studio.thumbnail(base, out, args[1], args[2], accent=args[3])
+    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.post("/api/projects/{pid}/prepare")

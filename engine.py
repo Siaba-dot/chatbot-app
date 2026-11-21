@@ -279,9 +279,12 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
 
 
 def cover(video_path, out_path, settings, at=0.5, width=1080, height=1920):
+    """Viršelis su kabliuku. video_path – geriausia paruošta medžiaga (prep["src"]) – be video užrašų."""
     s = settings_with_defaults(settings)
     reels_studio.make_cover(video_path, out_path, at, s["hook"], s["accent"], s["template"], s["handle"],
-                            width, height)
+                            width, height, color=s["color"],
+                            effects=tuple(e for e in s["effects"] if e != "Gintaro akimirka"),
+                            text_size=s["text_size"] / 100)
     return out_path
 
 
@@ -294,4 +297,5 @@ def caption(prep, settings, client=None):
         c = _safe(reels_studio.write_caption, client, text, s["hook"], "", s["subtitle_language"])
         if c:
             return c
-    return reels_studio.simple_caption(text, s["hook"], "", s["cta"], s["category"], words)
+    category = reels_studio.TEMPLATES.get(s["template"], {}).get("cat") or s["category"]
+    return reels_studio.simple_caption(text, s["hook"], "", s["cta"], category, words)

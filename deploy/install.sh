@@ -29,6 +29,9 @@ if [ ! -f .env ]; then
   IP=$(hostname -I | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -vE '^(10|127|172|192\.168)\.' | head -1)
   echo "DOMAIN=studija.${IP//./-}.sslip.io" > .env
 fi
+if ! grep -q '^APP_DOMAIN=' .env; then  # naujoji programa – atskiru adresu app.<IP>.sslip.io
+  sed -n 's/^DOMAIN=studija\./APP_DOMAIN=app./p' .env >> .env
+fi
 NEW_PW=""
 if [ ! -f secrets.toml ]; then
   NEW_PW=$(openssl rand -base64 12 | tr -dc 'A-Za-z0-9' | head -c 12)
@@ -42,7 +45,7 @@ docker image prune -f >/dev/null
 . ./.env
 echo
 echo "✅ Studija veikia: https://$DOMAIN"
-echo "   Naujos programos API: https://$DOMAIN/api/docs"
+echo "✨ Nauja programa: https://$APP_DOMAIN"
 if [ -n "$NEW_PW" ]; then
   echo "   Prisijungimas: admin / $NEW_PW   (išsisaugokite – daugiau nerodomas)"
 fi

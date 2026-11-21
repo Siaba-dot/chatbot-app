@@ -1,0 +1,10 @@
+# Nauja naršyklės programa (React): surenkama ir patiekiama per Caddy (kartu su HTTPS „vartais“).
+FROM node:20-alpine AS build
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
+FROM caddy:2
+COPY --from=build /web/dist /srv/app

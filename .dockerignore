@@ -4,3 +4,5 @@
 tools
 deploy/secrets.toml
 deploy/.env
+web/node_modules
+web/dist
