@@ -12,6 +12,9 @@ function save(key, v) {
   try { localStorage.setItem(key, String(v)); } catch { /* privatus langas */ }
 }
 function pickMime() {
+  // Safari (iPhone) – patikimiausia leisti naršyklei pasirinkti numatytą MP4
+  const ua = navigator.userAgent;
+  if (/Safari/.test(ua) && !/Chrome|CriOS|Android/.test(ua)) return "";
   const types = ["video/mp4;codecs=avc1,mp4a", "video/mp4", "video/webm;codecs=vp9,opus",
                  "video/webm;codecs=vp8,opus", "video/webm"];
   return types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
