@@ -247,7 +247,7 @@ textarea.input { resize: vertical; min-height: 70px; }
 .rec-modal { place-items: start center; overflow-y: auto; }
 .rec-box { width: 100%; max-width: 560px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 16px; margin: 20px 0; }
-.rec-stage { position: relative; border-radius: 14px; overflow: hidden; background: #000; aspect-ratio: 3 / 4; max-height: 62vh; width: 100%; }
+.rec-stage { position: relative; border-radius: 14px; overflow: hidden; background: #000; max-height: 62vh; width: 100%; }
 .rec-video { width: 100%; height: 100%; object-fit: cover; }
 .rec-video.mirror { transform: scaleX(-1); }
 .prompter { position: absolute; left: 0; right: 0; top: 0; height: 42%; overflow: hidden; padding: 14px 18px;
@@ -260,7 +260,7 @@ textarea.input { resize: vertical; min-height: 70px; }
 @media (max-width: 600px) {
   .rec-modal { padding: 0; }
   .rec-box { margin: 0; border-radius: 0; min-height: 100%; }
-  .rec-stage { aspect-ratio: 9 / 16; max-height: 70vh; }
+  .rec-stage { max-height: 70vh; }
 }
 .nav-back { margin-left: 8px; }
 @media (max-width: 900px) { .nav-back { margin-left: 0; } }
