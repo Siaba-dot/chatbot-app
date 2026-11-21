@@ -297,6 +297,12 @@ export default function Editor({ id, user }) {
             <div className="section">
               <h3>Formatas</h3>
               <Chips items={Object.entries(opts.formats)} value={s.format} onChange={v => set({ format: v })} />
+              {opts.fits && (
+                <>
+                  <div className="hint" style={{ margin: "4px 0 6px" }}>Kai įrašas kitos formos (pvz. gulsčias video stačiame Reels):</div>
+                  <Chips items={Object.entries(opts.fits)} value={s.fit || "fill"} onChange={v => set({ fit: v })} />
+                </>
+              )}
             </div>
             {proj.clips.length > 0 && (
               <div className="clips">

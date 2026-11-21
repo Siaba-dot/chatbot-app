@@ -297,7 +297,7 @@ def update_settings(pid: str, body: SettingsBody, user=Depends(current_user)):
     old = proj["settings"]
     proj["settings"] = engine.settings_with_defaults(dict(old, **body.settings))
     # pasikeitus formatui, perėjimui ar kalbai – medžiagą reikės paruošti iš naujo
-    if any(proj["settings"].get(k) != old.get(k) for k in ("format", "transition", "remove_silence", "subtitles",
+    if any(proj["settings"].get(k) != old.get(k) for k in ("format", "fit", "transition", "remove_silence", "subtitles",
                                                              "subtitle_language", "subtitle_text")):
         proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     if body.title is not None:
