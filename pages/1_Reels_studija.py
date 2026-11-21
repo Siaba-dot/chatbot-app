@@ -74,6 +74,13 @@ button[data-testid="stBaseButton-primary"] {
   color: #061226; border: 0; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   box-shadow: 0 8px 30px rgba(227,155,46,.18); }
 .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button:hover { filter: brightness(1.07); color: #061226; }
+/* tekstas aukso mygtukuose – visada tamsus ir įskaitomas (ir neaktyviuose) */
+button[data-testid="stBaseButton-primary"] p, button[data-testid="stBaseButton-primary"] div,
+.stDownloadButton > button[kind="primary"] p { color: #061226 !important; font-weight: 700; }
+button[data-testid="stBaseButton-primary"]:disabled {
+  background: linear-gradient(100deg, #8C6A44, #C9AE84 45%, #B08A5A 70%, #8C6A44) !important;
+  opacity: .75; box-shadow: none; cursor: not-allowed; }
+button[data-testid="stBaseButton-primary"]:disabled p { color: #1B2436 !important; }
 .stButton > button[kind="secondary"], .stDownloadButton > button[kind="secondary"],
 button[data-testid="stBaseButton-secondary"] {
   border-color: rgba(227,155,46,.45); background: rgba(14,34,66,.55); }
