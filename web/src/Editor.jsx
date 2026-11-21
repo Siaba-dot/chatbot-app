@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, fileUrl, upload, waitJob } from "./api.js";
+import Recorder from "./Recorder.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
@@ -64,6 +65,7 @@ export default function Editor({ id, user }) {
   const fileInput = useRef(null);
   const camInput = useRef(null);
   const [over, setOver] = useState(false);
+  const [recording, setRecording] = useState(false);
 
   useEffect(() => {
     Promise.all([api("/projects/" + id), api("/options")]).then(([p, o]) => {
@@ -128,6 +130,10 @@ export default function Editor({ id, user }) {
         setUploads(u => u.filter(o => o.key !== key));
       }
     }
+  }
+  async function onRecorded(file, script) {
+    await addFiles([file], true);
+    if (script && !s.subtitle_text) set({ subtitle_text: script });  // be AI – titrai iš suflerio teksto
   }
   async function removeClip(cid) {
     setProj(await api(`/projects/${id}/clips/${cid}`, { method: "DELETE" }));
@@ -321,9 +327,10 @@ export default function Editor({ id, user }) {
             <input ref={camInput} type="file" accept="video/*" capture="user" hidden
                    onChange={e => { addFiles([...e.target.files], true); e.target.value = ""; }} />
             <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn" onClick={() => camInput.current.click()}>📱 Filmuoti telefonu</button>
-              <span className="hint">Telefone atsidarys kamera.</span>
+              <button className="btn gold" onClick={() => setRecording(true)}>🎥 Filmuoti dabar (su sufleriu)</button>
+              <button className="btn" onClick={() => camInput.current.click()}>📱 Telefono kamera</button>
             </div>
+            <div className="hint" style={{ marginTop: 6 }}>„Filmuoti dabar“ – kamera čia pat naršyklėje, virš jos lėtai slenka jūsų tekstas.</div>
             <div className="section" style={{ marginTop: 18 }}>
               <h3>Perėjimai tarp įrašų</h3>
               <select className="input" value={s.transition} onChange={e => set({ transition: e.target.value })}>
@@ -388,6 +395,13 @@ export default function Editor({ id, user }) {
                   {Object.entries(opts.subtitle_languages).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
+              {!user.ai && (
+                <div className="field">
+                  <label>Titrų tekstas (kai nėra automatinio atpažinimo)</label>
+                  <textarea className="input" rows={3} value={s.subtitle_text} placeholder="Tekstas bus išdėliotas per video pagal kalbą."
+                            onChange={e => set({ subtitle_text: e.target.value })} />
+                </div>
+              )}
               <Switch on={s.key_words} onChange={v => set({ key_words: v })} title="✦ Svarbiausi žodžiai – didesni ir spalvoti" />
               <Switch on={s.punch} disabled={!s.key_words} onChange={v => set({ punch: v })} title="✦ Akcentų priartėjimas" desc="Vaizdas trumpam priartėja ties svarbiu žodžiu." />
               <Switch on={s.bubbles} onChange={v => set({ bubbles: v })} title="💭 Debesėliai (?, !, WOW)" desc="Komiksų debesėliai iššoka tam tikrose vietose." />
@@ -533,6 +547,7 @@ export default function Editor({ id, user }) {
         )}
       </div>
       {toast && <div className="toast">{toast}</div>}
+      {recording && <Recorder projectId={id} onClose={() => setRecording(false)} onRecorded={onRecorded} />}
     </div>
   );
 }
