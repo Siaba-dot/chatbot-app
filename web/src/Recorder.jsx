@@ -19,7 +19,7 @@ function pickMime() {
 
 const RATIOS = { "9:16": 9 / 16, "16:9": 16 / 9, "1:1": 1, "4:5": 4 / 5 };
 
-export default function Recorder({ projectId, format = "9:16", onClose, onRecorded }) {
+export default function Recorder({ projectId, format = "9:16", fit = "fill", onFitChange, onClose, onRecorded }) {
   const ratio = RATIOS[format] || 9 / 16;   // plotis / aukštis – kaip bus filmuojama
   const [stage, setStage] = useState("setup");       // setup | live | rec | review
   const [script, setScript] = useState(() => load("script_" + projectId, ""));
@@ -54,6 +54,20 @@ export default function Recorder({ projectId, format = "9:16", onClose, onRecord
 
   // Įrašoma tiesiai iš kameros (patikimiausia – ir iPhone). Stačią kadrą pagal formatą iškerpa serveris –
   // tiksliai tą vidurį, kurį matote filmavimo lange.
+  // Peržiūra: iPhone rodo kameros vaizdą tik nutildytame, „inline“ video, paleistame po prijungimo
+  function attach() {
+    const v = video.current;
+    if (!v || !stream.current) return;
+    v.muted = true;
+    v.setAttribute("muted", "");
+    v.setAttribute("playsinline", "");
+    v.setAttribute("webkit-playsinline", "");
+    if (v.srcObject !== stream.current) v.srcObject = stream.current;
+    const p = v.play();
+    if (p && p.catch) p.catch(() => setTimeout(() => v.play().catch(() => {}), 300));
+  }
+  useEffect(() => { if (stage === "live" || stage === "rec") attach(); }, [stage]);  // eslint-disable-line
+
   function recordStream() {
     return stream.current;
   }
@@ -105,9 +119,8 @@ export default function Recorder({ projectId, format = "9:16", onClose, onRecord
     setMsg("Laukiu leidimo naudoti kamerą ir mikrofoną…");
     try {
       stream.current = await navigator.mediaDevices.getUserMedia({
-        video: ratio < 1
-          ? { facingMode: face, width: { ideal: 1080 }, height: { ideal: 1920 }, aspectRatio: { ideal: ratio } }
-          : { facingMode: face, width: { ideal: 1280 }, height: { ideal: ratio === 1 ? 1280 : 720 }, aspectRatio: { ideal: ratio } },
+        // įprastas (platus) kameros režimas – be priverstinio 9:16, kad telefonas nenukirptų ir nepriartintų
+        video: { facingMode: face, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (e) {
@@ -123,9 +136,7 @@ export default function Recorder({ projectId, format = "9:16", onClose, onRecord
       ? (script.trim() ? "Pakalbėkite – juostelė turi judėti. Pradėjus filmuoti, tekstas slinks ramiu tempu."
                        : "Pakalbėkite – juostelė turi judėti. Tada spauskite „Pradėti filmuoti“.")
       : "⚠️ Mikrofonas nerastas – video bus be garso.");
-    setTimeout(() => {
-      if (video.current) { video.current.srcObject = stream.current; video.current.play().catch(() => {}); }
-    }, 0);
+    setTimeout(attach, 0);
     startMeter(stream.current);
     off.current = 0;
     render();
@@ -251,8 +262,9 @@ export default function Recorder({ projectId, format = "9:16", onClose, onRecord
         {stage !== "setup" && (
           <div className="rec-stage" style={{ aspectRatio: String(ratio), maxWidth: ratio < 1 ? `calc(62vh * ${ratio})` : undefined, margin: "0 auto" }}>
             {stage === "review"
-              ? <video className="rec-video" src={blobUrl} controls playsInline autoPlay />
-              : <video ref={video} className={"rec-video" + (facing === "user" ? " mirror" : "")} muted playsInline autoPlay />}
+              ? <video className="rec-video" src={blobUrl} controls playsInline autoPlay style={{ objectFit: fit === "blur" ? "contain" : "cover" }} />
+              : <video ref={el => { video.current = el; if (el) attach(); }} className={"rec-video" + (facing === "user" ? " mirror" : "")}
+                       style={{ objectFit: fit === "blur" ? "contain" : "cover" }} muted playsInline autoPlay />}
             {showPrompt && (
               <div className="prompter" ref={box}>
                 <div className="ptext" ref={text} style={{ fontSize: size }}>{script}</div>
@@ -274,6 +286,13 @@ export default function Recorder({ projectId, format = "9:16", onClose, onRecord
           </div>
         )}
 
+        {onFitChange && stage !== "rec" && (
+          <div className="chips" style={{ justifyContent: "center", margin: "8px 0 0" }}>
+            {[["fill", "🔍 Užpildyti kadrą"], ["blur", "🖼 Visas vaizdas (be nukirpimo)"]].map(([k, l]) => (
+              <button key={k} type="button" className={"chip" + (fit === k ? " on" : "")} onClick={() => onFitChange(k)}>{l}</button>
+            ))}
+          </div>
+        )}
         {(stage === "live" || stage === "rec") && (
           <div className="bar" style={{ height: 6, margin: "8px 0" }}><i ref={meter} style={{ width: 0, transition: "none" }} /></div>
         )}
