@@ -10,3 +10,19 @@
 		reverse_proxy studija:8501
 	}
 }
+
+# Nauja naršyklės programa: https://APP_DOMAIN (tas pats API ir tie patys projektai)
+{$APP_DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 450MB
+	}
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		root * /srv/app
+		try_files {path} /index.html
+		file_server
+	}
+}

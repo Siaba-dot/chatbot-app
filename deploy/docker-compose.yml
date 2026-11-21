@@ -19,14 +19,17 @@ services:
     volumes:
       - studija-data:/data
       - ./secrets.toml:/root/.streamlit/secrets.toml:ro
-  caddy:  # HTTPS „vartai“: automatinis Let's Encrypt sertifikatas
-    image: caddy:2
+  caddy:  # HTTPS „vartai“ (automatinis Let's Encrypt sertifikatas) + nauja naršyklės programa
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     environment:
       - DOMAIN=${DOMAIN}
+      - APP_DOMAIN=${APP_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

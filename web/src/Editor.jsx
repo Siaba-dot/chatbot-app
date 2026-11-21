@@ -1,0 +1,525 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { api, fileUrl, upload, waitJob } from "./api.js";
+
+const TABS = [
+  ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
+  ["anims", "✨ Animacijos"], ["sound", "🎵 Garsas"], ["pace", "⏱ Tempas"],
+];
+const PHONE = { "9:16": "", "16:9": "f169", "1:1": "f11", "4:5": "f45" };
+
+function Tile({ src, label, on, onClick, multi, small }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <button className={"tile" + (on ? " on" : "")} onClick={onClick} title={label} type="button">
+      <div className="img">
+        {!loaded && <div className="shimmer" />}
+        <img src={src} alt="" loading="lazy" onLoad={() => setLoaded(true)} style={{ opacity: loaded ? 1 : 0 }} />
+        {multi && <span className="tick">✓</span>}
+      </div>
+      <div className="name">{label}</div>
+    </button>
+  );
+}
+
+function Switch({ on, onChange, title, desc, disabled }) {
+  return (
+    <div className="switch" onClick={() => !disabled && onChange(!on)} style={disabled ? { opacity: .5 } : {}}>
+      <div className="txt"><b>{title}</b>{desc && <span>{desc}</span>}</div>
+      <div className={"toggle" + (on ? " on" : "")} />
+    </div>
+  );
+}
+
+function Chips({ items, value, onChange }) {
+  return (
+    <div className="chips">
+      {items.map(([k, label]) => (
+        <button key={k} type="button" className={"chip" + (value === k ? " on" : "")} onClick={() => onChange(k)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function fmtTime(t) {
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+export default function Editor({ id, user }) {
+  const [proj, setProj] = useState(null);
+  const [opts, setOpts] = useState(null);
+  const [s, setS] = useState(null);           // nustatymai (vietinė kopija)
+  const [saved, setSaved] = useState(0);      // išsaugojimų skaitiklis – plytelių atnaujinimui
+  const [tab, setTab] = useState("media");
+  const [cat, setCat] = useState("Visi");
+  const [job, setJob] = useState(null);
+  const [uploads, setUploads] = useState([]);
+  const [error, setError] = useState("");
+  const [show, setShow] = useState("live");   // live | preview | final
+  const [toast, setToast] = useState("");
+  const [lines, setLines] = useState(null);
+  const saveTimer = useRef(null);
+  const fileInput = useRef(null);
+  const camInput = useRef(null);
+  const [over, setOver] = useState(false);
+
+  useEffect(() => {
+    Promise.all([api("/projects/" + id), api("/options")]).then(([p, o]) => {
+      setProj(p);
+      setS(p.settings);
+      setOpts(o);
+      setLines(p.line_texts || (p.lines || []).map(l => l[2]));
+      if (p.outputs && p.outputs.final) setShow("final");
+      if (!p.clips.length) setTab("media");
+    }).catch(e => setError(e.message));
+  }, [id]);
+
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
+
+  // ---------- nustatymai: keičiam vietoje, į serverį – po akimirkos ----------
+  function set(patch) {
+    setS(prev => {
+      const next = { ...prev, ...patch };
+      clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(async () => {
+        try {
+          const p = await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: patch } });
+          setProj(p);
+          if (!p.prepared) setLines(null);
+          setSaved(n => n + 1);
+        } catch (e) { setError(e.message); }
+      }, 450);
+      return next;
+    });
+    setShow("live");
+  }
+  const setAnim = (k, v) => set({ anims: { ...s.anims, [k]: v } });
+
+  async function rename(title) {
+    if (!title.trim() || title === proj.title) return;
+    const p = await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: {}, title } });
+    setProj(p);
+  }
+
+  // ---------- medžiaga ----------
+  async function addFiles(files, recorded = false) {
+    for (const f of files) {
+      const key = Math.random().toString(36).slice(2);
+      setUploads(u => [...u, { key, name: f.name, p: 0 }]);
+      try {
+        const p = await upload(`/projects/${id}/clips`, f, {
+          recorded, onProgress: x => setUploads(u => u.map(o => (o.key === key ? { ...o, p: x } : o))),
+        });
+        setProj(p);
+        setLines(null);
+        setSaved(n => n + 1);
+      } catch (e) {
+        setError(`„${f.name}“: ${e.message}`);
+      } finally {
+        setUploads(u => u.filter(o => o.key !== key));
+      }
+    }
+  }
+  async function removeClip(cid) {
+    setProj(await api(`/projects/${id}/clips/${cid}`, { method: "DELETE" }));
+    setLines(null);
+    setSaved(n => n + 1);
+  }
+  async function move(i, d) {
+    const order = proj.clips.map(c => c.id);
+    const j = i + d;
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    setProj(await api(`/projects/${id}/clips/order`, { method: "PUT", body: { order } }));
+    setLines(null);
+  }
+
+  // ---------- darbai ----------
+  async function run(kind) {
+    setError("");
+    try {
+      if (kind === "prepare") {
+        const j = await api(`/projects/${id}/prepare`, { method: "POST" });
+        setJob(j);
+        await waitJob(j.id, setJob);
+      } else {
+        await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: s } });
+        const j = await api(`/projects/${id}/render`, { method: "POST", body: { quick: kind === "preview" } });
+        setJob(j);
+        await waitJob(j.id, setJob);
+        setShow(kind === "preview" ? "preview" : "final");
+        if (kind === "final") setToast("Video paruoštas! 🎉");
+      }
+      const p = await api("/projects/" + id);
+      setProj(p);
+      setLines(p.line_texts || (p.lines || []).map(l => l[2]));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setJob(null);
+    }
+  }
+
+  async function saveLines(next) {
+    setLines(next);
+    try { setProj(await api(`/projects/${id}/lines`, { method: "PUT", body: { lines: next } })); }
+    catch (e) { setError(e.message); }
+  }
+
+  const live = useMemo(() => fileUrl(`/projects/${id}/tile/live`, "&v=" + saved), [id, saved]);
+  if (error && !proj) return <div className="page"><div className="error">{error}</div></div>;
+  if (!proj || !opts || !s) return <div className="page hint">Kraunama…</div>;
+
+  const tileUrl = (kind, name) => fileUrl(`/projects/${id}/tile/${kind}?name=${encodeURIComponent(name)}`,
+    "&b=" + (proj.clips[0] ? proj.clips[0].id : "s") + (kind === "look" || kind === "effect" ? "&v=" + saved : ""));
+  const hasClips = proj.clips.length > 0;
+  const out = proj.outputs || {};
+  const busy = !!job;
+  const cats = ["Visi", ...opts.template_categories];
+  const templates = Object.entries(opts.templates).filter(([, t]) => cat === "Visi" || t.category === cat);
+  const stamp = x => (x ? "&v=" + x.at : "");
+
+  const steps = [
+    ["Medžiaga", "Įkelkite ar nufilmuokite", hasClips],
+    ["Stilius", "Šablonas, titrai, efektai", hasClips && proj.prepared],
+    ["Peržiūra", "Pažiūrėkite prieš kuriant", !!out.preview || !!out.final],
+    ["Atsisiųsti", "Video + viršelis + aprašymas", !!out.final],
+  ];
+  const now = steps.findIndex(x => !x[2]);
+
+  return (
+    <div className="editor">
+      {/* ---------- kairė: telefonas ---------- */}
+      <div className="stage">
+        <div className={"phone " + PHONE[s.format]}>
+          <div className="screen">
+            {busy ? (
+              <div className="empty">
+                <div className="progress">
+                  <div className="bar"><i style={{ width: `${Math.round((job.progress || 0) * 100)}%` }} /></div>
+                  <div className="msg">{job.message} {Math.round((job.progress || 0) * 100)}%</div>
+                </div>
+              </div>
+            ) : show === "final" && out.final ? (
+              <video key={"f" + out.final.at} src={fileUrl(`/projects/${id}/files/reels.mp4`, stamp(out.final))}
+                     controls playsInline poster={out.final.cover ? fileUrl(`/projects/${id}/files/cover.jpg`, stamp(out.final)) : undefined} />
+            ) : show === "preview" && out.preview ? (
+              <video key={"p" + out.preview.at} src={fileUrl(`/projects/${id}/files/preview.mp4`, stamp(out.preview))}
+                     controls autoPlay playsInline />
+            ) : (
+              <>
+                <img src={live} alt="Peržiūra" />
+                {!hasClips && <span className="pill tag">Pavyzdys</span>}
+              </>
+            )}
+          </div>
+        </div>
+        <div className="stage-actions">
+          <button className="btn" disabled={busy || !hasClips} onClick={() => run("preview")}>▶ Peržiūra</button>
+          <button className="btn gold" disabled={busy || !hasClips} onClick={() => run("final")}>Kurti video</button>
+        </div>
+        <div className="row" style={{ justifyContent: "center" }}>
+          {out.preview && <button className={"chip" + (show === "preview" ? " on" : "")} onClick={() => setShow("preview")}>Peržiūra</button>}
+          {out.final && <button className={"chip" + (show === "final" ? " on" : "")} onClick={() => setShow("final")}>Galutinis</button>}
+          {(out.preview || out.final) && <button className={"chip" + (show === "live" ? " on" : "")} onClick={() => setShow("live")}>Stilius</button>}
+        </div>
+        {!hasClips && <div className="hint" style={{ textAlign: "center", maxWidth: 300 }}>Kol neįkėlėte video, stilius rodomas ant pavyzdinio kadro.</div>}
+      </div>
+
+      {/* ---------- dešinė: nustatymai ---------- */}
+      <div>
+        <input className="title-input" defaultValue={proj.title} onBlur={e => rename(e.target.value)}
+               onKeyDown={e => e.key === "Enter" && e.target.blur()} aria-label="Projekto pavadinimas" />
+        <div className="steps">
+          {steps.map(([t, d, done], i) => (
+            <div key={t} className={"step" + (done ? " done" : i === now ? " now" : "")}><b>{i + 1}. {t}</b>{d}</div>
+          ))}
+        </div>
+        {error && <div className="error" onClick={() => setError("")}>⚠ {error}</div>}
+
+        {out.final && (
+          <div className="card section result">
+            <div className="row">
+              <h3 style={{ margin: 0 }}>🎉 Jūsų video paruoštas</h3>
+              <span className="spacer" />
+              <a className="btn gold small" href={fileUrl(`/projects/${id}/files/reels.mp4`, "&download=1")}>⬇ Video</a>
+              {out.final.cover && <a className="btn small" href={fileUrl(`/projects/${id}/files/cover.jpg`, "&download=1")}>⬇ Viršelis</a>}
+            </div>
+            {out.final.caption && (
+              <>
+                <div className="caption">{out.final.caption.caption}
+                  <div className="tags">{(out.final.caption.hashtags || []).join(" ")}</div>
+                </div>
+                <button className="btn small" onClick={() => {
+                  navigator.clipboard.writeText(out.final.caption.caption + "\n\n" + (out.final.caption.hashtags || []).join(" "));
+                  setToast("Aprašymas nukopijuotas 📋");
+                }}>📋 Kopijuoti aprašymą su grotažymėmis</button>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="tabs">
+          {TABS.map(([k, label]) => (
+            <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{label}</button>
+          ))}
+        </div>
+
+        {tab === "media" && (
+          <div className="section">
+            <div className="section">
+              <h3>Formatas</h3>
+              <Chips items={Object.entries(opts.formats)} value={s.format} onChange={v => set({ format: v })} />
+            </div>
+            {proj.clips.length > 0 && (
+              <div className="clips">
+                {proj.clips.map((c, i) => (
+                  <div className="clip" key={c.id}>
+                    <img src={fileUrl(`/projects/${id}/clips/${c.id}/thumb`)} alt="" />
+                    <div className="info">
+                      <b>{c.name}</b>
+                      <span>{c.image ? "Nuotrauka" : fmtTime(c.duration)} · {c.audio === "speech" ? "🎙 kalba" : c.audio === "silent" ? "🔇 be kalbos" : "be garso"}</span>
+                    </div>
+                    <button className="btn small ghost" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Aukštyn">↑</button>
+                    <button className="btn small ghost" onClick={() => move(i, 1)} disabled={i === proj.clips.length - 1} aria-label="Žemyn">↓</button>
+                    <button className="btn small ghost danger" onClick={() => removeClip(c.id)} aria-label="Pašalinti">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {uploads.map(u => (
+              <div className="clip" key={u.key}>
+                <div className="info"><b>{u.name}</b>
+                  <div className="bar" style={{ marginTop: 6 }}><i style={{ width: `${Math.round(u.p * 100)}%` }} /></div>
+                  <span>{u.p < 1 ? `Įkeliama ${Math.round(u.p * 100)}%` : "Tikrinama…"}</span>
+                </div>
+              </div>
+            ))}
+            <div className={"drop" + (over ? " over" : "")} onClick={() => fileInput.current.click()}
+                 onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
+                 onDrop={e => { e.preventDefault(); setOver(false); addFiles([...e.dataTransfer.files]); }}>
+              <b>＋ Įkelkite video ar nuotraukas</b>
+              <span className="hint">Nutempkite failus čia arba spauskite. MP4, MOV, JPG, PNG – iki 450 MB.</span>
+            </div>
+            <input ref={fileInput} type="file" accept="video/*,image/*" multiple hidden
+                   onChange={e => { addFiles([...e.target.files]); e.target.value = ""; }} />
+            <input ref={camInput} type="file" accept="video/*" capture="user" hidden
+                   onChange={e => { addFiles([...e.target.files], true); e.target.value = ""; }} />
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn" onClick={() => camInput.current.click()}>📱 Filmuoti telefonu</button>
+              <span className="hint">Telefone atsidarys kamera.</span>
+            </div>
+            <div className="section" style={{ marginTop: 18 }}>
+              <h3>Perėjimai tarp įrašų</h3>
+              <select className="input" value={s.transition} onChange={e => set({ transition: e.target.value })}>
+                {opts.transitions.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {tab === "style" && (
+          <>
+            <div className="section">
+              <h3>Šablonas</h3>
+              <div className="hint">Šrifto, spalvų ir filtro derinys vienu paspaudimu.</div>
+              <Chips items={cats.map(c => [c, c])} value={cat} onChange={setCat} />
+              <div className="tiles">
+                {templates.map(([name, t]) => (
+                  <Tile key={name} src={tileUrl("template", name)} label={name} on={s.template === name}
+                        onClick={() => set({ template: name, accent: t.accent, color: t.color })} />
+                ))}
+              </div>
+            </div>
+            <div className="section">
+              <h3>Akcento spalva</h3>
+              <div className="chips">
+                {Object.entries(opts.accents).map(([name, hex]) => (
+                  <button key={name} type="button" className={"chip" + (s.accent === name ? " on" : "")} onClick={() => set({ accent: name })}>
+                    <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 5, background: hex, marginRight: 6 }} />{name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="section">
+              <h3>Filtras</h3>
+              <div className="tiles small">
+                {opts.colors.map(name => (
+                  <Tile key={name} small src={tileUrl("color", name)} label={name} on={s.color === name} onClick={() => set({ color: name })} />
+                ))}
+              </div>
+            </div>
+            <div className="section">
+              <h3>Efektai</h3>
+              <div className="hint">Galima rinktis kelis.</div>
+              <div className="tiles small">
+                {Object.entries(opts.effects).map(([name]) => (
+                  <Tile key={name} small multi src={tileUrl("effect", name)} label={name} on={s.effects.includes(name)}
+                        onClick={() => set({ effects: s.effects.includes(name) ? s.effects.filter(x => x !== name) : [...s.effects, name] })} />
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === "subs" && (
+          <>
+            <div className="section card">
+              <Switch on={s.subtitles} onChange={v => set({ subtitles: v })} title="Titrai iš kalbos"
+                      desc={user.ai ? "Kalba atpažįstama automatiškai." : "Automatinis atpažinimas – Premium plane."} />
+              <div className="field" style={{ marginTop: 10 }}>
+                <label>Titrų kalba</label>
+                <select className="input" value={s.subtitle_language} onChange={e => set({ subtitle_language: e.target.value })}>
+                  {Object.entries(opts.subtitle_languages).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+              <Switch on={s.key_words} onChange={v => set({ key_words: v })} title="✦ Svarbiausi žodžiai – didesni ir spalvoti" />
+              <Switch on={s.punch} disabled={!s.key_words} onChange={v => set({ punch: v })} title="✦ Akcentų priartėjimas" desc="Vaizdas trumpam priartėja ties svarbiu žodžiu." />
+              <Switch on={s.bubbles} onChange={v => set({ bubbles: v })} title="💭 Debesėliai (?, !, WOW)" desc="Komiksų debesėliai iššoka tam tikrose vietose." />
+            </div>
+            <div className="section">
+              <h3>Titrų stilius</h3>
+              <div className="tiles">
+                {Object.entries(opts.subtitle_looks).map(([k, title]) => (
+                  <Tile key={k} src={tileUrl("look", k)} label={title} on={s.look === k} onClick={() => set({ look: k })} />
+                ))}
+              </div>
+            </div>
+            <div className="section">
+              <h3>Vieta ir dydis</h3>
+              <Chips items={opts.subtitle_positions.map(x => [x, x])} value={s.subs_pos} onChange={v => set({ subs_pos: v })} />
+              <input className="range" type="range" min="70" max="140" step="5" value={s.subs_size}
+                     onChange={e => setS({ ...s, subs_size: +e.target.value })} onMouseUp={e => set({ subs_size: +e.target.value })}
+                     onTouchEnd={e => set({ subs_size: +e.target.value })} />
+              <div className="hint">Dydis: {s.subs_size}%</div>
+            </div>
+            <div className="section">
+              <div className="row"><h3 style={{ margin: 0 }}>Titrų tekstas</h3><span className="spacer" />
+                <button className="btn small" disabled={busy || !hasClips} onClick={() => run("prepare")}>
+                  🎙 {proj.prepared ? "Atpažinti iš naujo" : "Paruošti titrus"}</button>
+              </div>
+              <div className="hint">Pataisykite klaidas. *Žvaigždutėmis* pažymėti žodžiai bus paryškinti. Ištrynus eilutę – ji dings.</div>
+              {proj.prepared && lines && lines.length > 0 ? (
+                <div className="lines" style={{ marginTop: 10 }}>
+                  {proj.lines.map((l, i) => (
+                    <div className="line" key={i}>
+                      <span>{fmtTime(l[0])}</span>
+                      <input className="input" defaultValue={lines[i]} onBlur={e => {
+                        if (e.target.value !== lines[i]) { const n = [...lines]; n[i] = e.target.value; saveLines(n); }
+                      }} />
+                    </div>
+                  ))}
+                </div>
+              ) : proj.prepared ? <p className="hint">Kalbos neaptikta – titrų nebus.</p> : null}
+            </div>
+          </>
+        )}
+
+        {tab === "texts" && (
+          <div className="section card">
+            <div className="field">
+              <label>Kabliukas – pirmos 3 sekundės</label>
+              <input className="input" value={s.hook} maxLength={80} placeholder="Pvz.: 3 klaidos, kurias daro visi"
+                     onChange={e => set({ hook: e.target.value })} />
+            </div>
+            <Chips items={opts.hook_positions.map(x => [x, x])} value={s.hook_pos} onChange={v => set({ hook_pos: v })} />
+            <div className="field">
+              <label>Kvietimas pabaigoje (CTA)</label>
+              <input className="input" value={s.cta} maxLength={60} placeholder="Pvz.: Sekite daugiau patarimų"
+                     onChange={e => set({ cta: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Jūsų paskyra</label>
+              <input className="input" value={s.handle} maxLength={40} placeholder="@jusu_paskyra"
+                     onChange={e => set({ handle: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Teksto dydis: {s.text_size}%</label>
+              <input className="range" type="range" min="70" max="140" step="5" value={s.text_size}
+                     onChange={e => setS({ ...s, text_size: +e.target.value })} onMouseUp={e => set({ text_size: +e.target.value })}
+                     onTouchEnd={e => set({ text_size: +e.target.value })} />
+            </div>
+          </div>
+        )}
+
+        {tab === "anims" && (
+          <>
+            <div className="section card">
+              <Switch on={s.anims.stickers} onChange={v => setAnim("stickers", v)} title="✨ Animuoti lipdukai" desc="Širdelės, žvaigždutės, konfeti, liepsnelės – pagal tai, ką sakote." />
+              <Switch on={s.anims.marks} onChange={v => setAnim("marks", v)} title="✏️ Ranka piešti žymėjimai" desc="Apvedamas ar parodomas svarbus pasakytas žodis." />
+              <Switch on={s.anims.cards} onChange={v => setAnim("cards", v)} title="🃏 Iššokančios kortelės" desc="Kai vardijate „pirma…, antra…“." />
+              <Switch on={s.anims.phone} onChange={v => setAnim("phone", v)} title="📱 Nuotraukos skrenda į telefoną" desc="Tik kai kalbate apie nuotraukas, galeriją, turinį." />
+              <Switch on={s.anims.fx} onChange={v => setAnim("fx", v)} title="🎆 Efektų mozaika" desc="Byrančios kaladėlės, glitch, blyksnis – vis kitas." />
+              <Switch on={s.anims.intro} onChange={v => setAnim("intro", v)} title="🎬 Įžanga" desc="Logotipas ir paskyra įskrenda pradžioje." />
+              <Switch on={s.anims.outro} onChange={v => setAnim("outro", v)} title="🙏 Pabaiga" desc="Padėka ir paskyra po video." />
+            </div>
+            <div className="section">
+              <h3>🎁 Grafikos efektai</h3>
+              <div className="hint">Parenkami pagal tai, ką sakote: skaičiai – grafikas, klausimas – žinutės ir pan.</div>
+              <div className="chips">
+                {Object.entries(opts.gfx).map(([k, label]) => (
+                  <button key={k} type="button" className={"chip" + (s.gfx_kinds.includes(k) ? " on" : "")}
+                          onClick={() => set({ gfx_kinds: s.gfx_kinds.includes(k) ? s.gfx_kinds.filter(x => x !== k) : [...s.gfx_kinds, k] })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === "sound" && (
+          <>
+            <div className="section">
+              <h3>Muzika</h3>
+              <div className="clips">
+                <div className={"clip"} style={{ cursor: "pointer", borderColor: !s.music ? "var(--amber)" : undefined }} onClick={() => set({ music: null })}>
+                  <div className="info"><b>Be muzikos</b><span>Tik jūsų balsas</span></div>
+                </div>
+                {Object.entries(opts.music).map(([name, desc]) => (
+                  <div key={name} className="clip" style={{ cursor: "pointer", borderColor: s.music === name ? "var(--amber)" : undefined }}
+                       onClick={() => set({ music: name })}>
+                    <div className="info"><b>{name}</b><span>{desc}</span></div>
+                    <audio controls preload="none" src={"/api/music/" + encodeURIComponent(name)} style={{ height: 32, maxWidth: 160 }}
+                           onClick={e => e.stopPropagation()} />
+                  </div>
+                ))}
+              </div>
+              <div className="field">
+                <label>Muzikos garsumas: {s.music_volume}%</label>
+                <input className="range" type="range" min="0" max="100" value={s.music_volume}
+                       onChange={e => setS({ ...s, music_volume: +e.target.value })} onMouseUp={e => set({ music_volume: +e.target.value })}
+                       onTouchEnd={e => set({ music_volume: +e.target.value })} />
+              </div>
+            </div>
+            <div className="section card">
+              <Switch on={s.ducking} onChange={v => set({ ducking: v })} title="Muzika patyli, kai kalbate" />
+              <Switch on={s.remove_silence} onChange={v => set({ remove_silence: v })} title="Iškirpti pauzes" desc="Tylos tarp sakinių iškerpamos – video tampa gyvesnis." />
+              <Switch on={s.denoise} onChange={v => set({ denoise: v })} title="Išvalyti foninį triukšmą" />
+            </div>
+          </>
+        )}
+
+        {tab === "pace" && (
+          <div className="section card">
+            <div className="field">
+              <label>Ilgiausia trukmė</label>
+              <Chips items={opts.lengths.map(x => [x, x])} value={s.length} onChange={v => set({ length: v })} />
+            </div>
+            <div className="field">
+              <label>Greitis</label>
+              <Chips items={[0.75, 1, 1.1, 1.25, 1.5, 2].map(x => [x, x + "×"])} value={s.speed} onChange={v => set({ speed: v })} />
+            </div>
+            <div className="field">
+              <label>Progreso juostelė</label>
+              <Chips items={["Viršuje", "Apačioje", "Nėra"].map(x => [x, x])} value={s.progress_bar} onChange={v => set({ progress_bar: v })} />
+            </div>
+          </div>
+        )}
+      </div>
+      {toast && <div className="toast">{toast}</div>}
+    </div>
+  );
+}

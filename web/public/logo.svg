@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Reels studija – gintaro lašas">
+  <defs>
+    <!-- gintaras – sustingęs sakų lašas: smailia viršūne, apvaliu, sunkiu dugnu -->
+    <path id="rs-drop" d="M60 6 C64 20 72 30 82 42 C92 54 98 64 98 78 C98 99 81 114 60 114 C39 114 22 99 22 78
+      C22 64 28 54 38 42 C48 30 56 20 60 6 Z"/>
+    <clipPath id="rs-clip"><use href="#rs-drop"/></clipPath>
+    <!-- metalinis gintaras: šviesus medus viršuje → gintaras → tamsus konjakas dugne -->
+    <linearGradient id="rs-body" x1="0.25" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#FFF1C9"/>
+      <stop offset="0.28" stop-color="#FFD27A"/>
+      <stop offset="0.55" stop-color="#E9A23B"/>
+      <stop offset="0.8" stop-color="#B8650F"/>
+      <stop offset="1" stop-color="#7A3A06"/>
+    </linearGradient>
+    <!-- vidinė šviesa – lyg saulė šviestų pro gintarą -->
+    <radialGradient id="rs-core" cx="0.5" cy="0.66" r="0.42">
+      <stop offset="0" stop-color="#FFE6A6" stop-opacity="0.75"/>
+      <stop offset="0.6" stop-color="#FFC25E" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#FFC25E" stop-opacity="0"/>
+    </radialGradient>
+    <!-- tamsesnis kraštas – tūris -->
+    <radialGradient id="rs-rim" cx="0.5" cy="0.62" r="0.62">
+      <stop offset="0.72" stop-color="#5A2A04" stop-opacity="0"/>
+      <stop offset="1" stop-color="#5A2A04" stop-opacity="0.55"/>
+    </radialGradient>
+    <linearGradient id="rs-shine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="rs-ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4A2306"/>
+      <stop offset="1" stop-color="#2A1203"/>
+    </linearGradient>
+    <filter id="rs-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+  <!-- švytėjimas aplink lašą -->
+  <use href="#rs-drop" fill="#E9A23B" opacity="0.45" filter="url(#rs-glow)"/>
+  <use href="#rs-drop" fill="url(#rs-body)"/>
+  <g clip-path="url(#rs-clip)">
+    <rect x="0" y="0" width="120" height="120" fill="url(#rs-core)"/>
+    <rect x="0" y="0" width="120" height="120" fill="url(#rs-rim)"/>
+    <!-- blizgesys kairėje viršuje -->
+    <path d="M50 30 C44 42 36 54 33 68 C32 74 36 76 39 71 C43 60 50 48 56 36 C58 31 53 26 50 30 Z"
+          fill="url(#rs-shine)" opacity="0.75"/>
+    <ellipse cx="76" cy="94" rx="10" ry="4" fill="#FFE2A0" opacity="0.35" transform="rotate(-25 76 94)"/>
+  </g>
+  <use href="#rs-drop" fill="none" stroke="#FFE7B0" stroke-opacity="0.65" stroke-width="1.2"/>
+  <!-- monograma: RS (Reels Studija), įspausta į gintarą -->
+  <text x="60" y="92" text-anchor="middle" font-family="'Playfair Display', Georgia, 'Times New Roman', serif"
+        font-weight="700" font-size="30" letter-spacing="1" fill="#FFE9B8" opacity="0.55" dx="0.6" dy="0.8">RS</text>
+  <text x="60" y="92" text-anchor="middle" font-family="'Playfair Display', Georgia, 'Times New Roman', serif"
+        font-weight="700" font-size="30" letter-spacing="1" fill="url(#rs-ink)">RS</text>
+</svg>
