@@ -118,6 +118,7 @@ export default function Editor({ id, user }) {
 
   // ---------- medžiaga ----------
   async function addFiles(files, recorded = false) {
+    setError("");  // sena klaida nebeaktuali
     for (const f of files) {
       const key = Math.random().toString(36).slice(2);
       setUploads(u => [...u, { key, name: f.name, p: 0 }]);
@@ -265,7 +266,12 @@ export default function Editor({ id, user }) {
             <div key={t} className={"step" + (done ? " done" : i === now ? " now" : "")}><b>{i + 1}. {t}</b>{d}</div>
           ))}
         </div>
-        {error && <div className="error" onClick={() => setError("")}>⚠ {error}</div>}
+        {error && (
+          <div className="error row" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}>
+            <span style={{ flex: 1 }}>⚠ {error}</span>
+            <button className="btn small ghost" onClick={() => setError("")} aria-label="Uždaryti">✕</button>
+          </div>
+        )}
 
         {out.final && (
           <div className="card section result">
@@ -291,7 +297,7 @@ export default function Editor({ id, user }) {
 
         <div className="tabs">
           {TABS.map(([k, label]) => (
-            <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{label}</button>
+            <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => { setTab(k); setError(""); }}>{label}</button>
           ))}
         </div>
 
