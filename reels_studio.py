@@ -317,7 +317,6 @@ EFFECTS = {
     "Ryškumas": "Aiškesnės detalės ir faktūros.",
     "Šviesos blyksnis": "Video prasideda baltu blyksniu.",
     "Aukso blizgesys": "Firminis: per auksinį ar sidabrinį tekstą periodiškai perbėga šviesos blyksnis.",
-    "Auksinės dulkės": "Firminis: vaizde švelniai plaukioja ir mirga auksinės kibirkštėlės.",
     "Auksinis rėmelis": "Firminis: plona dviguba metalinė linija aplink kadrą su deimantėliais (aukso ar sidabro).",
     "Gintaro akimirka": "Firminis: pasirinktoje vietoje kadras švelniai nušvinta šilta gintaro šviesa ir truputį "
                         "priartėja – akcentas svarbiausiam žodžiui. Video ir kalba nesustoja."
@@ -394,11 +393,8 @@ def look_graph(inp, out, color="Natūralios", effects=(), W=1080, H=1920, durati
 
 
 def still_extras(inp, out, width, height, effects, tmp, accent="Aukso gradientas", fps=25):
-    """Dulkės ir rėmelis vienam kadrui (miniatiūroms, viršeliui, peržiūroms)."""
+    """Rėmelis vienam kadrui (miniatiūroms, viršeliui, peržiūroms)."""
     chains, cur = [], inp
-    if "Auksinės dulkės" in (effects or ()):
-        chains += dust_chains(cur, "[sx1]", width, height, fps, tmp, still=True)
-        cur = "[sx1]"
     if "Auksinis rėmelis" in (effects or ()):
         chains += frame_chains(cur, "[sx2]", width, height, fps, tmp, accent)
         cur = "[sx2]"
@@ -552,7 +548,7 @@ def music_library():
 
 
 SIGNATURE_FILTERS = ("Paryžiaus rytas", "Milano naktis", "Baltijos auksas")
-SIGNATURE_EFFECTS = ("Gintaro akimirka", "Aukso blizgesys", "Auksinės dulkės", "Auksinis rėmelis")
+SIGNATURE_EFFECTS = ("Gintaro akimirka", "Aukso blizgesys", "Auksinis rėmelis")
 
 LENGTHS = {"Be ribos": None, "15 s": 15, "30 s": 30, "60 s": 60, "90 s": 90}
 
@@ -841,50 +837,6 @@ def shine_image(path, width, height):
     return path
 
 
-def dust_media(path, width=360, height=640, fps=30, seconds=4.0, still=False, seed=11):
-    """Auksinės dulkės: permatomas, be sandūros kartojamas kibirkštėlių sluoksnis (MOV qtrle) arba vienas kadras (PNG)."""
-    import numpy as np
-    rng = np.random.default_rng(seed)
-    n = 70
-    px, py = rng.uniform(0, width, n), rng.uniform(0, height, n)
-    rise = rng.choice([1, 1, 2], n) * height  # per ciklą pakyla 1–2 kadro aukščius – ciklas be sandūros
-    sway, sph = rng.uniform(4, 18, n), rng.uniform(0, 2 * np.pi, n)
-    tw, tph = rng.choice([1, 2, 3], n), rng.uniform(0, 2 * np.pi, n)
-    size = rng.uniform(1.2, 3.6, n)
-    gold = np.array([[255, 236, 170], [245, 210, 120], [255, 248, 220]])[rng.integers(0, 3, n)]
-    r = 18
-    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
-    window = np.clip(1 - (xx ** 2 + yy ** 2) / r ** 2, 0, 1) ** 2  # apvalūs, švelnūs kraštai
-    frames = 1 if still else int(round(fps * seconds))
-    codec = [] if still else ["-c:v", "qtrle"]
-    # Kadrai siunčiami ffmpeg po vieną (ne kaupiami atmintyje).
-    proc = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
-                             f"{width}x{height}", "-r", str(fps), "-i", "-", *codec, path],
-                            stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-    for f in range(frames):
-        ph = 0.37 if still else f / frames
-        img = np.zeros((height, width, 4), dtype=np.float32)
-        cx = (px + sway * np.sin(2 * np.pi * ph + sph)) % width
-        cy = (py - rise * ph) % height
-        bright = 0.25 + 0.75 * (0.5 + 0.5 * np.sin(2 * np.pi * tw * ph + tph)) ** 3
-        for i in range(n):
-            g = np.exp(-(xx ** 2 + yy ** 2) / (2 * size[i] ** 2)) * bright[i]
-            g += np.exp(-(xx ** 2 + yy ** 2) / (2 * (size[i] * 2.4) ** 2)) * bright[i] * 0.22  # švytėjimas
-            g *= window
-            x0, y0 = int(cx[i]) - r, int(cy[i]) - r
-            xs, ys = slice(max(0, x0), min(width, x0 + 2 * r + 1)), slice(max(0, y0), min(height, y0 + 2 * r + 1))
-            gs = g[ys.start - y0:ys.stop - y0, xs.start - x0:xs.stop - x0]
-            img[ys, xs, 3] = np.maximum(img[ys, xs, 3], gs)
-            img[ys, xs, :3] = np.where(gs[..., None] > 0.02, gold[i], img[ys, xs, :3])
-        img[..., 3] = np.clip(img[..., 3], 0, 1) * 255
-        proc.stdin.write(np.clip(img, 0, 255).astype(np.uint8).tobytes())
-    proc.stdin.close()
-    err = proc.stderr.read()
-    if proc.wait() != 0:
-        raise RuntimeError(f"Nepavyko sukurti auksinių dulkių: {err[-500:]}")
-    return path
-
-
 def frame_image(path, width, height, accent="Aukso gradientas"):
     """Auksinis (ar sidabrinis) rėmelis: dviguba linija suapvalintais kampais ir deimantėliai viršuje bei
     apačioje (RGBA PNG)."""
@@ -937,16 +889,6 @@ def frame_chains(inp, out, width, height, fps, tmp, accent="Aukso gradientas", d
     p = frame_image(os.path.join(tmp, "frame.png"), width, height, accent)
     return [f"movie='{_filter_path(p)}',loop=loop=-1:size=1:start=0{_until(duration, fps)},format=rgba[frm]",
             f"{inp}[frm]overlay=shortest=1:format=auto{out}"]
-
-
-def dust_chains(inp, out, width, height, fps, tmp, still=False, duration=None):
-    """Uždeda auksines dulkes ant vaizdo (inp -> out)."""
-    p = dust_media(os.path.join(tmp, "dust.png" if still else "dust.mov"), fps=fps, still=still)
-    src = f"movie='{_filter_path(p)}'" + ("" if still else ":loop=0,setpts=N/(FRAME_RATE*TB)" +
-                                          _until(duration, fps))
-    loop = ",loop=loop=-1:size=1:start=0" if still else ""
-    return [f"{src}{loop},scale={width}:{height},format=rgba[dust]",
-            f"{inp}[dust]overlay=shortest=1:format=auto{out}"]
 
 
 def gradient_image(path, width, height, accent, template="Prabangus auksas", hook_ypos=0.2, size=1.0):
@@ -1294,16 +1236,13 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 graph.append(f"{vout}[al{wi}]overlay=x=(W-w)/2:y='H*0.47-h-{round(H * 0.03)}*min(1,(t-{st0:.3f})/0.4)'"
                              f":eof_action=pass:format=auto[alo{wi}]")
                 vout = f"[alo{wi}]"
-        if card_len:  # pabaigos kortelė: švelniai išryškėja ties video pabaiga; dulkės ir rėmelis – virš jos
+        if card_len:  # pabaigos kortelė: švelniai išryškėja ties video pabaiga; rėmelis – virš jos
             cp = end_card_image(end_card, W, H, os.path.join(tmp, "end_card.png"), accent)
             k = add_input("-loop", "1", "-framerate", str(fps), "-t", f"{card_len + 1:.3f}", "-i", cp)
             graph.append(f"[{k}:v]format=yuva420p,fade=t=in:st=0:d=0.6:alpha=1,"
                          f"setpts=PTS-STARTPTS+{duration:.3f}/TB[card]")
             graph.append(f"{vout}[card]overlay=eof_action=pass:format=auto[carded]")
             vout = "[carded]"
-        if "Auksinės dulkės" in (effects or ()):
-            graph += dust_chains(vout, "[dusty]", W, H, fps, tmp, duration=total + 1)
-            vout = "[dusty]"
         if "Auksinis rėmelis" in (effects or ()):
             graph += frame_chains(vout, "[framed]", W, H, fps, tmp, accent, duration=total + 1)
             vout = "[framed]"
