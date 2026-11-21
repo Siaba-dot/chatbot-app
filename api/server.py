@@ -96,6 +96,7 @@ def _user_info(username):
     left = None if minutes is None else max(0.0, minutes - accounts.used_minutes(username))
     return {"username": username, "name": cfg.get("name") or username, "plan": plan,
             "plan_title": accounts.PLANS[plan], "ai": plan in AI_PLANS and bool(clips_ui.configured_key()),
+            "pexels": bool(pexels_key()),
             "minutes_left": left}
 
 
@@ -171,6 +172,227 @@ def openai_save(body: KeyBody, user=Depends(admin_user)):
     return openai_status(user)
 
 
+# ---------- 🎞 Pexels intarpai ----------
+def pexels_key():
+    if os.environ.get("PEXELS_API_KEY"):
+        return os.environ["PEXELS_API_KEY"].strip()
+    try:
+        with open(os.path.join(DATA, "pexels_key"), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _pexels(path, params=None, key=None):
+    import urllib.parse
+    import urllib.request
+    key = key or pexels_key()
+    if not key:
+        raise HTTPException(400, "Pexels raktas neįrašytas (administratorius: „Mano projektai“ → Pexels raktas).")
+    url = "https://api.pexels.com" + path + ("?" + urllib.parse.urlencode(params) if params else "")
+    req = urllib.request.Request(url, headers={"Authorization": key, "User-Agent": "ReelsStudija/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        code = getattr(e, "code", None)
+        raise HTTPException(400 if code in (401, 403) else 502,
+                            "Pexels raktas neveikia" if code in (401, 403) else f"Pexels nepasiekiamas ({e})")
+
+
+def _orientation(fmt):
+    return {"16:9": "landscape", "1:1": "square"}.get(fmt, "portrait")
+
+
+def _video_brief(v):
+    return {"id": v["id"], "image": v.get("image"), "duration": v.get("duration"), "width": v.get("width"),
+            "height": v.get("height"), "user": (v.get("user") or {}).get("name", ""), "url": v.get("url")}
+
+
+@app.get("/api/admin/pexels")
+def pexels_status(user=Depends(admin_user)):
+    k = pexels_key()
+    return {"set": bool(k), "tail": k[-4:] if k else ""}
+
+
+@app.post("/api/admin/pexels")
+def pexels_save(body: KeyBody, user=Depends(admin_user)):
+    key = body.key.strip()
+    if key:
+        _pexels("/videos/search", {"query": "nature", "per_page": 1}, key=key)
+    path = os.path.join(DATA, "pexels_key")
+    os.makedirs(DATA, exist_ok=True)
+    if key:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(key)
+        os.chmod(path, 0o600)
+    elif os.path.exists(path):
+        os.remove(path)
+    return pexels_status(user)
+
+
+@app.get("/api/pexels/search")
+def pexels_search(q: str, fmt: str = "9:16", page: int = 1, user=Depends(current_user)):
+    j = _pexels("/videos/search", {"query": q[:80], "orientation": _orientation(fmt), "per_page": 18,
+                                   "page": max(1, min(page, 20)), "size": "medium"})
+    return {"videos": [_video_brief(v) for v in j.get("videos", []) if (v.get("duration") or 0) >= 2],
+            "has_pexels": True}
+
+
+def _download_pexels(user, pid, vid, fmt):
+    """Parsisiunčia tinkamiausią Pexels failą (~1080p, ne didesnį nei reikia). Grąžina (kelias, aprašas)."""
+    import urllib.request
+    v = _pexels(f"/videos/videos/{int(vid)}")
+    files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4" and f.get("link")
+             and f.get("width") and f.get("height")]
+    if not files:
+        raise HTTPException(404, "Šio video failo nerasta")
+    target = 1920 if fmt in ("9:16", "16:9") else 1350
+    files.sort(key=lambda f: (max(f["width"], f["height"]) > 2200, abs(max(f["width"], f["height"]) - target)))
+    d = os.path.join(_pdir(user, pid), "broll")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"px{int(vid)}.mp4")
+    if not os.path.exists(path):
+        req = urllib.request.Request(files[0]["link"], headers={"User-Agent": "ReelsStudija/1.0"})
+        tmp = path + ".part"
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f, 1 << 20)
+        os.replace(tmp, path)
+    return path, _video_brief(v)
+
+
+class BrollBody(BaseModel):
+    pexels_id: int
+    t: float = 0.0
+    d: float = 2.5
+    query: str = ""
+    as_clip: bool = False
+
+
+@app.post("/api/projects/{pid}/broll")
+def add_broll(pid: str, body: BrollBody, user=Depends(current_user)):
+    proj = _load(user, pid)
+    path, brief = _download_pexels(user, pid, body.pexels_id, proj["settings"]["format"])
+    proj = _load(user, pid)
+    if body.as_clip:  # kaip įprastas įrašas (pvz. video be filmavimo: Pexels kadrai + AI įgarsinimas)
+        clip_path = os.path.join(_pdir(user, pid), "clips", f"px{body.pexels_id}_{uuid.uuid4().hex[:4]}.mp4")
+        os.makedirs(os.path.dirname(clip_path), exist_ok=True)
+        shutil.copy(path, clip_path)
+        clip = engine.add_clip(clip_path, f"Pexels · {brief['user'] or body.pexels_id}")
+        clip["id"] = uuid.uuid4().hex[:10]
+        clip["audio"] = "none" if clip["audio"] != "speech" else clip["audio"]
+        proj["clips"].append(clip)
+        proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+    else:
+        proj.setdefault("broll", []).append({
+            "id": uuid.uuid4().hex[:8], "pexels_id": body.pexels_id, "t": round(max(0.0, body.t), 2),
+            "d": round(max(1.0, min(6.0, body.d)), 2), "query": body.query[:60], "image": brief["image"],
+            "user": brief["user"], "url": brief["url"], "path": path})
+        proj["broll"].sort(key=lambda b: b["t"])
+    _save(user, proj)
+    return _public(proj)
+
+
+class BrollEdit(BaseModel):
+    t: float | None = None
+    d: float | None = None
+
+
+@app.put("/api/projects/{pid}/broll/{bid}")
+def edit_broll(pid: str, bid: str, body: BrollEdit, user=Depends(current_user)):
+    proj = _load(user, pid)
+    for b in proj.get("broll", []):
+        if b["id"] == bid:
+            if body.t is not None:
+                b["t"] = round(max(0.0, body.t), 2)
+            if body.d is not None:
+                b["d"] = round(max(1.0, min(6.0, body.d)), 2)
+    proj["broll"].sort(key=lambda b: b["t"])
+    _save(user, proj)
+    return _public(proj)
+
+
+@app.delete("/api/projects/{pid}/broll/{bid}")
+def delete_broll(pid: str, bid: str, user=Depends(current_user)):
+    proj = _load(user, pid)
+    proj["broll"] = [b for b in proj.get("broll", []) if b["id"] != bid]
+    _save(user, proj)
+    return _public(proj)
+
+
+@app.post("/api/projects/{pid}/broll/auto")
+def auto_broll(pid: str, user=Depends(current_user)):
+    """AI pagal tai, ką sakote, parenka 3–4 momentus ir Pexels kadrus jiems."""
+    proj = _load(user, pid)
+    client = openai_client(user)
+    if client is None:
+        raise HTTPException(400, "Automatiniams intarpams reikia AI (Premium). Galite ieškoti ir įterpti ranka.")
+    if not proj.get("words"):
+        raise HTTPException(400, "Pirmiausia paruoškite titrus (💬 Titrai → Paruošti titrus).")
+    lines = " ".join(f"[{a:.1f}] {video_editor.plain(w)}" for w, a, _ in proj["words"][:300])
+    end = proj["words"][-1][2]
+    j = reels_studio._ai_json(client, (
+        "You pick B-roll cutaways for a short talking video. From the timed transcript choose 3-4 moments (not in the "
+        "first 2.5 s, at least 4 s apart) where a stock video would illustrate what is said. For each give an "
+        "English Pexels search query of 2-4 concrete, visual words (e.g. 'winter car tires', 'coffee pouring'), "
+        "duration 2-3.5 s. Reply only JSON: {\"broll\": [{\"time\": 0, \"duration\": 2.5, \"query\": \"...\"}]}"),
+        {"transcript": lines})
+    used = {b["pexels_id"] for b in proj.get("broll", [])}
+    added = 0
+    for it in (j.get("broll") or [])[:4]:
+        try:
+            t, dur, q = float(it["time"]), float(it.get("duration", 2.5)), str(it["query"])[:60]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (1.5 <= t <= end - 1.0):
+            continue
+        res = _pexels("/videos/search", {"query": q, "orientation": _orientation(proj["settings"]["format"]),
+                                         "per_page": 6, "size": "medium"})
+        cand = [v for v in res.get("videos", []) if v["id"] not in used and (v.get("duration") or 0) >= 3]
+        if not cand:
+            continue
+        used.add(cand[0]["id"])
+        add_broll(pid, BrollBody(pexels_id=cand[0]["id"], t=t, d=min(dur, end - t), query=q), user)
+        added += 1
+    proj = _load(user, pid)
+    if not added:
+        raise HTTPException(404, "Tinkamų intarpų nerasta – pabandykite ieškoti ranka.")
+    return _public(proj)
+
+
+# ---------- 🎙 AI įgarsinimas ----------
+@app.get("/api/voice_sample/{voice}")
+def voice_sample(voice: str, user=Depends(current_user)):
+    if voice not in engine.VOICES:
+        raise HTTPException(404, "Nėra tokio balso")
+    path = os.path.join(DATA, "voice_samples", voice + ".mp3")
+    if not os.path.exists(path):
+        client = openai_client(user)
+        if client is None:
+            raise HTTPException(400, "Balsų pavyzdžiams reikia AI (Premium).")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        engine.tts(client, "Sveiki! Taip skambės jūsų Reels įgarsinimas. Ar patinka mano balsas?", voice, path)
+    return FileResponse(path, media_type="audio/mpeg")
+
+
+class VoiceTextBody(BaseModel):
+    topic: str
+    seconds: int = 30
+
+
+@app.post("/api/projects/{pid}/voice_text")
+def gen_voice_text(pid: str, body: VoiceTextBody, user=Depends(current_user)):
+    proj = _load(user, pid)
+    client = openai_client(user)
+    if client is None:
+        raise HTTPException(400, "Teksto rašymui reikia AI (Premium).")
+    text = engine.voice_text(client, body.topic[:300], proj["settings"]["subtitle_language"],
+                             max(10, min(90, body.seconds)))
+    if not text:
+        raise HTTPException(502, "AI tekstas neparašytas – pabandykite dar kartą.")
+    return {"text": text}
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True}
@@ -241,6 +463,7 @@ def _public(proj):
     """Projekto vaizdas naršyklei – be vidinių failų kelių."""
     p = dict(proj)
     p["clips"] = [{k: v for k, v in c.items() if k not in ("path",)} for c in proj.get("clips", [])]
+    p["broll"] = [{k: v for k, v in b.items() if k not in ("path",)} for b in proj.get("broll", [])]
     p.setdefault("prepared", False)
     p.setdefault("words", None)
     return p
@@ -380,13 +603,28 @@ def _run_job(jid, user, pid, kind, quick, words):
         left = _user_info(user["username"])["minutes_left"]
         if client is not None and proj["settings"]["subtitles"] and left is not None and left <= 0:
             client = None  # minutės baigėsi – titrai be AI atpažinimo
+        vo_path, vo_key = None, None
+        vo = proj["settings"].get("voiceover") or {}
+        if vo.get("on") and str(vo.get("text", "")).strip():  # 🎙 AI įgarsinimas
+            if client is None:
+                raise ValueError("AI įgarsinimui reikia OpenAI rakto (Premium planas).")
+            vo_key = hashlib.sha1((vo["text"] + "|" + vo.get("voice", "") + "|" +
+                                   proj["settings"]["subtitle_language"]).encode()).hexdigest()[:12]
+            vo_path = os.path.join(d, f"vo_{vo_key}.mp3")
+            if not os.path.exists(vo_path):
+                say("Kuriu AI įgarsinimą…")
+                engine.tts(client, vo["text"].strip(), vo.get("voice", "coral"), vo_path,
+                           proj["settings"]["subtitle_language"])
         prep = None if kind == "prepare" else _load_prep(user, proj)  # „Atpažinti iš naujo“ – visada iš naujo
+        if prep is not None and proj.get("prep_vo") != vo_key:
+            prep = None  # įgarsinimas pasikeitė – titrai ir montažas pagal naują
         if prep is not None and client is not None and proj["settings"]["subtitles"] and not proj.get("prep_ai"):
             prep = None  # paruošta dar be AI (pvz. prieš įrašant raktą) – dabar atpažinsim kalbą
         if prep is None:
             prep = engine.prepare(proj["clips"], proj["settings"], d, client, say,
                                   lambda p: _job_update(jid, progress=round(p * (1 if kind == "prepare" else 0.35),
-                                                                            3)))
+                                                                            3)), vo_path=vo_path)
+            proj["prep_vo"] = vo_key
             if prep["analysis"].get("subtitle_mode") in ("voice", "translated"):
                 accounts.add_minutes_for(user["username"], prep["analysis"]["info"]["duration"] / 60)
             _save_prep(user, proj, prep)
@@ -408,7 +646,11 @@ def _run_job(jid, user, pid, kind, quick, words):
         name = "preview.mp4" if quick else "reels.mp4"
         out = os.path.join(d, name)
         logo = os.path.join(DATA, "brand", re.sub(r"[^\w.@-]", "_", user["username"]) + "_logo.png")
-        fin = engine.build(prep, proj["settings"], out, d, client, words=words, quick=quick,
+        broll = [{"path": b["path"], "t": b["t"], "d": b["d"]} for b in proj.get("broll", [])
+                 if os.path.exists(b.get("path", ""))]
+        if broll:
+            say("Dedu intarpus…")
+        fin = engine.build(prep, proj["settings"], out, d, client, words=words, quick=quick, broll=broll,
                            progress=lambda p: _job_update(jid, progress=round(base + p * (1 - base), 3)),
                            logo=logo if os.path.exists(logo) else None)
         result = {"file": name, "duration": fin.get("duration"), "width": fin.get("width"),

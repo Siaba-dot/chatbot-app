@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, fileUrl, upload, waitJob } from "./api.js";
 import Recorder from "./Recorder.jsx";
+import Broll from "./Broll.jsx";
+import Voice from "./Voice.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
-  ["anims", "✨ Animacijos"], ["sound", "🎵 Garsas"], ["pace", "⏱ Tempas"],
+  ["broll", "🎞 Intarpai"], ["voice", "🎙 Įgarsinimas"], ["anims", "✨ Animacijos"], ["sound", "🎵 Garsas"],
+  ["pace", "⏱ Tempas"],
 ];
 const PHONE = { "9:16": "", "16:9": "f169", "1:1": "f11", "4:5": "f45" };
 
@@ -509,6 +512,14 @@ export default function Editor({ id, user }) {
               </div>
             </div>
           </>
+        )}
+
+        {tab === "broll" && (
+          <Broll id={id} proj={proj} setProj={setProj} s={s} user={user} setToast={setToast} setError={setError} />
+        )}
+
+        {tab === "voice" && (
+          <Voice id={id} s={s} set={set} setS={setS} opts={opts} user={user} setToast={setToast} setError={setError} />
         )}
 
         {tab === "sound" && (
