@@ -292,12 +292,39 @@ def clip_picker(prefix="", trim=False):
     return clips, image_duration
 
 
+def _key_file():
+    import accounts
+    return os.path.join(accounts.DATA_DIR, "openai_key")
+
+
 def configured_key():
-    """OpenAI raktas iš Streamlit Secrets arba aplinkos kintamųjų."""
+    """OpenAI raktas iš Streamlit Secrets, aplinkos kintamųjų arba administratoriaus išsaugoto failo."""
     try:
-        return st.secrets["OPENAI_API_KEY"]
+        key = st.secrets["OPENAI_API_KEY"]
+        if key and "..." not in key and "…" not in key:
+            return key
     except Exception:
-        return os.environ.get("OPENAI_API_KEY")
+        pass
+    if os.environ.get("OPENAI_API_KEY"):
+        return os.environ["OPENAI_API_KEY"]
+    try:
+        with open(_key_file(), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def save_key(key):
+    """Administratorius įrašo raktą per naršyklę (serveryje – /data/openai_key, matomas tik serverio savininkui)."""
+    path = _key_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not key:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(key.strip())
+    os.chmod(path, 0o600)
 
 
 def openai_client():
