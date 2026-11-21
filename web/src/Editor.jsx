@@ -572,7 +572,7 @@ export default function Editor({ id, user }) {
         )}
       </div>
       {toast && <div className="toast">{toast}</div>}
-      {recording && <Recorder projectId={id} format={s.format} onClose={() => setRecording(false)} onRecorded={onRecorded} />}
+      {recording && <Recorder projectId={id} format={s.format} fit={s.fit || "fill"} onFitChange={v => set({ fit: v })} onClose={() => setRecording(false)} onRecorded={onRecorded} />}
     </div>
   );
 }
