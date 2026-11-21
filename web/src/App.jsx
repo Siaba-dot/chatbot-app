@@ -41,6 +41,9 @@ export default function App() {
           <img src="/logo.svg" alt="" />
           <b>Reels montavimo studija</b>
         </div>
+        {route.page === "editor" && (
+          <button className="btn small nav-back" onClick={() => (window.location.hash = "")}>← Mano projektai</button>
+        )}
         <div className="spacer" />
         <div className="who">
           <b>{user.name}</b>
