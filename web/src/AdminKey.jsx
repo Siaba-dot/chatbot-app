@@ -7,7 +7,11 @@ const KINDS = {
     <>Reikalingas kalbos atpažinimui (titrams), AI įgarsinimui, aprašymams ir efektų parinkimui pagal tai, ką sakote.
       Raktą gausite <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">platform.openai.com → API keys</a>.
       Jis išsaugomas serveryje ir veikia ir senojoje studijoje.</>) },
-  pexels: { title: "🎞 Pexels raktas (nemokamas)", placeholder: "Pexels API raktas", help: (
+  pixabay: { title: "🎞 Pixabay raktas (nemokamas video intarpams)", placeholder: "Pixabay API raktas", help: (
+    <>Nemokami, licencijuoti video intarpams. Užsiregistruokite <a href="https://pixabay.com/accounts/register/" target="_blank" rel="noreferrer">pixabay.com</a>,
+      tada atidarykite <a href="https://pixabay.com/api/docs/" target="_blank" rel="noreferrer">pixabay.com/api/docs</a> – raktas matomas
+      skiltyje „Parameters“ prie „key“ (žalias tekstas). Nukopijuokite jį čia.</>) },
+  pexels: { title: "🎞 Pexels raktas (nebūtina)", placeholder: "Pexels API raktas", help: (
     <>Nemokami, licencijuoti video intarpams. Užsiregistruokite <a href="https://www.pexels.com/api/" target="_blank" rel="noreferrer">pexels.com/api</a> →
       „Your API Key“ ir nukopijuokite raktą čia.</>) },
 };

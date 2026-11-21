@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { api } from "./api.js";
 
-// 🎞 Intarpai iš Pexels: paieška, įterpimas ties sakiniu arba kaip atskiras įrašas, AI parinkimas
+// 🎞 Nemokami video intarpai (Pixabay arba Pexels): paieška, įterpimas ties sakiniu arba kaip atskiras įrašas, AI parinkimas
 function fmt(t) {
   const m = Math.floor(t / 60), s = Math.floor(t % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
@@ -18,11 +18,11 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
   if (!user.pexels) {
     return (
       <div className="card section">
-        <h3>🎞 Video intarpai iš Pexels</h3>
+        <h3>🎞 Nemokami video intarpai</h3>
         <p className="hint">Milijonai nemokamų, licencijuotų video: kalbate apie automobilius – įterpiamas kadras su
           automobiliu, apie kavą – su kava.</p>
         <p className="hint">{user.plan === "admin"
-          ? "Įjunkite: „← Mano projektai“ → „🎞 Pexels raktas“ (nemokamas, pexels.com/api)."
+          ? "Įjunkite: „← Mano projektai“ → „🎞 Pixabay raktas“ (nemokamas)."
           : "Ši funkcija dar neįjungta – kreipkitės į studijos administratorių."}</p>
       </div>
     );
@@ -33,7 +33,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
     if (!q.trim()) return;
     setBusy("search");
     try {
-      const r = await api(`/pexels/search?q=${encodeURIComponent(q)}&fmt=${encodeURIComponent(s.format)}&page=${page}`);
+      const r = await api(`/stock/search?q=${encodeURIComponent(q)}&fmt=${encodeURIComponent(s.format)}&page=${page}`);
       setRes({ ...r, page, videos: page > 1 && res ? [...res.videos, ...r.videos] : r.videos });
     } catch (e2) { setError(e2.message); }
     finally { setBusy(""); }
@@ -46,7 +46,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
       const t = line ? line[0] : 0;
       const d = line ? Math.min(3.5, Math.max(2, line[1] - line[0])) : 2.5;
       const p = await api(`/projects/${id}/broll`, { method: "POST",
-        body: { pexels_id: pick.id, t, d, query: q, as_clip: asClip } });
+        body: { pexels_id: pick.id, provider: pick.provider, t, d, query: q, as_clip: asClip } });
       setProj(p);
       setToast(asClip ? "Pridėta kaip įrašas 🎬" : "Intarpas įterptas 🎞");
       setPick(null);
@@ -120,12 +120,14 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
       )}
 
       <div className="section">
-        <h3>🔎 Ieškoti Pexels</h3>
+        <h3>🔎 Ieškoti {user.stock || "video"}</h3>
         <form className="row" style={{ flexWrap: "nowrap" }} onSubmit={search}>
           <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="Pvz.: car winter, coffee, beach sunset" />
           <button className="btn" disabled={!!busy || !q.trim()}>{busy === "search" ? "…" : "Ieškoti"}</button>
         </form>
-        <div className="hint" style={{ margin: "6px 0 10px" }}>Geriausiai randa angliškai. Video iš <a href="https://www.pexels.com" target="_blank" rel="noreferrer">Pexels</a> – nemokami ir licencijuoti.</div>
+        <div className="hint" style={{ margin: "6px 0 10px" }}>Geriausiai randa angliškai. Video iš {user.stock === "Pixabay"
+          ? <a href="https://pixabay.com/videos/" target="_blank" rel="noreferrer">Pixabay</a>
+          : <a href="https://www.pexels.com" target="_blank" rel="noreferrer">Pexels</a>} – nemokami ir licencijuoti.</div>
         {res && (
           <>
             <div className="tiles">
