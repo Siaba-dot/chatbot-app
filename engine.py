@@ -120,6 +120,7 @@ def options():
         "lengths": list(reels_studio.LENGTHS),
         "music": {k: v["desc"] for k, v in reels_studio.music_library().items()},
         "voices": VOICES,
+        "broll_modes": BROLL_MODES,
         "stickers": animations.STICKERS, "marks": animations.MARKS, "fx": animations.FX,
         "gfx": {k: v if isinstance(v, str) else v.get("title", k) for k, v in fxpack.KINDS.items()},
         "defaults": DEFAULTS,
@@ -246,13 +247,40 @@ def _to_src(t, keep):
     return keep[-1][1] if keep else t
 
 
+BROLL_MODES = {"card": "Kortelė – matotės ir jūs", "split": "Pusė ekrano", "full": "Visas kadras"}
+
+
+def _card_images(cw, ch, tmp):
+    """Kortelės kaukė (užapvalinti kampai) ir baltas rėmelis su šešėliu – PNG."""
+    from PIL import Image, ImageDraw, ImageFilter
+    r = max(8, cw // 14)
+    mask = Image.new("L", (cw, ch), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, cw - 1, ch - 1), r, fill=255)
+    b, pad = max(4, cw // 70), max(12, cw // 22)
+    fw, fh = cw + 2 * (b + pad), ch + 2 * (b + pad)
+    frame = Image.new("RGBA", (fw, fh), (0, 0, 0, 0))
+    sh = Image.new("RGBA", (fw, fh), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle((pad, pad + b, fw - pad, fh - pad + b), r + b, fill=(0, 0, 0, 120))
+    frame.alpha_composite(sh.filter(ImageFilter.GaussianBlur(pad / 2)))
+    ImageDraw.Draw(frame).rounded_rectangle((pad, pad, fw - pad - 1, fh - pad - 1), r + b, fill=(255, 255, 255, 255))
+    ImageDraw.Draw(frame).rounded_rectangle((pad + b, pad + b, pad + b + cw - 1, pad + b + ch - 1), r, fill=(0, 0, 0, 0))
+    mp, fp = os.path.join(tmp, f"mask_{cw}x{ch}.png"), os.path.join(tmp, f"frame_{cw}x{ch}.png")
+    mask.save(mp)
+    frame.save(fp)
+    return mp, fp, b + pad
+
+
 def overlay_broll(src, out_path, items, keep=None, speed=1.0, fade=0.25):
-    """Intarpai ant medžiagos (garsas lieka jūsų). items – [{"path", "t", "d"}], laikai – galutinio video
-    (įgarsinimo atveju) arba sumontuoto video laiku; užpildo visą kadrą, švelniai išnyra ir išnyksta."""
+    """Intarpai ant medžiagos (garsas lieka jūsų). items – [{"path", "t", "d", "mode"}], laikai – galutinio video
+    (įgarsinimo atveju) arba sumontuoto video laiku. mode: card – kortelė kampe (jūs matotės), split – pusė ekrano
+    (intarpas viršuje, jūs apačioje), full – visas kadras. Švelniai išnyra ir išnyksta."""
     info = video_editor.probe(src)
     W, H, fps = info["width"], info["height"], info["fps"] or 30
+    tall = H >= W
+    tmp = tempfile.mkdtemp(dir=os.path.dirname(out_path) or None)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", src]
-    chains, last, n = [], "0:v", 0
+    chains, last, n, k = [], "0:v", 0, 0
+    even = lambda v: int(v) // 2 * 2  # noqa: E731
     for it in items:
         if not it.get("path") or not os.path.exists(it["path"]):
             continue
@@ -261,22 +289,56 @@ def overlay_broll(src, out_path, items, keep=None, speed=1.0, fade=0.25):
         d = max(0.6, t1 - t0)
         if t0 >= info["duration"] - 0.3:
             continue
+        mode = it.get("mode") if it.get("mode") in BROLL_MODES else "full"
         n += 1
+        k += 1
+        bi = k
         cmd += ["-stream_loop", "-1", "-i", it["path"]]
         f = min(fade, d / 3)
-        chains.append(f"[{n}:v]trim=duration={d:.3f},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio="
-                      f"increase,crop={W}:{H},fps={fps},format=yuva420p,fade=t=in:st=0:d={f:.2f}:alpha=1,"
-                      f"fade=t=out:st={d - f:.3f}:d={f:.2f}:alpha=1,setpts=PTS+{t0:.3f}/TB[b{n}]")
-        chains.append(f"[{last}][b{n}]overlay=eof_action=pass:format=auto[o{n}]")
+        fades = (f"fade=t=in:st=0:d={f:.2f}:alpha=1,fade=t=out:st={d - f:.3f}:d={f:.2f}:alpha=1,"
+                 f"setpts=PTS+{t0:.3f}/TB")
+        base = f"[{bi}:v]trim=duration={d:.3f},setpts=PTS-STARTPTS,fps={fps},"
+        if mode == "card":
+            cw = even(min(W * 0.46, H * 0.36)) if tall else even(W * 0.3)
+            ch = even(cw * 1.22) if tall else even(cw * 0.5625)
+            mp, fp, off = _card_images(cw, ch, tmp)
+            cmd += ["-loop", "1", "-t", f"{d:.3f}", "-i", mp, "-loop", "1", "-t", f"{d:.3f}", "-i", fp]
+            mi, fi = k + 1, k + 2
+            k += 2
+            x = even(W - cw - W * 0.05)
+            y = even(H * 0.07)
+            chains.append(f"{base}scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch},format=yuva420p"
+                          f"[c{n}];[{mi}:v]format=gray,fps={fps}[m{n}];[c{n}][m{n}]alphamerge,{fades}[b{n}]")
+            chains.append(f"[{fi}:v]format=rgba,fps={fps},{fades}[f{n}]")
+            chains.append(f"[{last}][f{n}]overlay={x - off}:{y - off}:eof_action=pass:format=auto[p{n}]")
+            chains.append(f"[p{n}][b{n}]overlay={x}:{y}:eof_action=pass:format=auto[o{n}]")
+        elif mode == "split":  # intarpas – viena pusė, jūs (veido sritis) – kita
+            en = f"enable='between(t,{t0:.3f},{t0 + d:.3f})'"
+            if tall:
+                bw, bh, sx, sy, ox, oy = W, even(H / 2), 0, even(H * 0.12), 0, even(H / 2)
+            else:
+                bw, bh, sx, sy, ox, oy = even(W / 2), H, even(W / 4), 0, even(W / 2), 0
+            chains.append(f"[{last}]split[a{n}][s{n}];[s{n}]crop={bw}:{bh}:{sx}:{sy}[sp{n}];"
+                          f"[a{n}][sp{n}]overlay={ox}:{oy}:{en}[q{n}]")
+            chains.append(f"{base}scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
+                          f"format=yuva420p,{fades}[b{n}]")
+            chains.append(f"[q{n}][b{n}]overlay=0:0:eof_action=pass:format=auto[o{n}]")
+        else:
+            chains.append(f"{base}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},format=yuva420p,"
+                          f"{fades}[b{n}]")
+            chains.append(f"[{last}][b{n}]overlay=eof_action=pass:format=auto[o{n}]")
         last = f"o{n}"
-    if not n:
-        return src
-    cmd += ["-filter_complex", ";".join(chains), "-map", f"[{last}]", "-map", "0:a?", "-c:v", "libx264",
-            "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", out_path]
-    r = subprocess.run(video_editor.limit_threads(cmd), capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError("Nepavyko įdėti intarpų: " + r.stderr[-300:])
-    return out_path
+    try:
+        if not n:
+            return src
+        cmd += ["-filter_complex", ";".join(chains), "-map", f"[{last}]", "-map", "0:a?", "-c:v", "libx264",
+                "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", out_path]
+        r = subprocess.run(video_editor.limit_threads(cmd), capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError("Nepavyko įdėti intarpų: " + r.stderr[-300:])
+        return out_path
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 # ---------- AI / taisyklės ----------
