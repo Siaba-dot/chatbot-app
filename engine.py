@@ -270,9 +270,73 @@ def _card_images(cw, ch, tmp):
     return mp, fp, b + pad
 
 
+def _face_box(src, t0, d, W, H):
+    """Veido sritis intarpo metu (dalimis 0–1) arba None. OpenCV, jei įdiegtas; kitaip None."""
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return None
+    w = 270
+    h = max(2, round(H * w / W))
+    boxes = []
+    for t in (t0 + 0.1, t0 + d / 2, t0 + max(0.1, d - 0.2)):
+        r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, t):.3f}", "-i", src, "-frames:v", "1",
+                            "-vf", f"scale={w}:{h},format=gray", "-f", "rawvideo", "-"], capture_output=True)
+        if len(r.stdout) < w * h:
+            continue
+        img = np.frombuffer(r.stdout[:w * h], np.uint8).reshape(h, w)
+        casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        found = casc.detectMultiScale(cv2.equalizeHist(img), 1.1, 5, minSize=(w // 10, w // 10))
+        if len(found):
+            x, y, fw, fh = max(found, key=lambda f: f[2] * f[3])
+            boxes.append((x / w, y / h, (x + fw) / w, (y + fh) / h))
+    if not boxes:
+        return None
+    # veidas + plaukai / smakras: šiek tiek didesnė sritis
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    x1, y1 = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    mx, my = (x1 - x0) * 0.15, (y1 - y0) * 0.25
+    return max(0, x0 - mx), max(0, y0 - my), min(1, x1 + mx), min(1, y1 + my)
+
+
+def _card_place(W, H, face, pos="auto"):
+    """Kortelės vieta ir dydis (x, y, plotis, aukštis) – kad neuždengtų veido."""
+    even = lambda v: int(v) // 2 * 2  # noqa: E731
+    tall = H >= W
+    ratio = 1.2 if tall else 0.5625
+    cw = even(min(W * 0.42, H * 0.33)) if tall else even(W * 0.3)
+    m = even(W * 0.045)
+    top = even(H * 0.06)
+
+    def rect(corner, w):
+        h = even(w * ratio)
+        x = m if corner == "tl" else W - w - m
+        return x, top, w, h
+
+    def overlap(r):
+        if not face:
+            return 0.0
+        fx0, fy0, fx1, fy1 = face[0] * W, face[1] * H, face[2] * W, face[3] * H
+        x, y, w, h = r
+        ox = max(0, min(x + w, fx1) - max(x, fx0))
+        oy = max(0, min(y + h, fy1) - max(y, fy0))
+        return ox * oy
+    if pos in ("tl", "tr"):
+        return rect(pos, cw)
+    best = min(("tr", "tl"), key=lambda c: overlap(rect(c, cw)))
+    w = cw
+    while overlap(rect(best, w)) > 0 and w > W * 0.24:  # mažinam, kol nebeuždengia (iki ~¼ pločio)
+        w = even(w * 0.9)
+    if overlap(rect(best, w)) > 0:
+        w = cw if overlap(rect(best, cw)) < overlap(rect(best, w)) * 1.5 else w
+    return rect(best, w)
+
+
 def overlay_broll(src, out_path, items, keep=None, speed=1.0, fade=0.25):
     """Intarpai ant medžiagos (garsas lieka jūsų). items – [{"path", "t", "d", "mode"}], laikai – galutinio video
-    (įgarsinimo atveju) arba sumontuoto video laiku. mode: card – kortelė kampe (jūs matotės), split – pusė ekrano
+    (įgarsinimo atveju) arba sumontuoto video laiku. mode: card – kortelė kampe (jūs matotės; pos: auto – kampas
+    be veido, tl / tr – viršuje kairėje / dešinėje), split – pusė ekrano
     (intarpas viršuje, jūs apačioje), full – visas kadras. Švelniai išnyra ir išnyksta."""
     info = video_editor.probe(src)
     W, H, fps = info["width"], info["height"], info["fps"] or 30
@@ -298,15 +362,13 @@ def overlay_broll(src, out_path, items, keep=None, speed=1.0, fade=0.25):
         fades = (f"fade=t=in:st=0:d={f:.2f}:alpha=1,fade=t=out:st={d - f:.3f}:d={f:.2f}:alpha=1,"
                  f"setpts=PTS+{t0:.3f}/TB")
         base = f"[{bi}:v]trim=duration={d:.3f},setpts=PTS-STARTPTS,fps={fps},"
-        if mode == "card":
-            cw = even(min(W * 0.46, H * 0.36)) if tall else even(W * 0.3)
-            ch = even(cw * 1.22) if tall else even(cw * 0.5625)
+        if mode == "card":  # vieta – ten, kur nėra veido (arba pasirinkta ranka)
+            x, y, cw, ch = _card_place(W, H, _face_box(src, t0, d, W, H) if it.get("pos", "auto") == "auto" else None,
+                                       it.get("pos", "auto"))
             mp, fp, off = _card_images(cw, ch, tmp)
             cmd += ["-loop", "1", "-t", f"{d:.3f}", "-i", mp, "-loop", "1", "-t", f"{d:.3f}", "-i", fp]
             mi, fi = k + 1, k + 2
             k += 2
-            x = even(W - cw - W * 0.05)
-            y = even(H * 0.07)
             chains.append(f"{base}scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch},format=yuva420p"
                           f"[c{n}];[{mi}:v]format=gray,fps={fps}[m{n}];[c{n}][m{n}]alphamerge,{fades}[b{n}]")
             chains.append(f"[{fi}:v]format=rgba,fps={fps},{fades}[f{n}]")
