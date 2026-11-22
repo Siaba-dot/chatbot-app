@@ -1422,8 +1422,9 @@ def build(prep, words, tmp, out, quick, progress, fmt=fmt):
              else [(video_editor.plain(w), a, b) for w, a, b in words])
     if vo_path:  # įgarsinimo titrai – galutinio video laiku; montaže jie dar bus pagreitinti kartu su vaizdu
         words = [(w, a * speed, b * speed) for w, a, b in words]
+    late_subs = abs(speed - 1) > 0.001  # pakeitus greitį titrai piešiami apdailoje (kad sluoksniai nesiskirtų)
     res = video_editor.render_edit(
-        prep["src"], edited, prep["analysis"], words, fmt=fmt, denoise=denoise and not quick,
+        prep["src"], edited, prep["analysis"], [] if late_subs else words, fmt=fmt, denoise=denoise and not quick,
         loudnorm=not quick, subtitle_style="modern", highlight=highlight, subtitle_look=look, ypos=subs_y,
         subtitle_size=subs_size,
         progress=lambda p: progress(p * 0.6), max_side=640 if quick else 1920,
@@ -1436,7 +1437,7 @@ def build(prep, words, tmp, out, quick, progress, fmt=fmt):
         subs_words=words, subs_look=look, subs_ypos=subs_y,
         hook_ypos=hook_y, subs_size=subs_size, text_size=text_size, music_blocks=music_block_paths(tmp),
         voiceover=vo_path, clip_gain=clip_gain if vo_path else 1.0, punch=key_words and punch, logo=logo, end_card=end_card,
-        bubbles=bubble_list(words), anims=anim_spec(words),
+        bubbles=bubble_list(words), anims=anim_spec(words), subs_burn=late_subs, subs_highlight=highlight,
         moment_at=st.session_state.get(P + "moment_at", 3.0) if "Gintaro akimirka" in effects else None)
     return res, fin
 

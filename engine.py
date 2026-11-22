@@ -621,8 +621,11 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
         highlight = reels_studio._ass_color(reels_studio.accent_colors(s["accent"])[0])[4:]
         subs_y = reels_studio.SUBTITLE_POSITIONS.get(s["subs_pos"], 0.72)
         edited = os.path.join(tmp, "edited.mp4")
+        # pakeitus greitį titrai piešiami apdailoje (galutiniu laiku) – kad sluoksniai nelįstų vienas ant kito
+        late_subs = abs(s["speed"] - 1) > 0.001
         video_editor.render_edit(
-            src, edited, prep["analysis"], words, fmt=prep.get("format", s["format"]), fades=not vo,
+            src, edited, prep["analysis"], [] if late_subs else words, fmt=prep.get("format", s["format"]),
+            fades=not vo,
             denoise=s["denoise"] and not quick, loudnorm=not quick, subtitle_style="modern", highlight=highlight,
             subtitle_look=s["look"], ypos=subs_y, subtitle_size=s["subs_size"] / 100,
             progress=lambda p: prog(p * 0.6), max_side=640 if quick else 1920,
@@ -636,7 +639,7 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
             preview=quick, subs_words=words, subs_look=s["look"], subs_ypos=subs_y,
             hook_ypos=reels_studio.HOOK_POSITIONS.get(s["hook_pos"], 0.2), subs_size=s["subs_size"] / 100,
             text_size=s["text_size"] / 100, punch=s["key_words"] and s["punch"], logo=logo, end_card=end_card,
-            bubbles=bubble_list, anims=anims, voiceover=vo, clip_gain=s["clip_gain"] / 100 if vo else 1.0,
+            bubbles=bubble_list, anims=anims, subs_burn=late_subs, subs_highlight=highlight, voiceover=vo, clip_gain=s["clip_gain"] / 100 if vo else 1.0,
             moment_at=(s["moment_at"] if s["moment_at"] is not None else 3.0)
             if "Gintaro akimirka" in s["effects"] else None)
         prog(1.0)

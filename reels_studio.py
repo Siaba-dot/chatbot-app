@@ -1067,7 +1067,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
            color="Auksinė valanda", progress_bar="Viršuje", progress=None, effects=(), preview=False,
            subs_words=None, subs_look="modern", subs_ypos=0.72, hook_ypos=0.2, subs_size=1.0, text_size=1.0,
            music_blocks=None, voiceover=None, clip_gain=1.0, moment_at=None, moment_len=MOMENT_LEN, punch=False,
-           logo=None, end_card=None, bubbles=None, anims=None):
+           logo=None, end_card=None, bubbles=None, anims=None, subs_burn=False, subs_highlight="0AD6FF"):
     """Reels apdaila ant sumontuoto video. Grąžina {"duration", "width", "height"}.
     voiceover – įgarsinimas (balso failas, galima ir video): skamba visu garsumu (sustiprintas, išvalytas),
     natūraliu greičiu nuo pradžios; clip_gain – video klipų garso garsumas (0 – išjungtas); muzika patyli po balsu.
@@ -1119,6 +1119,13 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if card_len or outro_len:  # vieta kortelei / pabaigai (po ja – sustingęs paskutinis kadras)
             pre.append(f"tpad=stop_mode=clone:stop_duration={card_len + outro_len + 0.5:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
+        if subs_burn and subs_words:  # titrai piešiami čia – jau galutiniu laiku (po greičio pakeitimo), todėl
+            # animacijos sutampa su auksiniu žodžio sluoksniu (kitaip pagreitinus jos prasilenkia)
+            sp = os.path.join(tmp, "subs.ass")
+            with open(sp, "w", encoding="utf-8") as f:
+                f.write(video_editor.build_ass([(w, a0 / speed, b0 / speed) for w, a0, b0 in subs_words], W, H,
+                                               subs_ypos, subs_highlight, subs_look, size=subs_size))
+            post.insert(0, f"ass=filename='{_filter_path(sp)}':fontsdir='{_filter_path(FONT_DIR)}'")
         if bubbles:  # debesėliai (laikai – montažo laiku, todėl dalinami iš greičio)
             bb = [(t / speed, k) for t, k in bubbles if t / speed < duration - 0.3]
             if bb:
@@ -1170,9 +1177,10 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                     f.write(video_editor.build_ass(sw, W, H, ypos=subs_ypos, look=subs_look, mask=True,
                                                    size=subs_size))
                 masks.append(f"ass=filename='{_filter_path(sm)}':fontsdir='{_filter_path(FONT_DIR)}'")
-                masks += punch_f  # titrai sumontuoti anksčiau – „įšoka“ kartu su vaizdu
-                if "Lėtas priartėjimas" in (effects or ()):  # titrai sumontuoti anksčiau – priartėja kartu su vaizdu
-                    masks += zoom_filters(W, H, duration, fps)
+                if not subs_burn:
+                    masks += punch_f  # titrai sumontuoti anksčiau – „įšoka“ kartu su vaizdu
+                    if "Lėtas priartėjimas" in (effects or ()):  # titrai sumontuoti anksčiau – priartėja su vaizdu
+                        masks += zoom_filters(W, H, duration, fps)
             om = os.path.join(tmp, "overlay_mask.ass")
             with open(om, "w", encoding="utf-8") as f:
                 f.write(build_overlay_ass(W, H, duration, hook, hook_duration, cta, cta_duration, "", accent,
