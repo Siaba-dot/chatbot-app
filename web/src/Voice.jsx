@@ -58,7 +58,7 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
     <>
       <div className="section card">
         <Switch on={vo.on} onChange={v => setVo({ on: v })} title="🎙 AI įgarsinimas"
-                desc="Video skambės AI balsu; jūsų įrašo garsas patyla. Titrai – iš įgarsinimo." />
+                desc="Video skambės AI balsu; jūsų įrašo garsas patyla. Titrai – iš įgarsinimo. Nuotraukos rodomos tiek, kad tilptų visas įgarsinimas." />
       </div>
 
       <div className="section">

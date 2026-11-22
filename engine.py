@@ -252,6 +252,20 @@ def voice_text(client, topic, language="lt", seconds=30):
     return str(j.get("text", "")).strip()
 
 
+def photo_duration(clips, s, vo_path=None):
+    """Kiek rodyti vieną nuotrauką. Su įgarsinimu – kad nuotraukos (ir video) truktų tiek, kiek kalba:
+    likęs įgarsinimo laikas tolygiai padalijamas nuotraukoms (≥ 1,2 s)."""
+    imgs = [c for c in clips if c.get("image")]
+    if not vo_path or not imgs:
+        return s["image_duration"]
+    vo = video_editor.media_duration(vo_path)
+    videos = sum((sum(b - a for a, b in _segments(c)) if _segments(c) else c["duration"])
+                 for c in clips if not c.get("image"))
+    overlap = (len(clips) - 1) * video_editor.TRANSITION_DURATION if video_editor.TRANSITIONS.get(s["transition"]) else 0
+    need = vo * s["speed"] + 0.6 + overlap - videos  # vaizdas pagreitinamas, įgarsinimas – ne
+    return round(max(1.2, min(30.0, need / len(imgs))), 2)
+
+
 def prepare(clips, settings, workdir, client=None, status=None, progress=None, vo_path=None):
     """Sujungia medžiagą, suranda pauzes, atpažįsta kalbą (titrai). Grąžina prep žodyną (JSON-draugišką).
     vo_path – įgarsinimas: tada pauzės nekerpamos, o titrai daromi iš įgarsinimo (jo laiko skalė)."""
@@ -262,8 +276,11 @@ def prepare(clips, settings, workdir, client=None, status=None, progress=None, v
         raise ValueError("Nėra medžiagos")
     say(f"Sujungiu {len(clips)} įrašus…" if len(clips) > 1 else "Ruošiu medžiagą…")
     src = os.path.join(workdir, f"joined_{s['format'].replace(':', 'x')}.mkv")
+    image_duration = photo_duration(clips, s, vo_path)
+    if image_duration != s["image_duration"]:
+        say(f"Nuotraukos – po {image_duration:.1f} s, kad tilptų visas įgarsinimas…")
     src, spans = video_editor.concat_clips([c["path"] for c in clips], src, s["format"],
-                                           progress=lambda p: prog(p * 0.5), image_duration=s["image_duration"],
+                                           progress=lambda p: prog(p * 0.5), image_duration=image_duration,
                                            segments=[_segments(c) for c in clips], transition=s["transition"],
                                            fill=s["fit"] == "fill")
     protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
@@ -542,7 +559,7 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
         subs_y = reels_studio.SUBTITLE_POSITIONS.get(s["subs_pos"], 0.72)
         edited = os.path.join(tmp, "edited.mp4")
         video_editor.render_edit(
-            src, edited, prep["analysis"], words, fmt=prep.get("format", s["format"]),
+            src, edited, prep["analysis"], words, fmt=prep.get("format", s["format"]), fades=not vo,
             denoise=s["denoise"] and not quick, loudnorm=not quick, subtitle_style="modern", highlight=highlight,
             subtitle_look=s["look"], ypos=subs_y, subtitle_size=s["subs_size"] / 100,
             progress=lambda p: prog(p * 0.6), max_side=640 if quick else 1920,
