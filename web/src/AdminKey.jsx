@@ -7,6 +7,10 @@ const KINDS = {
     <>Reikalingas kalbos atpažinimui (titrams), AI įgarsinimui, aprašymams ir efektų parinkimui pagal tai, ką sakote.
       Raktą gausite <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">platform.openai.com → API keys</a>.
       Jis išsaugomas serveryje ir veikia ir senojoje studijoje.</>) },
+  gemini: { title: "🇱🇹 Google (Gemini) raktas – natūralūs lietuviški balsai", placeholder: "AIza…", help: (
+    <>Ta pati Google technologija kaip NotebookLM – taisyklingas lietuviškas tarimas. Raktą gausite
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer"> aistudio.google.com/apikey</a> →
+      „Create API key“ (prisijunkite Google paskyra).</>) },
   pixabay: { title: "🎞 Pixabay raktas (nemokamas video intarpams)", placeholder: "Pixabay API raktas", help: (
     <>Nemokami, licencijuoti video intarpams. Užsiregistruokite <a href="https://pixabay.com/accounts/register/" target="_blank" rel="noreferrer">pixabay.com</a>,
       tada atidarykite <a href="https://pixabay.com/api/docs/" target="_blank" rel="noreferrer">pixabay.com/api/docs</a> – raktas matomas

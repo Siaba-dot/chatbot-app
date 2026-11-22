@@ -10,7 +10,9 @@ paprastas funkcijas, kurioms paduodamas nustatymų žodynas:
 
 client – openai.OpenAI arba None (be AI veikia taisyklės).
 """
+import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -69,6 +71,17 @@ DEFAULTS = {
 VOICES = {"coral": "Koralas – šilta moteris", "nova": "Nova – žvali moteris", "shimmer": "Šimeris – švelni moteris",
           "sage": "Sage – rami moteris", "alloy": "Alloy – neutralus", "ash": "Ash – ramus vyras",
           "echo": "Echo – gilus vyras", "onyx": "Onyx – žemas vyras", "fable": "Fable – pasakotojas"}
+# 🇱🇹 Google Gemini balsai (ta pati technologija kaip NotebookLM) – natūralus lietuviškas tarimas.
+GEMINI_VOICES = {"g:Kore": "Kore – tvirta, užtikrinta moteris", "g:Aoede": "Aoede – lengva, gyva moteris",
+                 "g:Leda": "Leda – jaunatviška moteris", "g:Sulafat": "Sulafat – šilta moteris",
+                 "g:Achernar": "Achernar – švelni moteris", "g:Zephyr": "Zephyr – šviesi moteris",
+                 "g:Charon": "Charon – informatyvus vyras", "g:Puck": "Puck – linksmas vyras",
+                 "g:Orus": "Orus – tvirtas vyras", "g:Fenrir": "Fenrir – energingas vyras",
+                 "g:Iapetus": "Iapetus – aiškus vyras", "g:Algieba": "Algieba – ramus vyras"}
+GEMINI_TTS_MODELS = ("gemini-3.8-flash-tts", "gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts",
+                     "gemini-2.5-pro-preview-tts")
+GEMINI_STYLE = ("Read the following {lang} text aloud exactly as written, as a native {lang} speaker: natural, "
+                "correct stress and intonation, warm and confident social-media voice, lively but not rushed:\n\n")
 TTS_INSTRUCTIONS = ("Speak in natural, fluent {lang} with correct pronunciation and stress. Warm, confident, "
                     "energetic social-media tone, clear diction, natural pauses at punctuation.")
 
@@ -78,7 +91,7 @@ def settings_with_defaults(settings):
     s.update({k: v for k, v in (settings or {}).items() if k in DEFAULTS and v is not None})
     s["anims"] = dict(DEFAULTS["anims"], **(settings or {}).get("anims", {}) or {})
     s["voiceover"] = dict(DEFAULTS["voiceover"], **(settings or {}).get("voiceover", {}) or {})
-    if s["voiceover"]["voice"] not in VOICES:
+    if s["voiceover"]["voice"] not in VOICES and s["voiceover"]["voice"] not in GEMINI_VOICES:
         s["voiceover"]["voice"] = "coral"
     s["voiceover"]["text"] = str(s["voiceover"]["text"])[:4000]
     tpl = reels_studio.TEMPLATES.get(s["template"]) or reels_studio.TEMPLATES[DEFAULTS["template"]]
@@ -120,6 +133,7 @@ def options():
         "lengths": list(reels_studio.LENGTHS),
         "music": {k: v["desc"] for k, v in reels_studio.music_library().items()},
         "voices": VOICES,
+        "gemini_voices": GEMINI_VOICES,
         "broll_modes": BROLL_MODES,
         "stickers": animations.STICKERS, "marks": animations.MARKS, "fx": animations.FX,
         "gfx": {k: v if isinstance(v, str) else v.get("title", k) for k, v in fxpack.KINDS.items()},
@@ -225,8 +239,57 @@ def _segments(c):
     return [(float(a), float(b))]
 
 
-def tts(client, text, voice, out_path, language="lt"):
-    """AI įgarsinimas (OpenAI): tekstas -> MP3. Naujesnis modelis priima nurodymus (tarimas, tonas)."""
+def tts_gemini(key, text, voice, out_path, language="lt"):
+    """Google Gemini balsas: tekstas -> MP3. Bandomi keli TTS modeliai (naujausias pirmas)."""
+    import base64
+    import urllib.error
+    import urllib.request
+    lang = video_editor.LANGUAGES.get(language, "Lithuanian")
+    body = json.dumps({
+        "contents": [{"parts": [{"text": GEMINI_STYLE.format(lang=lang) + text}]}],
+        "generationConfig": {"responseModalities": ["AUDIO"],
+                             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {
+                                 "voiceName": voice.removeprefix("g:")}}}}}).encode()
+    last = None
+    for model in GEMINI_TTS_MODELS:
+        req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", data=body,
+            headers={"Content-Type": "application/json", "x-goog-api-key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                j = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            last = f"{model}: {e.code} {e.read()[:200]!r}"
+            if e.code in (401, 403):
+                raise RuntimeError("Google (Gemini) raktas neveikia – patikrinkite jį „Mano projektuose“.")
+            continue  # 404 – modelio nėra, bandom kitą
+        parts = (((j.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+        data = next((p["inlineData"] for p in parts if p.get("inlineData", {}).get("data")), None)
+        if not data:
+            last = f"{model}: be garso"
+            continue
+        rate = 24000
+        m = re.search(r"rate=(\d+)", data.get("mimeType", ""))
+        if m:
+            rate = int(m.group(1))
+        raw = out_path + ".pcm"
+        with open(raw, "wb") as f:
+            f.write(base64.b64decode(data["data"]))
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "s16le", "-ar", str(rate), "-ac", "1", "-i", raw,
+                            "-c:a", "libmp3lame", "-b:a", "160k", out_path], capture_output=True, text=True)
+        os.unlink(raw)
+        if r.returncode != 0:
+            raise RuntimeError("Nepavyko paruošti Google įgarsinimo: " + r.stderr[-200:])
+        return out_path
+    raise RuntimeError("Google įgarsinimas nepavyko (" + str(last)[:200] + ")")
+
+
+def tts(client, text, voice, out_path, language="lt", gemini_key=None):
+    """AI įgarsinimas: tekstas -> MP3. „g:…“ balsai – Google Gemini (natūralus lietuviškas tarimas), kiti – OpenAI."""
+    if voice.startswith("g:"):
+        if not gemini_key:
+            raise RuntimeError("Google balsams reikia Google (Gemini) rakto – „Mano projektai“ → Google raktas.")
+        return tts_gemini(gemini_key, text, voice, out_path, language)
     lang = video_editor.LANGUAGES.get(language, "Lithuanian")
     try:
         with client.audio.speech.with_streaming_response.create(
