@@ -278,8 +278,21 @@ export default function Editor({ id, user }) {
             <div className="row">
               <h3 style={{ margin: 0 }}>🎉 Jūsų video paruoštas</h3>
               <span className="spacer" />
-              <a className="btn gold small" href={fileUrl(`/projects/${id}/files/reels.mp4`, "&download=1")}>⬇ Video</a>
-              {out.final.cover && <a className="btn small" href={fileUrl(`/projects/${id}/files/cover.jpg`, "&download=1")}>⬇ Viršelis</a>}
+              {(out.final.formats || []).length > 1 && (
+                <a className="btn gold small" href={fileUrl(`/projects/${id}/files/visi_formatai.zip`, "&download=1&v=" + out.final.at)}>📦 Visi (ZIP)</a>
+              )}
+            </div>
+            <div className="formats">
+              {(out.final.formats || [{ fmt: s.format, file: "reels.mp4", cover: out.final.cover }]).map(f => (
+                <div className="fmt" key={f.fmt}>
+                  {f.cover && <img src={fileUrl(`/projects/${id}/files/${f.cover}`, "&v=" + out.final.at)} alt=""
+                                   style={{ aspectRatio: f.fmt.replace(":", " / ") }} />}
+                  <b>{f.fmt}</b>
+                  <span className="hint">{{ "9:16": "Reels, TikTok, Shorts", "16:9": "YouTube", "4:5": "Instagram įrašas", "1:1": "Kvadratas" }[f.fmt]}</span>
+                  <a className="btn small gold" href={fileUrl(`/projects/${id}/files/${f.file}`, "&download=1")}>⬇ Video</a>
+                  {f.cover && <a className="btn small" href={fileUrl(`/projects/${id}/files/${f.cover}`, "&download=1")}>⬇ Viršelis</a>}
+                </div>
+              ))}
             </div>
             {out.final.caption && (
               <>
@@ -562,6 +575,8 @@ export default function Editor({ id, user }) {
 
         {tab === "pace" && (
           <div className="section card">
+            <Switch on={s.all_formats !== false} onChange={v => set({ all_formats: v })} title="📐 Kartu sukurti 3 formatus"
+                    desc="Kuriant video – dar 2 formatai: 9:16 (Reels, TikTok), 16:9 (YouTube), 4:5 (Instagram). Kūrimas trunka ilgiau." />
             <div className="field">
               <label>Ilgiausia trukmė</label>
               <Chips items={opts.lengths.map(x => [x, x])} value={s.length} onChange={v => set({ length: v })} />

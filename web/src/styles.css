@@ -273,3 +273,10 @@ textarea.input { resize: vertical; min-height: 70px; }
 .story-body p { margin: 0 0 10px; }
 .story-body b { color: var(--honey); }
 .story-end { font-style: italic; text-align: center; color: var(--honey); }
+
+/* formatai */
+.formats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.fmt { display: flex; flex-direction: column; gap: 6px; align-items: stretch; background: var(--ink-2); border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px; }
+.fmt img { width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; background: #000; }
+.fmt b { font-size: 15px; }

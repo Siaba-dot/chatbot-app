@@ -786,8 +786,11 @@ def _run_job(jid, user, pid, kind, quick, words):
                  if os.path.exists(b.get("path", ""))]
         if broll:
             say("Dedu intarpus…")
+        extra = [] if quick or not proj["settings"].get("all_formats", True) else \
+            engine.extra_formats(proj["settings"]["format"])
+        share = (1 - base) / (1 + len(extra))  # pagrindinis + kiti formatai
         fin = engine.build(prep, proj["settings"], out, d, client, words=words, quick=quick, broll=broll,
-                           progress=lambda p: _job_update(jid, progress=round(base + p * (1 - base), 3)),
+                           progress=lambda p: _job_update(jid, progress=round(base + p * share, 3)),
                            logo=logo if os.path.exists(logo) else None)
         result = {"file": name, "duration": fin.get("duration"), "width": fin.get("width"),
                   "height": fin.get("height")}
@@ -800,6 +803,31 @@ def _run_job(jid, user, pid, kind, quick, words):
             except Exception:
                 traceback.print_exc()
             result["caption"] = engine.caption(prep, proj["settings"], client)
+            main = proj["settings"]["format"]
+            result["formats"] = [{"fmt": main, "file": name, "cover": result.get("cover")}]
+            for i, f in enumerate(extra):  # 📐 tas pats video kitais formatais
+                say(f"Kuriu {f} formatą…")
+                tag = f.replace(":", "x")
+                lo = base + share * (1 + i)
+                try:
+                    src_f = engine.source_for_format(proj["clips"], proj["settings"], d, f, vo_path,
+                                                     lambda p: _job_update(jid, progress=round(lo + p * share * 0.3, 3)))
+                    st_f = dict(proj["settings"], format=f)
+                    engine.build(dict(prep, src=src_f, format=f), st_f, os.path.join(d, f"reels_{tag}.mp4"), d,
+                                 client, words=words, broll=broll, logo=logo if os.path.exists(logo) else None,
+                                 progress=lambda p: _job_update(jid, progress=round(lo + share * (0.3 + p * 0.7), 3)))
+                    w_, h_ = engine.FORMAT_SIZES.get(f, (1080, 1920))
+                    entry = {"fmt": f, "file": f"reels_{tag}.mp4"}
+                    try:
+                        engine.cover(src_f, os.path.join(d, f"cover_{tag}.jpg"), st_f, width=w_, height=h_)
+                        entry["cover"] = f"cover_{tag}.jpg"
+                    except Exception:
+                        traceback.print_exc()
+                    result["formats"].append(entry)
+                    if os.path.exists(src_f) and src_f != prep["src"]:
+                        os.unlink(src_f)
+                except Exception:
+                    traceback.print_exc()  # papildomas formatas nepavyko – pagrindinis video vis tiek paruoštas
         proj = _load(user, pid)
         proj["outputs"][("preview" if quick else "final")] = dict(result, at=time.time())
         _save(user, proj)
@@ -938,16 +966,41 @@ def job(jid: str, user=Depends(current_user)):
     return j
 
 
+def _zip_formats(user, pid):
+    """Visi formatai ir viršeliai viename ZIP (video jau suspausti – laikomi be papildomo glaudinimo)."""
+    import zipfile
+    proj = _load(user, pid)
+    fin = (proj.get("outputs") or {}).get("final") or {}
+    d = _pdir(user, pid)
+    fname = re.sub(r"[^\w-]+", "_", proj["title"]).strip("_")[:40] or "reels"
+    zpath = os.path.join(d, "visi_formatai.zip")
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:
+        for f in fin.get("formats") or [{"fmt": proj["settings"]["format"], "file": "reels.mp4", "cover": fin.get("cover")}]:
+            tag = f["fmt"].replace(":", "x")
+            for key, ext in (("file", "mp4"), ("cover", "jpg")):
+                if f.get(key) and os.path.exists(os.path.join(d, f[key])):
+                    z.write(os.path.join(d, f[key]), f"{fname}_{tag}{'_virselis' if key == 'cover' else ''}.{ext}")
+        cap = fin.get("caption") or {}
+        if cap.get("caption"):
+            z.writestr(f"{fname}_aprasymas.txt", cap["caption"] + "\n\n" + " ".join(cap.get("hashtags") or []))
+    return FileResponse(zpath, filename=f"{fname}_visi_formatai.zip", media_type="application/zip")
+
+
 @app.get("/api/projects/{pid}/files/{name}")
 def download(pid: str, name: str, download: bool = False, user=Depends(current_user)):
-    if name not in ("preview.mp4", "reels.mp4", "cover.jpg"):
+    if name == "visi_formatai.zip":
+        return _zip_formats(user, pid)
+    if not re.fullmatch(r"(preview\.mp4|reels(_\d+x\d+)?\.mp4|cover(_\d+x\d+)?\.jpg)", name):
         raise HTTPException(404, "Failas nerastas")
     path = os.path.join(_pdir(user, pid), name)
     if not os.path.exists(path):
         raise HTTPException(404, "Failas dar nesukurtas")
     proj = _load(user, pid)
     fname = re.sub(r"[^\w-]+", "_", proj["title"]).strip("_")[:40] or "reels"
-    return FileResponse(path, filename=f"{fname}{os.path.splitext(name)[1]}" if download else None,
+    m = re.search(r"_(\d+x\d+)\.", name)
+    tag = "_" + m.group(1) if m else ""
+    kind = "_virselis" if name.startswith("cover") else ""
+    return FileResponse(path, filename=f"{fname}{tag}{kind}{os.path.splitext(name)[1]}" if download else None,
                         media_type="image/jpeg" if name.endswith(".jpg") else "video/mp4")
 
 

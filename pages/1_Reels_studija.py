@@ -1154,7 +1154,9 @@ def other_format(fmt_name, tmp, progress):
                                        image_duration=image_duration,
                                        segments=[clips_ui.clip_segments(c) for c in clips], transition=transition)
     out = os.path.join(tmp, "reels.mp4")
-    build(dict(prep, src=src), words, tmp, out, False, lambda p: progress(0.3 + p * 0.65), fmt=f)
+    si = video_editor.probe(src)  # kadro dydis – iš šio formato medžiagos (analizė – ta pati)
+    an = dict(prep["analysis"], info=dict(prep["analysis"]["info"], width=si["width"], height=si["height"]))
+    build(dict(prep, src=src, analysis=an), words, tmp, out, False, lambda p: progress(0.3 + p * 0.65), fmt=f)
     cover = os.path.join(tmp, "cover.jpg")
     reels_studio.make_cover(src, cover, min(cover_at, prep["analysis"]["info"]["duration"] - 0.1), hook, accent,
                             template, handle, size[0], size[1], color=color, effects=effects, text_size=text_size)
