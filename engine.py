@@ -63,6 +63,7 @@ DEFAULTS = {
     "image_duration": video_editor.IMAGE_DURATION,
     "moment_at": None,         # „Gintaro akimirka“ – sekundė galutiniame video
     "category": "Prabanga",
+    "all_formats": True,       # kuriant galutinį video – kartu dar 2 formatai (9:16, 16:9, 4:5)
     # 🎙 AI įgarsinimas (OpenAI balsas): tekstas skaitomas vietoj / šalia jūsų balso
     "voiceover": {"on": False, "text": "", "voice": "coral"},
     "clip_gain": 20,           # originalaus garso garsumas, kai yra įgarsinimas (%)
@@ -327,6 +328,26 @@ def photo_duration(clips, s, vo_path=None):
     overlap = (len(clips) - 1) * video_editor.TRANSITION_DURATION if video_editor.TRANSITIONS.get(s["transition"]) else 0
     need = vo * s["speed"] + 0.6 + overlap - videos  # vaizdas pagreitinamas, įgarsinimas – ne
     return round(max(1.2, min(30.0, need / len(imgs))), 2)
+
+
+AUTO_FORMATS = ("9:16", "16:9", "4:5")
+FORMAT_SIZES = {"9:16": (1080, 1920), "16:9": (1280, 720), "1:1": (1080, 1080), "4:5": (1080, 1350)}
+
+
+def extra_formats(main):
+    """Kiti du formatai šalia pagrindinio (iš 9:16, 16:9, 4:5)."""
+    return [f for f in AUTO_FORMATS if f != main][:2]
+
+
+def source_for_format(clips, settings, workdir, fmt, vo_path=None, progress=None):
+    """Ta pati medžiaga kitu formatu (analizė – pauzės, titrai – lieka ta pati)."""
+    s = settings_with_defaults(dict(settings, format=fmt))
+    src = os.path.join(workdir, f"joined_{fmt.replace(':', 'x')}.mkv")
+    src, _ = video_editor.concat_clips([c["path"] for c in clips], src, fmt, progress=progress,
+                                       image_duration=photo_duration(clips, s, vo_path),
+                                       segments=[_segments(c) for c in clips], transition=s["transition"],
+                                       fill=s["fit"] == "fill")
+    return src
 
 
 def prepare(clips, settings, workdir, client=None, status=None, progress=None, vo_path=None):
@@ -623,8 +644,12 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
         edited = os.path.join(tmp, "edited.mp4")
         # pakeitus greitį titrai piešiami apdailoje (galutiniu laiku) – kad sluoksniai nelįstų vienas ant kito
         late_subs = abs(s["speed"] - 1) > 0.001
+        analysis = prep["analysis"]
+        si = video_editor.probe(src)  # kitas formatas – kadro dydis iš jo medžiagos (analizė – ta pati)
+        if (si["width"], si["height"]) != (analysis["info"]["width"], analysis["info"]["height"]):
+            analysis = dict(analysis, info=dict(analysis["info"], width=si["width"], height=si["height"]))
         video_editor.render_edit(
-            src, edited, prep["analysis"], [] if late_subs else words, fmt=prep.get("format", s["format"]),
+            src, edited, analysis, [] if late_subs else words, fmt=prep.get("format", s["format"]),
             fades=not vo,
             denoise=s["denoise"] and not quick, loudnorm=not quick, subtitle_style="modern", highlight=highlight,
             subtitle_look=s["look"], ypos=subs_y, subtitle_size=s["subs_size"] / 100,
