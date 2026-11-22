@@ -73,8 +73,8 @@ export default function Projects({ user, onUserChange }) {
                 <b>{p.title}</b>
                 <span>{p.clips} įraš. · {ago(p.updated)}</span>
                 <div className="row" style={{ gap: 6, marginTop: 6 }}>
-                  <button className="btn small ghost" onClick={e => rename(e, p)}>✏️ Pervadinti</button>
-                  <button className="btn small ghost danger" onClick={e => remove(e, p)}>🗑 Ištrinti</button>
+                  <button className="btn small ghost icon" onClick={e => rename(e, p)} title="Pervadinti" aria-label="Pervadinti">✏️</button>
+                  <button className="btn small ghost danger icon" onClick={e => remove(e, p)} title="Ištrinti" aria-label="Ištrinti">🗑</button>
                 </div>
               </div>
             </div>

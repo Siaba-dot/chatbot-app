@@ -280,3 +280,21 @@ textarea.input { resize: vertical; min-height: 70px; }
   border-radius: 12px; padding: 10px; }
 .fmt img { width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; background: #000; }
 .fmt b { font-size: 15px; }
+
+/* kompaktiškos projektų kortelės – daugiau telpa viename lange */
+.grid-projects { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+.proj { border-radius: 12px; }
+.proj .thumb { font-size: 26px; }
+.proj .meta { padding: 6px 8px 7px; }
+.proj .meta b { font-size: 12.5px; }
+.proj .meta span { font-size: 11px; }
+.proj .meta .row { gap: 4px !important; margin-top: 4px !important; }
+.btn.icon { padding: 3px 7px; font-size: 13px; }
+.proj.new { min-height: 0; aspect-ratio: 9 / 16; }
+.proj.new div { font-size: 13px; }
+.proj.new div span { font-size: 32px; }
+.badge { top: 6px; left: 6px; font-size: 9.5px; padding: 2px 6px; }
+@media (max-width: 600px) {
+  .grid-projects { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+}
+.proj .thumb, .proj.new { aspect-ratio: 4 / 5; background-position: center 30%; }
