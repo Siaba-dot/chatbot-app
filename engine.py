@@ -307,25 +307,37 @@ def _gapi(key, url, body=None, timeout=60):
         raise RuntimeError(f"{e.code}: {e.read()[:300].decode(errors='ignore')}")
 
 
+def gemini_models(key):
+    """Visi šiam raktui prieinami Gemini API modeliai: [{"name", "methods"}]."""
+    out, token = [], ""
+    for _ in range(10):
+        j = _gapi(key, "/models?pageSize=200" + (f"&pageToken={token}" if token else ""))
+        out += [{"name": m["name"].split("/", 1)[1], "methods": m.get("supportedGenerationMethods") or [],
+                 "title": m.get("displayName", "")} for m in j.get("models", [])]
+        token = j.get("nextPageToken")
+        if not token:
+            break
+    return out
+
+
+VEO_DIAG = {"seen": [], "error": None}  # ką Google siūlo (rodoma klaidos pranešime)
+
+
 def veo_models(key):
-    """Veo modeliai, kuriuos leidžia šis raktas (naujausi ir greiti – pirmi); nepavykus – žinomų sąrašas."""
+    """Video modeliai, kuriuos leidžia šis raktas: visi su „predictLongRunning“ (taip kuriami video) ir/ar
+    „veo“ / „video“ / „omni“ pavadinime. Pigiausi ir naujausi – pirmi; nepavykus – žinomų sąrašas."""
     try:
-        names = []
-        token = ""
-        for _ in range(5):
-            j = _gapi(key, "/models?pageSize=200" + (f"&pageToken={token}" if token else ""))
-            names += [m["name"].split("/", 1)[1] for m in j.get("models", [])
-                      if ("veo" in m.get("name", "") or "video" in m.get("name", ""))
-                      and "predictLongRunning" in (m.get("supportedGenerationMethods") or [])]
-            token = j.get("nextPageToken")
-            if not token:
-                break
+        models = gemini_models(key)
+        video_like = [m for m in models if "predictLongRunning" in m["methods"]
+                      or re.search(r"veo|video|omni", m["name"] + " " + m["title"], re.I)]
+        VEO_DIAG.update(seen=[f"{m['name']} ({', '.join(m['methods']) or '–'})" for m in video_like], error=None)
+        names = [m["name"] for m in video_like if "predictLongRunning" in m["methods"]]
         if names:
             ver = lambda n: [int(x) for x in re.findall(r"\d+", n.split("-generate")[0])] or [0]  # noqa: E731
             tier = lambda n: 0 if "lite" in n else 1 if "fast" in n else 2  # noqa: E731 – pigiausi pirmi
             return sorted(names, key=lambda n: (tier(n), [-v for v in ver(n)], "preview" in n))
-    except Exception:
-        pass
+    except Exception as e:
+        VEO_DIAG.update(seen=[], error=str(e)[:200])
     return list(VEO_FALLBACK)
 
 
@@ -356,7 +368,9 @@ def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
         if op:
             break
     if not op or not op.get("name"):
-        raise RuntimeError("Google Veo nepasiekiamas: " + str(last)[:250])
+        seen = "; ".join(VEO_DIAG["seen"][:12]) or (
+            "modelių sąrašo gauti nepavyko: " + VEO_DIAG["error"] if VEO_DIAG["error"] else "video modelių nėra")
+        raise RuntimeError("Google Veo nepasiekiamas (" + str(last)[:160] + "). Google šiam raktui siūlo: " + seen)
     say("Google kuria video kadrą (1–3 min.)…")
     t0 = _t.time()
     while not op.get("done"):
