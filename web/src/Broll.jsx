@@ -156,9 +156,9 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
           <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="Pvz.: car winter, coffee, beach sunset" />
           <button className="btn" disabled={!!busy || !q.trim()}>{busy === "search" ? "…" : "Ieškoti"}</button>
         </form>
-        <div className="hint" style={{ margin: "6px 0 10px" }}>Geriausiai randa angliškai. Video iš {user.stock === "Pixabay"
-          ? <a href="https://pixabay.com/videos/" target="_blank" rel="noreferrer">Pixabay</a>
-          : <a href="https://www.pexels.com" target="_blank" rel="noreferrer">Pexels</a>} – nemokami ir licencijuoti.</div>
+        <div className="hint" style={{ margin: "6px 0 10px" }}>Geriausiai randa angliškai. Video iš {user.stock === "Pexels"
+          ? <a href="https://www.pexels.com" target="_blank" rel="noreferrer">Pexels</a>
+          : <a href="https://pixabay.com/videos/" target="_blank" rel="noreferrer">Pixabay</a>} – nemokami ir licencijuoti.</div>
         {res && (
           <>
             <div className="tiles">

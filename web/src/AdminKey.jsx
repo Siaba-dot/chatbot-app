@@ -15,9 +15,6 @@ const KINDS = {
     <>Nemokami, licencijuoti video intarpams. Užsiregistruokite <a href="https://pixabay.com/accounts/register/" target="_blank" rel="noreferrer">pixabay.com</a>,
       tada atidarykite <a href="https://pixabay.com/api/docs/" target="_blank" rel="noreferrer">pixabay.com/api/docs</a> – raktas matomas
       skiltyje „Parameters“ prie „key“ (žalias tekstas). Nukopijuokite jį čia.</>) },
-  pexels: { title: "🎞 Pexels raktas (nebūtina)", placeholder: "Pexels API raktas", help: (
-    <>Nemokami, licencijuoti video intarpams. Užsiregistruokite <a href="https://www.pexels.com/api/" target="_blank" rel="noreferrer">pexels.com/api</a> →
-      „Your API Key“ ir nukopijuokite raktą čia.</>) },
 };
 
 export default function AdminKey({ onChange, kind = "openai" }) {
