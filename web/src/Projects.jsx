@@ -55,7 +55,6 @@ export default function Projects({ user, onUserChange }) {
       {user && user.plan === "admin" && <AdminKey kind="openai" onChange={onUserChange} />}
       {user && user.plan === "admin" && <AdminKey kind="gemini" onChange={onUserChange} />}
       {user && user.plan === "admin" && <AdminKey kind="pixabay" onChange={onUserChange} />}
-      {user && user.plan === "admin" && <AdminKey kind="pexels" onChange={onUserChange} />}
       <div className="grid-projects">
         <div className="proj new" onClick={() => setNaming("")}>
           <div><span>＋</span>{busy ? "Kuriama…" : "Naujas Reels"}</div>
