@@ -97,6 +97,7 @@ def _user_info(username):
     return {"username": username, "name": cfg.get("name") or username, "plan": plan,
             "plan_title": accounts.PLANS[plan], "ai": plan in AI_PLANS and bool(clips_ui.configured_key()),
             "pexels": bool(stock_provider()), "stock": STOCK.get(stock_provider() or "", ""),
+            "gemini": plan in AI_PLANS and bool(stock_key("gemini")),
             "minutes_left": left}
 
 
@@ -177,7 +178,7 @@ STOCK = {"pexels": "Pexels", "pixabay": "Pixabay"}
 
 
 def stock_key(provider):
-    env = {"pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY"}[provider]
+    env = {"pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY", "gemini": "GEMINI_API_KEY"}[provider]
     if os.environ.get(env):
         return os.environ[env].strip()
     try:
@@ -311,7 +312,10 @@ def _key_status(provider):
 def _key_save(provider, key):
     key = key.strip()
     if key:  # patikrinam prieš išsaugant
-        if provider == "pexels":
+        if provider == "gemini":
+            _http_json("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+                       {"x-goog-api-key": key}, "Google (Gemini)")
+        elif provider == "pexels":
             _pexels("/videos/search", {"query": "nature", "per_page": 1}, key=key)
         else:
             _pixabay({"q": "nature", "per_page": 3}, key=key)
@@ -334,6 +338,16 @@ def pexels_status(user=Depends(admin_user)):
 @app.post("/api/admin/pexels")
 def pexels_save(body: KeyBody, user=Depends(admin_user)):
     return _key_save("pexels", body.key)
+
+
+@app.get("/api/admin/gemini")
+def gemini_status(user=Depends(admin_user)):
+    return _key_status("gemini")
+
+
+@app.post("/api/admin/gemini")
+def gemini_save(body: KeyBody, user=Depends(admin_user)):
+    return _key_save("gemini", body.key)
 
 
 @app.get("/api/admin/pixabay")
@@ -473,15 +487,21 @@ def auto_broll(pid: str, mode: str = "card", user=Depends(current_user)):
 # ---------- 🎙 AI įgarsinimas ----------
 @app.get("/api/voice_sample/{voice}")
 def voice_sample(voice: str, user=Depends(current_user)):
-    if voice not in engine.VOICES:
+    if voice not in engine.VOICES and voice not in engine.GEMINI_VOICES:
         raise HTTPException(404, "Nėra tokio balso")
-    path = os.path.join(DATA, "voice_samples", voice + ".mp3")
+    path = os.path.join(DATA, "voice_samples", voice.replace(":", "_") + ".mp3")
     if not os.path.exists(path):
-        client = openai_client(user)
-        if client is None:
+        if user["plan"] not in AI_PLANS:
             raise HTTPException(400, "Balsų pavyzdžiams reikia AI (Premium).")
+        client = openai_client(user)
+        if not voice.startswith("g:") and client is None:
+            raise HTTPException(400, "OpenAI balsams reikia OpenAI rakto.")
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        engine.tts(client, "Sveiki! Taip skambės jūsų Reels įgarsinimas. Ar patinka mano balsas?", voice, path)
+        try:
+            engine.tts(client, "Sveiki! Taip skambės jūsų Reels įgarsinimas. Ar patinka mano balsas?", voice, path,
+                       gemini_key=stock_key("gemini"))
+        except RuntimeError as e:
+            raise HTTPException(400, str(e))
     return FileResponse(path, media_type="audio/mpeg")
 
 
@@ -716,7 +736,12 @@ def _run_job(jid, user, pid, kind, quick, words):
         vo_path, vo_key = None, None
         vo = proj["settings"].get("voiceover") or {}
         if vo.get("on") and str(vo.get("text", "")).strip():  # 🎙 AI įgarsinimas
-            if client is None:
+            google = str(vo.get("voice", "")).startswith("g:")
+            if user["plan"] not in AI_PLANS:
+                raise ValueError("AI įgarsinimas – Premium plane.")
+            if google and not stock_key("gemini"):
+                raise ValueError("Google balsams reikia Google (Gemini) rakto – „Mano projektai“ → Google raktas.")
+            if not google and client is None:
                 raise ValueError("AI įgarsinimui reikia OpenAI rakto (Premium planas).")
             vo_key = hashlib.sha1((vo["text"] + "|" + vo.get("voice", "") + "|" +
                                    proj["settings"]["subtitle_language"]).encode()).hexdigest()[:12]
@@ -724,7 +749,7 @@ def _run_job(jid, user, pid, kind, quick, words):
             if not os.path.exists(vo_path):
                 say("Kuriu AI įgarsinimą…")
                 engine.tts(client, vo["text"].strip(), vo.get("voice", "coral"), vo_path,
-                           proj["settings"]["subtitle_language"])
+                           proj["settings"]["subtitle_language"], gemini_key=stock_key("gemini"))
         prep = None if kind == "prepare" else _load_prep(user, proj)  # „Atpažinti iš naujo“ – visada iš naujo
         if prep is not None and proj.get("prep_vo") != vo_key:
             prep = None  # įgarsinimas pasikeitė – titrai ir montažas pagal naują
