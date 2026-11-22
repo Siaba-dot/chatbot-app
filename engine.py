@@ -408,56 +408,54 @@ def _omni_reason(it):
 
 
 def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
-    """AI video kadras per Gemini Omni Flash (Interactions API): 4 s, 720p, 9:16 / 16:9."""
+    """AI video kadras per Gemini Omni Flash (Interactions API). Bandomi keli užklausos variantai (Google pavyzdžio
+    forma, trukmė 4 s → numatyta), kol vienas pavyksta; nepavykę bandymai Google neapmokestinami."""
     say = status or (lambda m: None)
     models = VEO_DIAG.get("omni") or list(OMNI_FALLBACK)
     text = VEO_STYLE.format(prompt=prompt.strip().rstrip("."))
+    ar = aspect if aspect in ("9:16", "16:9") else "9:16"
+    parts = [{"type": "text", "text": text}]
+    task = {"video_config": {"task": "text_to_video"}}
+    variants = [  # (įvestis, generation_config, response_format, fone)
+        (text, None, {"type": "video", "aspect_ratio": ar, "duration": "4s", "resolution": "720p"}, True),
+        (parts, task, {"type": "video", "aspect_ratio": ar, "duration": "4s", "resolution": "720p"}, True),
+        (parts, task, {"type": "video", "aspect_ratio": ar}, True),
+        (parts, task, {"type": "video", "aspect_ratio": ar}, False),
+    ]
     last = None
-    for model in models:
-        next_model = False
-        for secs in ("4s", "5s", None):  # 4 s – pigiausia; jei netinka – 5 s, tada be papildomų nustatymų
-            fmt = {"type": "video", "aspect_ratio": aspect if aspect in ("9:16", "16:9") else "9:16"}
-            if secs:
-                fmt["duration"] = secs
-                fmt["resolution"] = "720p"
-            retry_duration = False
-            for background in (True, False):  # fone (su tikrinimu); jei nepalaikoma – iškart
-                body = {"model": model, "input": text, "response_format": fmt}
-                if background:
-                    body["background"] = True
-                try:
-                    it = _gapi(key, "/interactions", body, timeout=60 if background else 400)
-                except RuntimeError as e:
-                    last, msg = f"{model}: {e}", str(e).lower()
-                    if str(e).startswith(("401", "403")):
-                        raise RuntimeError("Google raktas neleidžia kurti video – patikrinkite mokėjimus AI Studio.")
-                    if msg.startswith("400") and "background" in msg:
-                        continue
-                    if msg.startswith("400") and "duration" in msg:
-                        retry_duration = True
-                    else:
-                        next_model = True
-                    break
-                try:
-                    it = _omni_wait(key, it, background, say, timeout)
-                except OmniFailed as e:
-                    last = f"{model}: {e}"
-                    policy = re.search(r"people|person|safety|policy|region|block|prohibit|allowed|filter", str(e), re.I)
-                    if secs is not None and not policy:  # be priežasties – bandom be trukmės / raiškos nustatymų
-                        retry_duration = True
-                        break
-                    raise RuntimeError(
-                        f"Google nesukūrė video ({e}). Jei aprašyme yra žmonės – ES Google dažnai neleidžia kurti "
-                        "tikroviškų žmonių; pabandykite kadrą be žmonių (daiktai, gamta, aplinka).")
-                for step in it.get("steps") or []:
-                    if step.get("type") == "model_output":
-                        for c in step.get("content") or []:
-                            if c.get("type") == "video":
-                                return _save_b64_or_uri(key, c, out_path)
-                raise RuntimeError("Google nesukūrė video – pabandykite kitaip aprašyti kadrą.")
-            if next_model or not retry_duration:
-                break
-    raise RuntimeError("Google video (Omni) nepasiekiamas: " + str(last)[:250])
+    for model in models[:2]:
+        for n, (inp, gc, fmt, background) in enumerate(variants, 1):
+            body = {"model": model, "input": inp, "response_format": fmt}
+            if gc:
+                body["generation_config"] = gc
+            if background:
+                body.update(background=True, store=True)
+            if n > 1:
+                say(f"Bandau kitą būdą ({n}/{len(variants)})…")
+            try:
+                it = _gapi(key, "/interactions", body, timeout=60 if background else 400)
+                it = _omni_wait(key, it, background, say, timeout)
+            except OmniFailed as e:
+                last = f"{model}: {e}"
+                if re.search(r"people|person|safety|policy|region|prohibit|not allowed|filter", str(e), re.I):
+                    raise RuntimeError(f"Google nesukūrė video ({e}). Pabandykite aprašyti kitaip – ES Google dažnai "
+                                       "neleidžia kurti tikroviškų žmonių.")
+                continue
+            except RuntimeError as e:
+                last = f"{model}: {e}"
+                if str(e).startswith(("401", "403")):
+                    raise RuntimeError("Google raktas neleidžia kurti video – patikrinkite mokėjimus AI Studio.")
+                if str(e).startswith("404"):
+                    break  # tokio modelio nėra – kitas modelis
+                continue  # 400 ir pan. – kitas užklausos variantas
+            for step in it.get("steps") or []:
+                if step.get("type") == "model_output":
+                    for c in step.get("content") or []:
+                        if c.get("type") == "video":
+                            return _save_b64_or_uri(key, c, out_path)
+            last = f"{model}: atsakyme nėra video"
+    raise RuntimeError("Google nesukūrė video (" + str(last)[:220] + "). Pabandykite vėliau – Omni modelis dar "
+                       "bandomasis (preview).")
 
 
 def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
