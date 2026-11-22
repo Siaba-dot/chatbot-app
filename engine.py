@@ -285,6 +285,93 @@ def tts_gemini(key, text, voice, out_path, language="lt"):
     raise RuntimeError("Google įgarsinimas nepavyko (" + str(last)[:200] + ")")
 
 
+# ---------- 🎬 Google Veo: AI sukurti video intarpai ----------
+GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
+VEO_FALLBACK = ("veo-3.1-fast-generate-preview", "veo-3.0-fast-generate-001", "veo-3.1-generate-preview",
+                "veo-3.0-generate-001", "veo-2.0-generate-001")
+VEO_STYLE = ("{prompt}. Cinematic, realistic, high quality, natural light, smooth camera movement, "
+             "no text, no captions, no watermark, no logos.")
+
+
+def _gapi(key, url, body=None, timeout=60):
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url if url.startswith("http") else GEMINI_API + url,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json", "x-goog-api-key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"{e.code}: {e.read()[:300].decode(errors='ignore')}")
+
+
+def veo_models(key):
+    """Veo modeliai, kuriuos leidžia šis raktas (naujausi ir greiti – pirmi); nepavykus – žinomų sąrašas."""
+    try:
+        names = []
+        token = ""
+        for _ in range(5):
+            j = _gapi(key, "/models?pageSize=200" + (f"&pageToken={token}" if token else ""))
+            names += [m["name"].split("/", 1)[1] for m in j.get("models", [])
+                      if "veo" in m.get("name", "") and "predictLongRunning" in (m.get("supportedGenerationMethods") or [])]
+            token = j.get("nextPageToken")
+            if not token:
+                break
+        if names:
+            ver = lambda n: [int(x) for x in re.findall(r"\d+", n.split("-generate")[0])] or [0]  # noqa: E731
+            return sorted(names, key=lambda n: ("fast" not in n, [-v for v in ver(n)], "preview" in n))
+    except Exception:
+        pass
+    return list(VEO_FALLBACK)
+
+
+def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
+    """AI video kadras (Google Veo) pagal aprašymą. aspect – „9:16“ arba „16:9“. Grąžina kelią."""
+    import time as _t
+    import urllib.request
+    say = status or (lambda m: None)
+    body = {"instances": [{"prompt": VEO_STYLE.format(prompt=prompt.strip().rstrip("."))}],
+            "parameters": {"aspectRatio": aspect if aspect in ("9:16", "16:9") else "9:16",
+                           "negativePrompt": "text, subtitles, watermark, logo, blurry, distorted faces"}}
+    op, last = None, None
+    for model in veo_models(key):
+        try:
+            op = _gapi(key, f"/models/{model}:predictLongRunning", body)
+            break
+        except RuntimeError as e:
+            last = f"{model}: {e}"
+            if str(e).startswith(("401", "403")):
+                raise RuntimeError("Google raktas neleidžia kurti video (Veo) – gali reikėti įjungti mokėjimus "
+                                   "Google AI Studio (Veo nemokamai nepasiekiamas).")
+            if str(e).startswith("400") and "aspect" in str(e).lower():  # modelis nepalaiko 9:16 – bandom kitą
+                continue
+    if not op or not op.get("name"):
+        raise RuntimeError("Google Veo nepasiekiamas: " + str(last)[:250])
+    say("Google kuria video kadrą (1–3 min.)…")
+    t0 = _t.time()
+    while not op.get("done"):
+        if _t.time() - t0 > timeout:
+            raise RuntimeError("Google Veo neatsakė per 7 min. – pabandykite dar kartą.")
+        _t.sleep(8)
+        op = _gapi(key, "/" + op["name"])
+    if op.get("error"):
+        raise RuntimeError("Google Veo: " + str(op["error"].get("message", op["error"]))[:250])
+    resp = op.get("response") or {}
+    samples = ((resp.get("generateVideoResponse") or {}).get("generatedSamples") or resp.get("generatedVideos") or [])
+    uri = next((((x.get("video") or {}).get("uri")) for x in samples if (x.get("video") or {}).get("uri")), None)
+    if not uri:
+        reason = (resp.get("generateVideoResponse") or {}).get("raiMediaFilteredReasons")
+        raise RuntimeError("Google nesukūrė video" + (f" ({reason[0]})" if reason else
+                                                       " – pabandykite kitaip aprašyti kadrą."))
+    req = urllib.request.Request(uri, headers={"x-goog-api-key": key})
+    tmp = out_path + ".part"
+    with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
+        shutil.copyfileobj(r, f, 1 << 20)
+    os.replace(tmp, out_path)
+    return out_path
+
+
 def tts(client, text, voice, out_path, language="lt", gemini_key=None):
     """AI įgarsinimas: tekstas -> MP3. „g:…“ balsai – Google Gemini (natūralus lietuviškas tarimas), kiti – OpenAI."""
     if voice.startswith("g:"):

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { api } from "./api.js";
+import { api, fileUrl } from "./api.js";
+import Veo from "./Veo.jsx";
 
 // 🎞 Nemokami video intarpai (Pixabay arba Pexels): paieška, įterpimas ties sakiniu arba kaip atskiras įrašas, AI parinkimas
 function fmt(t) {
@@ -32,18 +33,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
   const lines = proj.lines || [];
   const [at, setAt] = useState(0);
 
-  if (!user.pexels) {
-    return (
-      <div className="card section">
-        <h3>🎞 Nemokami video intarpai</h3>
-        <p className="hint">Milijonai nemokamų, licencijuotų video: kalbate apie automobilius – įterpiamas kadras su
-          automobiliu, apie kavą – su kava.</p>
-        <p className="hint">{user.plan === "admin"
-          ? "Įjunkite: „← Mano projektai“ → „🎞 Pixabay raktas“ (nemokamas)."
-          : "Ši funkcija dar neįjungta – kreipkitės į studijos administratorių."}</p>
-      </div>
-    );
-  }
+  const noStock = !user.pexels;
 
   async function search(e, page = 1) {
     e && e.preventDefault();
@@ -96,6 +86,18 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
 
   return (
     <>
+      <Veo id={id} proj={proj} setProj={setProj} user={user} mode={mode} ModeChips={ModeChips} chooseMode={chooseMode}
+           setToast={setToast} setError={setError} />
+      {noStock ? (
+        <div className="card section">
+          <h3>🎞 Nemokami video intarpai</h3>
+          <p className="hint">Milijonai nemokamų, licencijuotų video: kalbate apie automobilius – įterpiamas kadras su
+            automobiliu, apie kavą – su kava.</p>
+          <p className="hint">{user.plan === "admin"
+            ? "Įjunkite: „← Mano projektai“ → „🎞 Pixabay raktas“ (nemokamas)."
+            : "Ši funkcija dar neįjungta – kreipkitės į studijos administratorių."}</p>
+        </div>
+      ) : (
       <div className="section card">
         <div className="row">
           <div style={{ flex: 1, minWidth: 200 }}>
@@ -113,13 +115,15 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
         </div>
       </div>
 
+      )}
+
       {(proj.broll || []).length > 0 && (
         <div className="section">
           <h3>Įterpti intarpai</h3>
           <div className="clips">
             {proj.broll.map(b => (
               <div className="clip" key={b.id}>
-                <img src={b.image} alt="" />
+                <img src={b.image && b.image.startsWith("/api") ? fileUrl(b.image.slice(4)) : b.image} alt="" />
                 <div className="info">
                   <b>{fmt(b.t)} · {b.query || "intarpas"}</b>
                   <span>„{lineAt(b.t).slice(0, 60)}“</span>
@@ -150,7 +154,7 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
         </div>
       )}
 
-      <div className="section">
+      {!noStock && <div className="section">
         <h3>🔎 Ieškoti {user.stock || "video"}</h3>
         <form className="row" style={{ flexWrap: "nowrap" }} onSubmit={search}>
           <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="Pvz.: car winter, coffee, beach sunset" />
@@ -177,6 +181,8 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
           </>
         )}
       </div>
+
+      }
 
       {pick && (
         <div className="modal" onClick={() => !busy && setPick(null)}>
