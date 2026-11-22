@@ -98,6 +98,7 @@ def _user_info(username):
             "plan_title": accounts.PLANS[plan], "ai": plan in AI_PLANS and bool(clips_ui.configured_key()),
             "pexels": bool(stock_provider()), "stock": STOCK.get(stock_provider() or "", ""),
             "gemini": plan in AI_PLANS and bool(stock_key("gemini")),
+            "veo": plan in AI_PLANS and bool(stock_key("gemini")),
             "minutes_left": left}
 
 
@@ -482,6 +483,120 @@ def auto_broll(pid: str, mode: str = "card", user=Depends(current_user)):
     if not added:
         raise HTTPException(404, "Tinkamų intarpų nerasta – pabandykite ieškoti ranka.")
     return _public(proj)
+
+
+# ---------- 🎬 Google Veo: AI sukurti intarpai ----------
+class VeoBody(BaseModel):
+    prompt: str
+    t: float = 0.0
+    d: float = 3.0
+    mode: str = "card"
+    pos: str = "auto"
+    as_clip: bool = False
+
+
+def _veo_prompt_en(client, prompt):
+    """Veo geriausiai supranta angliškai – aprašymas išverčiamas (jei yra AI), kitaip siunčiamas kaip yra."""
+    if client is None or re.fullmatch(r"[\x00-\x7F]+", prompt):
+        return prompt
+    try:
+        j = reels_studio._ai_json(client, (
+            "Translate this stock-video shot description to concise, vivid English for a text-to-video model "
+            "(one sentence, concrete visuals, camera and light). Reply only JSON: {\"en\": \"...\"}"),
+            {"text": prompt})
+        return str(j.get("en") or prompt)[:500]
+    except Exception:
+        return prompt
+
+
+def _run_veo(jid, user, pid, body):
+    try:
+        key = stock_key("gemini")
+        proj = _load(user, pid)
+        fmt = proj["settings"]["format"]
+        prompt = _veo_prompt_en(openai_client(user), body.prompt)
+        d = os.path.join(_pdir(user, pid), "broll")
+        os.makedirs(d, exist_ok=True)
+        vid = uuid.uuid4().hex[:8]
+        path = os.path.join(d, f"veo_{vid}.mp4")
+        _job_update(jid, progress=0.05)
+        engine.veo_generate(key, prompt, "16:9" if fmt == "16:9" else "9:16", path,
+                            status=lambda m: _job_update(jid, message=m, progress=0.15))
+        _job_update(jid, message="Dedu kadrą į projektą…", progress=0.9)
+        thumb = path + ".thumb.jpg"
+        reels_studio.grab_frame(path, thumb, at=1.0)
+        proj = _load(user, pid)
+        if body.as_clip:
+            clip = engine.add_clip(path, "AI kadras · " + body.prompt[:40])
+            clip["id"] = uuid.uuid4().hex[:10]
+            proj["clips"].append(clip)
+            proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+        else:
+            proj.setdefault("broll", []).append({
+                "id": vid, "provider": "veo", "pexels_id": 0, "t": round(max(0.0, body.t), 2),
+                "d": round(max(1.0, min(8.0, body.d)), 2), "query": "AI: " + body.prompt[:50],
+                "mode": body.mode if body.mode in engine.BROLL_MODES else "card",
+                "pos": body.pos if body.pos in ("auto", "tl", "tr") else "auto",
+                "image": f"/api/projects/{pid}/broll/{vid}/thumb", "user": "Google Veo", "url": "", "path": path})
+            proj["broll"].sort(key=lambda b: b["t"])
+        _save(user, proj)
+        _job_update(jid, status="done", progress=1.0, message="AI kadras paruoštas ✅")
+    except Exception as e:
+        traceback.print_exc()
+        _job_update(jid, status="error", message=str(e)[:300])
+
+
+@app.post("/api/projects/{pid}/broll/veo")
+def veo_broll(pid: str, body: VeoBody, user=Depends(current_user)):
+    """🎬 AI sukuria video kadrą pagal aprašymą (Google Veo, 1–3 min., fone)."""
+    _load(user, pid)
+    if user["plan"] not in AI_PLANS:
+        raise HTTPException(400, "AI kadrai – Premium plane.")
+    if not stock_key("gemini"):
+        raise HTTPException(400, "Reikia Google (Gemini) rakto – „Mano projektai“ → Google raktas.")
+    if len(body.prompt.strip()) < 5:
+        raise HTTPException(400, "Aprašykite kadrą plačiau (pvz. „kava pilama į puodelį, saulėtas rytas“).")
+    with _jobs_lock:
+        if any(j["user"] == user["username"] and j["kind"] == "veo" and j["status"] in ("queued", "running")
+               for j in _jobs.values()):
+            raise HTTPException(429, "Palaukite – ankstesnis AI kadras dar kuriamas.")
+        jid = uuid.uuid4().hex[:12]
+        _jobs[jid] = {"id": jid, "user": user["username"], "project": pid, "kind": "veo", "status": "running",
+                      "progress": 0.0, "message": "Siunčiu užklausą Google…", "created": time.time(), "result": None}
+    threading.Thread(target=_run_veo, args=(jid, user, pid, body), daemon=True).start()
+    return _jobs[jid]
+
+
+@app.get("/api/projects/{pid}/broll/{bid}/thumb")
+def broll_thumb(pid: str, bid: str, user=Depends(current_user)):
+    path = os.path.join(_pdir(user, pid), "broll", f"veo_{re.sub(r'[^a-f0-9]', '', bid)}.mp4.thumb.jpg")
+    if not os.path.exists(path):
+        raise HTTPException(404, "Nėra")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.post("/api/projects/{pid}/broll/veo_ideas")
+def veo_ideas(pid: str, user=Depends(current_user)):
+    """AI pagal tai, ką sakote, pasiūlo 3 AI kadrų aprašymus (ties sakiniais)."""
+    proj = _load(user, pid)
+    client = openai_client(user)
+    if client is None:
+        raise HTTPException(400, "Pasiūlymams reikia OpenAI rakto. Aprašymą galite parašyti patys.")
+    if not proj.get("words"):
+        raise HTTPException(400, "Pirmiausia paruoškite titrus (💬 Titrai → Paruošti titrus).")
+    lines = " ".join(f"[{a:.1f}] {video_editor.plain(w)}" for w, a, _ in proj["words"][:300])
+    j = reels_studio._ai_json(client, (
+        "Suggest 3 short AI-generated cutaway shots for this talking video (moments at least 4 s apart, not in the "
+        "first 2 s). For each: time (s), a vivid one-sentence visual description in Lithuanian (what the camera "
+        "shows; no people talking to camera, no text). Reply only JSON: "
+        "{\"ideas\": [{\"time\": 0, \"prompt\": \"...\"}]}"), {"transcript": lines})
+    out = []
+    for it in (j.get("ideas") or [])[:3]:
+        try:
+            out.append({"t": round(float(it["time"]), 2), "prompt": str(it["prompt"])[:200]})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return {"ideas": out}
 
 
 # ---------- 🎙 AI įgarsinimas ----------
