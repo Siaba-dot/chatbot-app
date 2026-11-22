@@ -287,8 +287,9 @@ def tts_gemini(key, text, voice, out_path, language="lt"):
 
 # ---------- 🎬 Google Veo: AI sukurti video intarpai ----------
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
-VEO_FALLBACK = ("veo-3.1-fast-generate-preview", "veo-3.0-fast-generate-001", "veo-3.1-generate-preview",
-                "veo-3.0-generate-001", "veo-2.0-generate-001")
+VEO_FALLBACK = ("veo-3.1-lite-generate-preview", "veo-3.1-fast-generate-preview", "veo-3.0-fast-generate-001",
+                "veo-3.1-generate-preview", "veo-3.0-generate-001", "veo-2.0-generate-001")
+VEO_SECONDS = 4  # intarpas rodomas 2,5–4 s – mokam tik už tiek (Google ima mokestį už sekundę)
 VEO_STYLE = ("{prompt}. Cinematic, realistic, high quality, natural light, smooth camera movement, "
              "no text, no captions, no watermark, no logos.")
 
@@ -314,13 +315,15 @@ def veo_models(key):
         for _ in range(5):
             j = _gapi(key, "/models?pageSize=200" + (f"&pageToken={token}" if token else ""))
             names += [m["name"].split("/", 1)[1] for m in j.get("models", [])
-                      if "veo" in m.get("name", "") and "predictLongRunning" in (m.get("supportedGenerationMethods") or [])]
+                      if ("veo" in m.get("name", "") or "video" in m.get("name", ""))
+                      and "predictLongRunning" in (m.get("supportedGenerationMethods") or [])]
             token = j.get("nextPageToken")
             if not token:
                 break
         if names:
             ver = lambda n: [int(x) for x in re.findall(r"\d+", n.split("-generate")[0])] or [0]  # noqa: E731
-            return sorted(names, key=lambda n: ("fast" not in n, [-v for v in ver(n)], "preview" in n))
+            tier = lambda n: 0 if "lite" in n else 1 if "fast" in n else 2  # noqa: E731 – pigiausi pirmi
+            return sorted(names, key=lambda n: (tier(n), [-v for v in ver(n)], "preview" in n))
     except Exception:
         pass
     return list(VEO_FALLBACK)
@@ -336,16 +339,22 @@ def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
                            "negativePrompt": "text, subtitles, watermark, logo, blurry, distorted faces"}}
     op, last = None, None
     for model in veo_models(key):
-        try:
-            op = _gapi(key, f"/models/{model}:predictLongRunning", body)
+        for secs in (VEO_SECONDS, 5, None):  # 4 s (pigiausia); senesni modeliai – nuo 5 s
+            b = json.loads(json.dumps(body))
+            if secs:
+                b["parameters"]["durationSeconds"] = secs
+            try:
+                op = _gapi(key, f"/models/{model}:predictLongRunning", b)
+                break
+            except RuntimeError as e:
+                last = f"{model}: {e}"
+                if str(e).startswith(("401", "403")):
+                    raise RuntimeError("Google raktas neleidžia kurti video (Veo) – gali reikėti įjungti mokėjimus "
+                                       "Google AI Studio (Veo nemokamai nepasiekiamas).")
+                if not (str(e).startswith("400") and "duration" in str(e).lower()):
+                    break  # ne trukmės klaida – bandom kitą modelį
+        if op:
             break
-        except RuntimeError as e:
-            last = f"{model}: {e}"
-            if str(e).startswith(("401", "403")):
-                raise RuntimeError("Google raktas neleidžia kurti video (Veo) – gali reikėti įjungti mokėjimus "
-                                   "Google AI Studio (Veo nemokamai nepasiekiamas).")
-            if str(e).startswith("400") and "aspect" in str(e).lower():  # modelis nepalaiko 9:16 – bandom kitą
-                continue
     if not op or not op.get("name"):
         raise RuntimeError("Google Veo nepasiekiamas: " + str(last)[:250])
     say("Google kuria video kadrą (1–3 min.)…")
