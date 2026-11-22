@@ -378,9 +378,33 @@ def _omni_wait(key, it, background, say, timeout):
         _t.sleep(8)
         it = _gapi(key, f"/interactions/{it['id']}")
     if it.get("status") in ("failed", "cancelled"):
-        err = it.get("error") or {}
-        raise RuntimeError("Google nesukūrė video: " + str(err.get("message", err) or it["status"])[:200])
+        import sys
+        print("Omni nepavyko:", json.dumps(it, ensure_ascii=False)[:2000], file=sys.stderr)
+        raise OmniFailed(_omni_reason(it))
     return it
+
+
+class OmniFailed(RuntimeError):
+    pass
+
+
+def _omni_reason(it):
+    """Kodėl Google nesukūrė video – visi „message“ / „reason“ laukai iš atsakymo."""
+    found = []
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k in ("message", "reason", "finish_reason", "finishReason", "block_reason", "status_message") \
+                        and isinstance(v, str) and v not in found and v not in ("failed", "completed"):
+                    found.append(v)
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk({k: v for k, v in it.items() if k not in ("steps",)})
+    walk([st for st in it.get("steps") or [] if st.get("type") != "user_input"])
+    return "; ".join(found)[:300] or "Google priežasties nenurodė"
 
 
 def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
@@ -391,11 +415,11 @@ def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
     last = None
     for model in models:
         next_model = False
-        for secs in ("4s", "5s", None):  # 4 s – pigiausia; jei netinka – 5 s, tada numatyta
-            fmt = {"type": "video", "aspect_ratio": aspect if aspect in ("9:16", "16:9") else "9:16",
-                   "resolution": "720p"}
+        for secs in ("4s", "5s", None):  # 4 s – pigiausia; jei netinka – 5 s, tada be papildomų nustatymų
+            fmt = {"type": "video", "aspect_ratio": aspect if aspect in ("9:16", "16:9") else "9:16"}
             if secs:
                 fmt["duration"] = secs
+                fmt["resolution"] = "720p"
             retry_duration = False
             for background in (True, False):  # fone (su tikrinimu); jei nepalaikoma – iškart
                 body = {"model": model, "input": text, "response_format": fmt}
@@ -414,7 +438,17 @@ def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
                     else:
                         next_model = True
                     break
-                it = _omni_wait(key, it, background, say, timeout)
+                try:
+                    it = _omni_wait(key, it, background, say, timeout)
+                except OmniFailed as e:
+                    last = f"{model}: {e}"
+                    policy = re.search(r"people|person|safety|policy|region|block|prohibit|allowed|filter", str(e), re.I)
+                    if secs is not None and not policy:  # be priežasties – bandom be trukmės / raiškos nustatymų
+                        retry_duration = True
+                        break
+                    raise RuntimeError(
+                        f"Google nesukūrė video ({e}). Jei aprašyme yra žmonės – ES Google dažnai neleidžia kurti "
+                        "tikroviškų žmonių; pabandykite kadrą be žmonių (daiktai, gamta, aplinka).")
                 for step in it.get("steps") or []:
                     if step.get("type") == "model_output":
                         for c in step.get("content") or []:
