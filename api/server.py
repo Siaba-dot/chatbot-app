@@ -351,6 +351,18 @@ def gemini_save(body: KeyBody, user=Depends(admin_user)):
     return _key_save("gemini", body.key)
 
 
+@app.get("/api/admin/models")
+def admin_models(user=Depends(admin_user)):
+    """Diagnostika: visi Google (Gemini) modeliai, kuriuos leidžia įrašytas raktas."""
+    key = stock_key("gemini")
+    if not key:
+        raise HTTPException(400, "Google raktas neįrašytas")
+    try:
+        return {"models": engine.gemini_models(key)}
+    except RuntimeError as e:
+        raise HTTPException(502, str(e)[:300])
+
+
 @app.get("/api/admin/pixabay")
 def pixabay_status(user=Depends(admin_user)):
     return _key_status("pixabay")
