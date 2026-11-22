@@ -320,7 +320,7 @@ def gemini_models(key):
     return out
 
 
-VEO_DIAG = {"seen": [], "error": None}  # ką Google siūlo (rodoma klaidos pranešime)
+VEO_DIAG = {"seen": [], "error": None, "omni": [], "listed": False}  # ką Google siūlo (rodoma klaidos pranešime)
 
 
 def veo_models(key):
@@ -330,8 +330,14 @@ def veo_models(key):
         models = gemini_models(key)
         video_like = [m for m in models if "predictLongRunning" in m["methods"]
                       or re.search(r"veo|video|omni", m["name"] + " " + m["title"], re.I)]
-        VEO_DIAG.update(seen=[f"{m['name']} ({', '.join(m['methods']) or '–'})" for m in video_like], error=None)
+        omni = [m["name"] for m in models if "omni" in m["name"].lower()]
+        ver2 = lambda n: [int(x) for x in re.findall(r"\d+", n)] or [0]  # noqa: E731
+        VEO_DIAG.update(seen=[f"{m['name']} ({', '.join(m['methods']) or '–'})" for m in video_like], error=None,
+                        omni=sorted(omni, key=lambda n: ("flash" not in n, [-v for v in ver2(n)], "preview" in n)),
+                        listed=True)
         names = [m["name"] for m in video_like if "predictLongRunning" in m["methods"]]
+        if not names and omni:
+            return []  # senų Veo modelių nebėra – video kuriamas per Gemini Omni
         if names:
             ver = lambda n: [int(x) for x in re.findall(r"\d+", n.split("-generate")[0])] or [0]  # noqa: E731
             tier = lambda n: 0 if "lite" in n else 1 if "fast" in n else 2  # noqa: E731 – pigiausi pirmi
@@ -339,6 +345,85 @@ def veo_models(key):
     except Exception as e:
         VEO_DIAG.update(seen=[], error=str(e)[:200])
     return list(VEO_FALLBACK)
+
+
+OMNI_FALLBACK = ("gemini-omni-flash-preview", "gemini-omni-1.1-flash-preview", "gemini-omni-1.1-flash")
+
+
+def _save_b64_or_uri(key, item, out_path):
+    import base64
+    import urllib.request
+    if item.get("data"):
+        with open(out_path, "wb") as f:
+            f.write(base64.b64decode(item["data"]))
+        return out_path
+    uri = item.get("uri")
+    if not uri:
+        raise RuntimeError("Google atsakyme nėra video")
+    req = urllib.request.Request(uri, headers={"x-goog-api-key": key})
+    tmp = out_path + ".part"
+    with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
+        shutil.copyfileobj(r, f, 1 << 20)
+    os.replace(tmp, out_path)
+    return out_path
+
+
+def _omni_wait(key, it, background, say, timeout):
+    import time as _t
+    say("Google kuria video kadrą (1–3 min.)…")
+    t0 = _t.time()
+    while background and it.get("status") not in ("completed", "failed", "cancelled"):
+        if _t.time() - t0 > timeout:
+            raise RuntimeError("Google neatsakė per 7 min. – pabandykite dar kartą.")
+        _t.sleep(8)
+        it = _gapi(key, f"/interactions/{it['id']}")
+    if it.get("status") in ("failed", "cancelled"):
+        err = it.get("error") or {}
+        raise RuntimeError("Google nesukūrė video: " + str(err.get("message", err) or it["status"])[:200])
+    return it
+
+
+def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
+    """AI video kadras per Gemini Omni Flash (Interactions API): 4 s, 720p, 9:16 / 16:9."""
+    say = status or (lambda m: None)
+    models = VEO_DIAG.get("omni") or list(OMNI_FALLBACK)
+    text = VEO_STYLE.format(prompt=prompt.strip().rstrip("."))
+    last = None
+    for model in models:
+        next_model = False
+        for secs in ("4s", "5s", None):  # 4 s – pigiausia; jei netinka – 5 s, tada numatyta
+            fmt = {"type": "video", "aspect_ratio": aspect if aspect in ("9:16", "16:9") else "9:16",
+                   "resolution": "720p"}
+            if secs:
+                fmt["duration"] = secs
+            retry_duration = False
+            for background in (True, False):  # fone (su tikrinimu); jei nepalaikoma – iškart
+                body = {"model": model, "input": text, "response_format": fmt}
+                if background:
+                    body["background"] = True
+                try:
+                    it = _gapi(key, "/interactions", body, timeout=60 if background else 400)
+                except RuntimeError as e:
+                    last, msg = f"{model}: {e}", str(e).lower()
+                    if str(e).startswith(("401", "403")):
+                        raise RuntimeError("Google raktas neleidžia kurti video – patikrinkite mokėjimus AI Studio.")
+                    if msg.startswith("400") and "background" in msg:
+                        continue
+                    if msg.startswith("400") and "duration" in msg:
+                        retry_duration = True
+                    else:
+                        next_model = True
+                    break
+                it = _omni_wait(key, it, background, say, timeout)
+                for step in it.get("steps") or []:
+                    if step.get("type") == "model_output":
+                        for c in step.get("content") or []:
+                            if c.get("type") == "video":
+                                return _save_b64_or_uri(key, c, out_path)
+                raise RuntimeError("Google nesukūrė video – pabandykite kitaip aprašyti kadrą.")
+            if next_model or not retry_duration:
+                break
+    raise RuntimeError("Google video (Omni) nepasiekiamas: " + str(last)[:250])
 
 
 def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
@@ -350,7 +435,10 @@ def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
             "parameters": {"aspectRatio": aspect if aspect in ("9:16", "16:9") else "9:16",
                            "negativePrompt": "text, subtitles, watermark, logo, blurry, distorted faces"}}
     op, last = None, None
-    for model in veo_models(key):
+    models = veo_models(key)
+    if not models:  # Google dabar video kuria per Gemini Omni
+        return omni_generate(key, prompt, aspect, out_path, status, timeout)
+    for model in models:
         for secs in (VEO_SECONDS, 5, None):  # 4 s (pigiausia); senesni modeliai – nuo 5 s
             b = json.loads(json.dumps(body))
             if secs:
@@ -367,6 +455,8 @@ def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
                     break  # ne trukmės klaida – bandom kitą modelį
         if op:
             break
+    if (not op or not op.get("name")) and VEO_DIAG.get("omni"):
+        return omni_generate(key, prompt, aspect, out_path, status, timeout)
     if not op or not op.get("name"):
         seen = "; ".join(VEO_DIAG["seen"][:12]) or (
             "modelių sąrašo gauti nepavyko: " + VEO_DIAG["error"] if VEO_DIAG["error"] else "video modelių nėra")
