@@ -81,8 +81,7 @@ GEMINI_VOICES = {"g:Kore": "Kore – tvirta, užtikrinta moteris", "g:Aoede": "A
                  "g:Iapetus": "Iapetus – aiškus vyras", "g:Algieba": "Algieba – ramus vyras"}
 GEMINI_TTS_MODELS = ("gemini-3.8-flash-tts", "gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts",
                      "gemini-2.5-pro-preview-tts")
-GEMINI_STYLE = ("Read the following {lang} text aloud exactly as written, as a native {lang} speaker: natural, "
-                "correct stress and intonation, warm and confident social-media voice, lively but not rushed:\n\n")
+TTS_VERSION = "2"  # pakeitus įgarsinimo būdą – seni įgarsinimai sukuriami iš naujo
 TTS_INSTRUCTIONS = ("Speak in natural, fluent {lang} with correct pronunciation and stress. Warm, confident, "
                     "energetic social-media tone, clear diction, natural pauses at punctuation.")
 
@@ -247,7 +246,8 @@ def tts_gemini(key, text, voice, out_path, language="lt"):
     import urllib.request
     lang = video_editor.LANGUAGES.get(language, "Lithuanian")
     body = json.dumps({
-        "contents": [{"parts": [{"text": GEMINI_STYLE.format(lang=lang) + text}]}],
+        # tik tekstas – Google TTS bet kokius nurodymus perskaito garsiai (kalbą atpažįsta pats)
+        "contents": [{"parts": [{"text": text}]}],
         "generationConfig": {"responseModalities": ["AUDIO"],
                              "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {
                                  "voiceName": voice.removeprefix("g:")}}}}}).encode()

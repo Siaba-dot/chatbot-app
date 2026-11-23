@@ -756,7 +756,7 @@ def veo_ideas(pid: str, user=Depends(current_user)):
 def voice_sample(voice: str, user=Depends(current_user)):
     if voice not in engine.VOICES and voice not in engine.GEMINI_VOICES:
         raise HTTPException(404, "Nėra tokio balso")
-    path = os.path.join(DATA, "voice_samples", voice.replace(":", "_") + ".mp3")
+    path = os.path.join(DATA, "voice_samples", f"v{engine.TTS_VERSION}_" + voice.replace(":", "_") + ".mp3")
     if not os.path.exists(path):
         if user["plan"] not in AI_PLANS:
             raise HTTPException(400, "Balsų pavyzdžiams reikia AI (Premium).")
@@ -786,7 +786,7 @@ def voiceover_preview(pid: str, user=Depends(current_user)):
     google = str(vo.get("voice", "")).startswith("g:")
     if (google and not stock_key("gemini")) or (not google and client is None):
         raise HTTPException(400, "Šiam balsui nėra rakto.")
-    key = hashlib.sha1((vo["text"] + "|" + vo.get("voice", "") + "|" +
+    key = hashlib.sha1((engine.TTS_VERSION + "|" + vo["text"] + "|" + vo.get("voice", "") + "|" +
                         proj["settings"]["subtitle_language"]).encode()).hexdigest()[:12]
     path = os.path.join(_pdir(user, pid), f"vo_{key}.mp3")
     if not os.path.exists(path):
@@ -1046,7 +1046,7 @@ def _run_job(jid, user, pid, kind, quick, words):
                 raise ValueError("Google balsams reikia Google (Gemini) rakto – „Mano projektai“ → Google raktas.")
             if not google and client is None:
                 raise ValueError("AI įgarsinimui reikia OpenAI rakto (Premium planas).")
-            vo_key = hashlib.sha1((vo["text"] + "|" + vo.get("voice", "") + "|" +
+            vo_key = hashlib.sha1((engine.TTS_VERSION + "|" + vo["text"] + "|" + vo.get("voice", "") + "|" +
                                    proj["settings"]["subtitle_language"]).encode()).hexdigest()[:12]
             vo_path = os.path.join(d, f"vo_{vo_key}.mp3")
             if not os.path.exists(vo_path):
