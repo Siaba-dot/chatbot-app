@@ -772,6 +772,42 @@ def voice_sample(voice: str, user=Depends(current_user)):
     return FileResponse(path, media_type="audio/mpeg")
 
 
+@app.post("/api/projects/{pid}/voiceover_preview")
+def voiceover_preview(pid: str, user=Depends(current_user)):
+    """▶ Išklausyti tikrąjį įgarsinimą (tas pats failas bus naudojamas video – antrą kartą nemokama)."""
+    proj = _load(user, pid)
+    vo = proj["settings"].get("voiceover") or {}
+    text = str(vo.get("text", "")).strip()
+    if not text:
+        raise HTTPException(400, "Įrašykite įgarsinimo tekstą.")
+    if user["plan"] not in AI_PLANS:
+        raise HTTPException(400, "AI įgarsinimas – Premium plane.")
+    client = openai_client(user)
+    google = str(vo.get("voice", "")).startswith("g:")
+    if (google and not stock_key("gemini")) or (not google and client is None):
+        raise HTTPException(400, "Šiam balsui nėra rakto.")
+    key = hashlib.sha1((vo["text"] + "|" + vo.get("voice", "") + "|" +
+                        proj["settings"]["subtitle_language"]).encode()).hexdigest()[:12]
+    path = os.path.join(_pdir(user, pid), f"vo_{key}.mp3")
+    if not os.path.exists(path):
+        try:
+            engine.tts(client, text, vo.get("voice", "coral"), path, proj["settings"]["subtitle_language"],
+                       gemini_key=stock_key("gemini"))
+        except RuntimeError as e:
+            raise HTTPException(400, str(e))
+    return {"file": f"vo_{key}.mp3", "text": text, "voice": vo.get("voice")}
+
+
+@app.get("/api/projects/{pid}/voiceover/{name}")
+def voiceover_file(pid: str, name: str, user=Depends(current_user)):
+    if not re.fullmatch(r"vo_[a-f0-9]{12}\.mp3", name):
+        raise HTTPException(404, "Nėra")
+    path = os.path.join(_pdir(user, pid), name)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Nėra")
+    return FileResponse(path, media_type="audio/mpeg")
+
+
 class VoiceTextBody(BaseModel):
     topic: str
     seconds: int = 30

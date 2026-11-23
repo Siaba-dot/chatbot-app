@@ -32,6 +32,7 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
   const [busy, setBusy] = useState(false);
   const [playing, setPlaying] = useState("");
   const audio = useRef(null);
+  const [pv, setPv] = useState("");  // įgarsinimo peržiūra: "" | "busy" | adresas
   const words = vo.text.trim() ? vo.text.trim().split(/\s+/).length : 0;
   const setVo = patch => set({ voiceover: { ...vo, ...patch } });
 
@@ -44,6 +45,15 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
         <p className="hint">{user.plan === "admin" ? "Įjunkite: „← Mano projektai“ → „🔑 OpenAI raktas“." : "Įgarsinimas – Premium plane."}</p>
       </div>
     );
+  }
+
+  async function preview() {
+    setPv("busy");
+    try {
+      await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: { voiceover: vo } } });  // dabartinis tekstas
+      const r = await api(`/projects/${id}/voiceover_preview`, { method: "POST" });
+      setPv(fileUrl(`/projects/${id}/voiceover/${r.file}`));
+    } catch (e) { setError(e.message); setPv(""); }
   }
 
   async function write() {
@@ -95,6 +105,15 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
                   onBlur={e => setVo({ text: e.target.value })}
                   placeholder="Įrašykite, ką turi pasakyti balsas. Skyrybos ženklai – natūralios pauzės." />
         <div className="hint">{words} žodž. · ~{Math.round(words / 2.3)} s</div>
+        {!vo.on && vo.text.trim() && (
+          <div className="error" style={{ marginTop: 8 }}>⚠ Įgarsinimas išjungtas – video bus su jūsų įrašo garsu. Įjunkite jungiklį viršuje.</div>
+        )}
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className="btn" onClick={preview} disabled={pv === "busy" || !vo.text.trim()}>
+            {pv === "busy" ? "Kuriamas įgarsinimas…" : "▶ Išklausyti įgarsinimą"}</button>
+          <span className="hint">Tai tiksliai tas balsas ir tekstas, kurie bus video.</span>
+        </div>
+        {pv && pv !== "busy" && <audio src={pv} controls autoPlay style={{ width: "100%", marginTop: 8 }} />}
       </div>
 
       <div className="section">
