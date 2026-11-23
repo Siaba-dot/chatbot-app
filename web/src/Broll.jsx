@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { api, fileUrl } from "./api.js";
 import Veo from "./Veo.jsx";
+import Library from "./Library.jsx";
 
 // 🎞 Nemokami video intarpai (Pixabay arba Pexels): paieška, įterpimas ties sakiniu arba kaip atskiras įrašas, AI parinkimas
 function fmt(t) {
@@ -88,6 +89,8 @@ export default function Broll({ id, proj, setProj, s, user, setToast, setError }
     <>
       <Veo id={id} proj={proj} setProj={setProj} user={user} mode={mode} ModeChips={ModeChips} chooseMode={chooseMode}
            setToast={setToast} setError={setError} />
+      <Library id={id} proj={proj} setProj={setProj} mode={mode} ModeChips={ModeChips} chooseMode={chooseMode}
+               setToast={setToast} setError={setError} refresh={(proj.broll || []).length + (proj.clips || []).length} />
       {noStock ? (
         <div className="card section">
           <h3>🎞 Nemokami video intarpai</h3>

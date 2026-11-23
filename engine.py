@@ -445,6 +445,13 @@ def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
                 last = f"{model}: {e}"
                 if str(e).startswith(("401", "403")):
                     raise RuntimeError("Google raktas neleidžia kurti video – patikrinkite mokėjimus AI Studio.")
+                if str(e).startswith("429") and re.search(r"free tier|limit: 0", str(e), re.I):
+                    raise RuntimeError(
+                        "Jūsų Google raktas – nemokamo lygio (Free Tier), o jame AI video kurti negalima. "
+                        "AI Studio → Billing užbaikite išankstinį apmokėjimą (Set up prepay), o API Keys patikrinkite, "
+                        "ar raktas priklauso projektui su mokėjimais (ne „Free“ lygis).")
+                if str(e).startswith("429"):
+                    raise RuntimeError("Google šiuo metu riboja užklausas – pabandykite po kelių minučių.")
                 if str(e).startswith("404"):
                     break  # tokio modelio nėra – kitas modelis
                 continue  # 400 ir pan. – kitas užklausos variantas
