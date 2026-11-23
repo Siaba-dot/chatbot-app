@@ -578,14 +578,24 @@ def extra_formats(main):
     return [f for f in AUTO_FORMATS if f != main][:2]
 
 
+def _mostly_portrait(clips):
+    """Ar dauguma medžiagos (pagal trukmę) – stati."""
+    tall = sum(c.get("duration") or 0 for c in clips if (c.get("height") or 0) > (c.get("width") or 0) * 1.1)
+    total = sum(c.get("duration") or 0 for c in clips) or 1
+    return tall / total > 0.5
+
+
 def source_for_format(clips, settings, workdir, fmt, vo_path=None, progress=None):
     """Ta pati medžiaga kitu formatu (analizė – pauzės, titrai – lieka ta pati)."""
     s = settings_with_defaults(dict(settings, format=fmt))
     src = os.path.join(workdir, f"joined_{fmt.replace(':', 'x')}.mkv")
+    # Gulsčias papildomas formatas (YouTube 16:9) iš stačios medžiagos – visas vaizdas per vidurį su sulietu
+    # fonu (užpildant būtų nukirsta didžioji viršaus ir apačios dalis – žmonės liktų be galvų)
+    fill = s["fit"] == "fill" and not (fmt == "16:9" and _mostly_portrait(clips))
     src, _ = video_editor.concat_clips([c["path"] for c in clips], src, fmt, progress=progress,
                                        image_duration=photo_duration(clips, s, vo_path),
                                        segments=[_segments(c) for c in clips], transition=s["transition"],
-                                       fill=s["fit"] == "fill")
+                                       fill=fill)
     return src
 
 
