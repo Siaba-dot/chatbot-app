@@ -53,7 +53,7 @@ export default function Veo({ id, proj, setProj, user, mode, ModeChips, chooseMo
       setProj(await api("/projects/" + id));
       setToast(asClip ? "AI kadras pridėtas kaip įrašas 🎬" : "AI kadras įterptas 🎬");
       setPrompt("");
-    } catch (e) { setError(e.message); }
+    } catch (e) { if (e.status === 499) setToast("Sustabdyta ■"); else setError(e.message); }
     finally { setJob(null); }
   }
 
@@ -96,6 +96,9 @@ export default function Veo({ id, proj, setProj, user, mode, ModeChips, chooseMo
         <div className="progress" style={{ maxWidth: "none" }}>
           <div className="bar"><i style={{ width: `${Math.round(Math.max(0.05, job.progress || 0) * 100)}%` }} /></div>
           <div className="msg">{job.message}</div>
+          <button className="btn small" style={{ marginTop: 8 }}
+                  onClick={async () => { try { setJob(await api(`/jobs/${job.id}/cancel`, { method: "POST" })); } catch (e) { setError(e.message); } }}>
+            ■ Sustabdyti</button>
         </div>
       ) : (
         <div className="row">

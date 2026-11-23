@@ -12,6 +12,7 @@ import math
 import os
 import re
 import subprocess
+import threading
 import tempfile
 
 import numpy as np
@@ -24,6 +25,31 @@ SUBTITLE_STYLES = ("modern", "training")
 # Streamlit Cloud turi ~1 GB atminties, o ffmpeg mato visus serverio procesorius ir paleidžia dešimtis gijų
 # (kiekviena – su savo kadrų buferiais). Ribojam gijas, kad programa nenulūžtų dėl atminties.
 FFMPEG_THREADS = os.environ.get("REELS_FFMPEG_THREADS", "2")
+
+
+_ACTIVE = threading.local()  # šios gijos paleisti ffmpeg procesai – kad sustabdžius darbą juos būtų galima nutraukti
+
+
+def popen(cmd, **kw):
+    """subprocess.Popen, įsimenant procesą (žr. kill_active)."""
+    proc = subprocess.Popen(cmd, **kw)
+    procs = getattr(_ACTIVE, "procs", None)
+    if procs is None:
+        procs = _ACTIVE.procs = []
+    procs[:] = [p for p in procs if p.poll() is None] + [proc]
+    return proc
+
+
+def kill_active():
+    """Nutraukia visus šios gijos dar veikiančius ffmpeg procesus (naudotojas sustabdė darbą)."""
+    for p in getattr(_ACTIVE, "procs", None) or []:
+        if p.poll() is None:
+            try:
+                p.kill()
+                p.wait(timeout=5)
+            except Exception:
+                pass
+    _ACTIVE.procs = []
 
 
 def limit_threads(cmd, threads=None):
@@ -861,7 +887,7 @@ def render(path, out_path, keep, info, fmt="original", loudnorm=True, fades=True
     cmd += ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
             "-movflags", "+faststart", "-t", f"{total:.3f}", out_path]
     try:
-        proc = subprocess.Popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in proc.stdout:
             m = re.match(r"out_time_us=(\d+)", line)
             if m and progress and total > 0:
@@ -950,7 +976,7 @@ def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, seg
             cmd += ["-r", str(fps), "-i", part]
         cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
                 "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
-        proc = subprocess.Popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in proc.stdout:
             m = re.match(r"out_time_us=(\d+)", line)
             if m and progress and t > 0:
@@ -1053,7 +1079,7 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
     cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
             "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
     try:
-        proc = subprocess.Popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = popen(limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in proc.stdout:
             m = re.match(r"out_time_us=(\d+)", line)
             if m and progress and total > 0:

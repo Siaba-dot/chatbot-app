@@ -792,9 +792,11 @@ def overlay_broll(src, out_path, items, keep=None, speed=1.0, fade=0.25):
             return src
         cmd += ["-filter_complex", ";".join(chains), "-map", f"[{last}]", "-map", "0:a?", "-c:v", "libx264",
                 "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", out_path]
-        r = subprocess.run(video_editor.limit_threads(cmd), capture_output=True, text=True)
-        if r.returncode != 0:
-            raise RuntimeError("Nepavyko įdėti intarpų: " + r.stderr[-300:])
+        proc = video_editor.popen(video_editor.limit_threads(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True)
+        _, err = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError("Nepavyko įdėti intarpų: " + (err or "")[-300:])
         return out_path
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
