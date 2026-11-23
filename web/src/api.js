@@ -63,6 +63,7 @@ export function waitJob(jobId, onUpdate) {
         onUpdate && onUpdate(j);
         if (j.status === "done") return resolve(j);
         if (j.status === "error") return reject(new ApiError(500, j.message));
+        if (j.status === "cancelled") return reject(new ApiError(499, "Sustabdyta"));
         setTimeout(tick, 1200);
       } catch (e) { reject(e); }
     };

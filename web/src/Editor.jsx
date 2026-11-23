@@ -179,10 +179,16 @@ export default function Editor({ id, user }) {
       setProj(p);
       setLines(p.line_texts || (p.lines || []).map(l => l[2]));
     } catch (e) {
-      setError(e.message);
+      if (e.status === 499) setToast("Sustabdyta ■");
+      else setError(e.message);
     } finally {
       setJob(null);
     }
+  }
+
+  async function stopJob() {
+    if (!job) return;
+    try { setJob(await api(`/jobs/${job.id}/cancel`, { method: "POST" })); } catch (e) { setError(e.message); }
   }
 
   async function saveLines(next) {
@@ -223,6 +229,7 @@ export default function Editor({ id, user }) {
                 <div className="progress">
                   <div className="bar"><i style={{ width: `${Math.round((job.progress || 0) * 100)}%` }} /></div>
                   <div className="msg">{job.message} {Math.round((job.progress || 0) * 100)}%</div>
+                  <button className="btn small" style={{ marginTop: 10 }} onClick={stopJob}>■ Sustabdyti</button>
                 </div>
               </div>
             ) : show === "final" && out.final ? (

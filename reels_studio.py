@@ -1004,8 +1004,8 @@ def _run_once(cmd, total, progress, what, stall=12.0, hard=180.0, threads=None):
     pagalbinių sluoksnių): jei eiga nebejuda `stall` s, o video jau beveik baigtas – ffmpeg tvarkingai sustabdomas
     (q, failas išsaugomas); jei nejuda `hard` s – nutraukiamas su aiškia klaida."""
     import threading
-    proc = subprocess.Popen(video_editor.limit_threads(cmd, threads), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True)
+    proc = video_editor.popen(video_editor.limit_threads(cmd, threads), stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     state = {"t": 0.0, "seen": time.time()}
     errbuf = []
     threading.Thread(target=lambda: errbuf.append(proc.stderr.read()), daemon=True).start()

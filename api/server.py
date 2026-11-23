@@ -534,7 +534,7 @@ def _run_veo(jid, user, pid, body):
         _job_update(jid, progress=0.05)
         engine.veo_generate(key, prompt, "16:9" if fmt == "16:9" else "9:16", path,
                             status=lambda m: _job_update(jid, message=m, progress=0.15))
-        _job_update(jid, message="Dedu kadrą į projektą…", progress=0.9)
+        _job_update(jid, message="Dedu kadrą į projektą…", progress=0.9)  # sustabdžius – čia nutrūksta
         thumb = path + ".thumb.jpg"
         reels_studio.grab_frame(path, thumb, at=1.0)
         _library_add(user, path, body.prompt, fmt)  # 📚 kad būtų galima naudoti ir kituose Reels'uose
@@ -554,7 +554,10 @@ def _run_veo(jid, user, pid, body):
             proj["broll"].sort(key=lambda b: b["t"])
         _save(user, proj)
         _job_update(jid, status="done", progress=1.0, message="AI kadras paruoštas ✅")
-    except Exception as e:
+    except (Exception, JobCancelled) as e:
+        if jid in _cancelled or isinstance(e, JobCancelled):
+            _job_update(jid, status="cancelled", message="Sustabdyta")
+            return
         traceback.print_exc()
         _job_update(jid, status="error", message=str(e)[:300])
 
@@ -1020,9 +1023,24 @@ def reorder_clips(pid: str, body: ClipOrder, user=Depends(current_user)):
 
 
 # ---------- darbai (paruošimas ir video kūrimas fone) ----------
+class JobCancelled(BaseException):  # ne Exception – kad jo „nepagautų“ vidiniai „except Exception“
+    pass
+
+
+_cancelled = set()  # naudotojo sustabdyti darbai
+
+
 def _job_update(jid, **kw):
+    """Darbo eiga. Kai darbas sustabdytas, eigos atnaujinimas (iš darbo gijos) nutraukia darbą."""
+    if "status" not in kw and jid in _cancelled:
+        raise JobCancelled()
     with _jobs_lock:
         _jobs[jid].update(kw)
+
+
+def _finish_cancelled(jid):
+    video_editor.kill_active()  # tos pačios gijos ffmpeg procesai
+    _job_update(jid, status="cancelled", message="Sustabdyta")
 
 
 def _run_job(jid, user, pid, kind, quick, words):
@@ -1134,8 +1152,15 @@ def _run_job(jid, user, pid, kind, quick, words):
         proj = _load(user, pid)
         proj["outputs"][("preview" if quick else "final")] = dict(result, at=time.time())
         _save(user, proj)
+        if jid in _cancelled:
+            raise JobCancelled()
         _job_update(jid, status="done", progress=1.0, message="Paruošta ✅", result=result)
+    except JobCancelled:
+        _finish_cancelled(jid)
     except Exception as e:
+        if jid in _cancelled:
+            _finish_cancelled(jid)
+            return
         traceback.print_exc()
         _job_update(jid, status="error", message=str(e)[:300] or type(e).__name__)
 
@@ -1246,19 +1271,43 @@ def render(pid: str, body: RenderBody, user=Depends(current_user)):
 
 def _start(user, pid, kind, quick, words):
     _load(user, pid)
-    with _jobs_lock:
-        busy = [j for j in _jobs.values() if j["user"] == user["username"] and j["status"] in ("queued", "running")]
+    with _jobs_lock:  # ankstesnis to paties projekto darbas nebereikalingas – stabdomas (kad nesikauptų eilė)
+        for j in _jobs.values():
+            if j["user"] == user["username"] and j["project"] == pid and j["kind"] in ("render", "prepare") \
+                    and j["status"] in ("queued", "running"):
+                _cancelled.add(j["id"])
+                if j["status"] == "queued":
+                    j.update(status="cancelled", message="Sustabdyta")
+        busy = [j for j in _jobs.values() if j["user"] == user["username"] and j["status"] in ("queued", "running")
+                and j["id"] not in _cancelled]
         if len(busy) >= 2:
-            raise HTTPException(429, "Palaukite, kol baigsis ankstesnis video")
+            raise HTTPException(429, "Palaukite, kol baigsis ankstesnis video (arba sustabdykite jį)")
         jid = uuid.uuid4().hex[:12]
         _jobs[jid] = {"id": jid, "user": user["username"], "project": pid, "kind": kind, "status": "queued",
                       "progress": 0.0, "message": "Eilėje…", "created": time.time(), "result": None}
 
     def run():
+        if jid in _cancelled:
+            return
         _job_update(jid, status="running", message="Pradedu…")
         _run_job(jid, user, pid, kind, quick, words)
     _pool.submit(run)
     return _jobs[jid]
+
+
+@app.post("/api/jobs/{jid}/cancel")
+def cancel_job(jid: str, user=Depends(current_user)):
+    """■ Sustabdyti darbą (eilėje – iškart; vykstantį – per akimirką, nutraukiant ffmpeg)."""
+    with _jobs_lock:
+        j = _jobs.get(jid)
+        if not j or j["user"] != user["username"]:
+            raise HTTPException(404, "Darbas nerastas")
+        if j["status"] in ("queued", "running"):
+            _cancelled.add(jid)
+            j.update(status="cancelled" if j["status"] == "queued" else "running", message="Stabdoma…")
+            if j["status"] == "cancelled":
+                j["message"] = "Sustabdyta"
+        return dict(j)
 
 
 @app.get("/api/jobs/{jid}")
