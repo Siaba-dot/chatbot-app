@@ -537,6 +537,7 @@ def _run_veo(jid, user, pid, body):
         _job_update(jid, message="Dedu kadrą į projektą…", progress=0.9)
         thumb = path + ".thumb.jpg"
         reels_studio.grab_frame(path, thumb, at=1.0)
+        _library_add(user, path, body.prompt, fmt)  # 📚 kad būtų galima naudoti ir kituose Reels'uose
         proj = _load(user, pid)
         if body.as_clip:
             clip = engine.add_clip(path, "AI kadras · " + body.prompt[:40])
@@ -556,6 +557,145 @@ def _run_veo(jid, user, pid, body):
     except Exception as e:
         traceback.print_exc()
         _job_update(jid, status="error", message=str(e)[:300])
+
+
+# ---------- 📚 Mano AI kadrai: biblioteka (sumokėta vieną kartą – naudojama visur) ----------
+def _lib_dir(user):
+    return os.path.join(DATA, "library", re.sub(r"[^\w.@-]", "_", user["username"]))
+
+
+def _lib_load(user):
+    try:
+        with open(os.path.join(_lib_dir(user), "library.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def _lib_save(user, items):
+    d = _lib_dir(user)
+    os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, "library.json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False)
+    os.replace(tmp, os.path.join(d, "library.json"))
+
+
+def _library_add(user, path, prompt, fmt, created=None, backfill=True):
+    """Kadro kopija į naudotojo biblioteką (atskirai nuo projekto – ištrynus projektą, kadras lieka)."""
+    if backfill:
+        _library_backfill(user)  # pirmiausia – anksčiau sukurti kadrai (kad nesidubliuotų)
+    items = _lib_load(user)
+    lid = uuid.uuid4().hex[:10]
+    d = _lib_dir(user)
+    os.makedirs(d, exist_ok=True)
+    dst = os.path.join(d, lid + ".mp4")
+    shutil.copy(path, dst)
+    try:
+        reels_studio.grab_frame(dst, dst + ".thumb.jpg", at=1.0)
+    except Exception:
+        traceback.print_exc()
+    try:
+        dur = round(video_editor.media_duration(dst), 1)
+    except Exception:
+        dur = None
+    items.insert(0, {"id": lid, "prompt": prompt[:200], "format": fmt, "duration": dur,
+                     "created": created or time.time()})
+    _lib_save(user, items)
+    return lid
+
+
+def _library_backfill(user):
+    """Anksčiau sukurti AI kadrai (projektuose) – į biblioteką vieną kartą."""
+    marker = os.path.join(_lib_dir(user), ".backfilled")
+    if os.path.exists(marker):
+        return
+    os.makedirs(_lib_dir(user), exist_ok=True)
+    open(marker, "w").close()
+    root = os.path.join(PROJECTS, re.sub(r"[^\w.@-]", "_", user["username"]))
+    for pid in os.listdir(root) if os.path.isdir(root) else []:
+        try:
+            proj = _load(user, pid)
+        except HTTPException:
+            continue
+        for b in proj.get("broll", []):
+            if b.get("provider") == "veo" and os.path.exists(b.get("path", "")):
+                _library_add(user, b["path"], (b.get("query") or "AI kadras").removeprefix("AI: "),
+                             proj["settings"].get("format", "9:16"), backfill=False)
+
+
+@app.get("/api/library")
+def library(user=Depends(current_user)):
+    _library_backfill(user)
+    return {"items": [it for it in _lib_load(user) if os.path.exists(os.path.join(_lib_dir(user), it["id"] + ".mp4"))]}
+
+
+def _lib_file(user, lid, thumb=False):
+    lid = re.sub(r"[^a-f0-9]", "", lid)
+    path = os.path.join(_lib_dir(user), lid + ".mp4" + (".thumb.jpg" if thumb else ""))
+    if not lid or not os.path.exists(path):
+        raise HTTPException(404, "Kadras nerastas")
+    return path
+
+
+@app.get("/api/library/{lid}/thumb")
+def library_thumb(lid: str, user=Depends(current_user)):
+    return FileResponse(_lib_file(user, lid, True), media_type="image/jpeg")
+
+
+@app.get("/api/library/{lid}/video")
+def library_video(lid: str, user=Depends(current_user)):
+    return FileResponse(_lib_file(user, lid), media_type="video/mp4")
+
+
+@app.delete("/api/library/{lid}")
+def library_delete(lid: str, user=Depends(current_user)):
+    path = _lib_file(user, lid)
+    for f in (path, path + ".thumb.jpg"):
+        if os.path.exists(f):
+            os.unlink(f)
+    _lib_save(user, [it for it in _lib_load(user) if it["id"] != lid])
+    return {"ok": True}
+
+
+class LibUse(BaseModel):
+    lid: str
+    t: float = 0.0
+    d: float = 3.0
+    mode: str = "card"
+    pos: str = "auto"
+    as_clip: bool = False
+
+
+@app.post("/api/projects/{pid}/broll/library")
+def use_library(pid: str, body: LibUse, user=Depends(current_user)):
+    """Kadras iš bibliotekos – į projektą (kopija), be jokio naujo mokesčio."""
+    src = _lib_file(user, body.lid)
+    meta = next((it for it in _lib_load(user) if it["id"] == body.lid), {})
+    proj = _load(user, pid)
+    d = os.path.join(_pdir(user, pid), "broll")
+    os.makedirs(d, exist_ok=True)
+    vid = uuid.uuid4().hex[:8]
+    path = os.path.join(d, f"veo_{vid}.mp4")
+    shutil.copy(src, path)
+    if os.path.exists(src + ".thumb.jpg"):
+        shutil.copy(src + ".thumb.jpg", path + ".thumb.jpg")
+    if body.as_clip:
+        clip = engine.add_clip(path, "AI kadras · " + meta.get("prompt", "")[:40])
+        clip["id"] = uuid.uuid4().hex[:10]
+        proj["clips"].append(clip)
+        proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+    else:
+        proj.setdefault("broll", []).append({
+            "id": vid, "provider": "veo", "pexels_id": 0, "t": round(max(0.0, body.t), 2),
+            "d": round(max(1.0, min(8.0, body.d)), 2), "query": "AI: " + meta.get("prompt", "")[:50],
+            "mode": body.mode if body.mode in engine.BROLL_MODES else "card",
+            "pos": body.pos if body.pos in ("auto", "tl", "tr") else "auto",
+            "image": f"/api/projects/{pid}/broll/{vid}/thumb", "user": "Mano AI kadras", "url": "", "path": path,
+            "from_library": True})
+        proj["broll"].sort(key=lambda b: b["t"])
+    _save(user, proj)
+    return _public(proj)
 
 
 @app.post("/api/projects/{pid}/broll/veo")

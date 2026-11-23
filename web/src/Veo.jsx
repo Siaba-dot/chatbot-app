@@ -62,7 +62,8 @@ export default function Veo({ id, proj, setProj, user, mode, ModeChips, chooseMo
       <h3 style={{ marginTop: 0 }}>🎬 AI sukurs kadrą (Google Veo)</h3>
       <div className="hint" style={{ marginBottom: 10 }}>
         Aprašykite, ką turi rodyti kamera – AI sukurs unikalų video, kokio neturi niekas kitas. Kūrimas trunka 1–3 min.
-        Kuriamas 4 s kadras pigiausiu Google modeliu – apie 0,20–0,40 € už kadrą.
+        Kuriamas 4 s kadras pigiausiu Google modeliu – apie 0,20–0,40 € už kadrą. Kiekvienas kadras išsaugomas
+        „📚 Mano AI kadrai“ – kituose Reels'uose jį naudosite nemokamai.
       </div>
       {user.ai && proj.prepared && (
         <div style={{ marginBottom: 10 }}>
