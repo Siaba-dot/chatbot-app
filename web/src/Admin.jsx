@@ -116,10 +116,11 @@ function Business({ st, save, onError }) {
   return (
     <>
       <Section open={open} setOpen={setOpen} id="biz" title="📄 Veiklos duomenys (taisyklėms ir privatumo politikai)" ok={!!st.biz_name}>
+        <div className="error" style={{ marginBottom: 8 }}>⚠ Šie duomenys rodomi VIEŠAI – juos mato visi, net neprisijungę. Asmens kodo ir namų adreso nerašykite.</div>
         <div className="hint" style={{ marginBottom: 10 }}>Įrašomi į <a href="#/terms" target="_blank" rel="noreferrer">taisykles</a> ir{" "}
           <a href="#/privacy" target="_blank" rel="noreferrer">privatumo politiką</a>. Tai šablonai – prieš prekybą verta, kad juos peržiūrėtų teisininkas.</div>
         <TextFields st={st} onSave={save} fields={[["biz_name", "Vardas, pavardė / įmonė", "pvz. Vardenė Pavardenė, individuali veikla"],
-          ["biz_code", "Asmens / įmonės / individualios veiklos kodas", ""], ["biz_address", "Adresas", "pvz. Vilnius, Lietuva"],
+          ["biz_code", "Įmonės kodas arba individualios veiklos pažymos / verslo liudijimo Nr. (NE asmens kodas!)", "pvz. 306123456 arba IV pažymos Nr. 1234567"], ["biz_address", "Veiklos adresas (užtenka miesto)", "pvz. Vilnius, Lietuva"],
           ["biz_email", "El. paštas klientams (ir pranešimams jums)", "info@…"]]} />
       </Section>
       <Section open={open} setOpen={setOpen} id="mail" title="✉️ El. laiškai (Brevo)" ok={st.mail}>

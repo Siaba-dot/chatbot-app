@@ -22,7 +22,7 @@ function Shell({ title, children }) {
 function Who({ s }) {
   const name = s.biz_name || "[Veiklos vykdytojo vardas, pavardė / įmonės pavadinimas]";
   return (
-    <p>Paslaugos teikėjas: <b>{name}</b>{s.biz_code ? `, kodas ${s.biz_code}` : ", [asmens / įmonės / individualios veiklos kodas]"}
+    <p>Paslaugos teikėjas: <b>{name}</b>{s.biz_code ? `, ${s.biz_code}` : ", [įmonės kodas arba individualios veiklos pažymos Nr.]"}
       {s.biz_address ? `, ${s.biz_address}` : ", [adresas]"}. El. paštas: <b>{s.biz_email || s.contact || "[el. paštas]"}</b>.</p>
   );
 }
