@@ -164,8 +164,16 @@ function Settings({ onError }) {
     <div className="card section">
       <div className="switch" onClick={() => save({ registration: !st.registration })}>
         <div className="txt"><b>📝 Klientai gali registruotis patys</b>
-          <span>Prisijungimo puslapyje – „Registruotis“. Naujas klientas gauna Pagrindinį planą; sumokėjusį perkelkite į ⭐ Premium.</span></div>
+          <span>Prisijungimo puslapyje – „Registruotis“. Naujas klientas gauna Pagrindinį planą (ir Premium bandymą, jei įjungtas žemiau); sumokėjusį perkelkite į ⭐ Premium.</span></div>
         <div className={"toggle" + (st.registration ? " on" : "")} />
+      </div>
+      <div className="field" style={{ marginTop: 10 }}>
+        <label>🎁 Nemokamas Premium bandymas naujiems klientams</label>
+        <div className="chips">{[0, 3, 7, 14].map(n => (
+          <button key={n} type="button" className={"chip" + ((st.trial_days ?? 7) === n ? " on" : "")}
+                  onClick={() => save({ trial_days: n })}>{n ? `${n} d.` : "Išjungta"}</button>))}</div>
+        <div className="hint" style={{ marginTop: 4 }}>Bandymo metu – mažesnės AI ribos (2 AI kadrai, 3000 įgarsinimo simbolių).
+          Pasibaigus – automatiškai Pagrindinis planas, mokestis neimamas.</div>
       </div>
       <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
         <label>Kontaktas Premium planui (rodomas Pagrindinio plano klientams)</label>
@@ -242,7 +250,7 @@ export default function Admin({ me }) {
             <div className="info">
               <b>{u.name}</b>
               <span>{u.username} · <span className="pill">{PLANS[u.plan]}</span>{!u.active && " · išjungtas"}{u.source === "secrets" && " · secrets.toml"}
-                {u.self_registered && " · 📝 užsiregistravo pats"}{u.subscribed && " · 💳 prenumerata"}{u.created ? ` · ${new Date(u.created * 1000).toLocaleDateString("lt-LT")}` : ""}</span>
+                {u.self_registered && " · 📝 užsiregistravo pats"}{u.subscribed && " · 💳 prenumerata"}{u.trial_until && ` · 🎁 bandymas iki ${new Date(u.trial_until * 1000).toLocaleDateString("lt-LT")}`}{u.created ? ` · ${new Date(u.created * 1000).toLocaleDateString("lt-LT")}` : ""}</span>
             </div>
             <div className="use">
               <span title="Kalbos atpažinimas">🎙 {u.used.minutes}/{lim(u.minutes)} min</span>

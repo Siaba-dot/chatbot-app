@@ -12,10 +12,11 @@ export default function Login({ onLogin }) {
   const [busy, setBusy] = useState(false);
   const [canRegister, setCanRegister] = useState(false);
   const [canReset, setCanReset] = useState(false);
+  const [trialDays, setTrialDays] = useState(0);
   const [consent, setConsent] = useState(false);
   const [sent, setSent] = useState(false);
 
-  useEffect(() => { api("/public/settings").then(s => { setCanRegister(!!s.registration); setCanReset(!!s.mail); }).catch(() => {}); }, []);
+  useEffect(() => { api("/public/settings").then(s => { setCanRegister(!!s.registration); setCanReset(!!s.mail); setTrialDays(s.trial_days || 0); }).catch(() => {}); }, []);
 
   async function submit(e) {
     e.preventDefault();
@@ -78,7 +79,9 @@ export default function Login({ onLogin }) {
                 <a href="#/privacy" target="_blank" rel="noreferrer">privatumo politika</a>.</span>
             </label>
           )}
-          {reg && <div className="hint" style={{ marginBottom: 10 }}>Iš karto gausite Pagrindinį planą. AI funkcijos (titrai iš kalbos, AI balsai ir kadrai) – Premium plane.</div>}
+          {reg && <div className="hint" style={{ marginBottom: 10 }}>{trialDays
+            ? <>🎁 <b>{trialDays} d. Premium nemokamai</b> – su AI titrais, balsais ir kadrais. Vėliau paskyra lieka su nemokamu Pagrindiniu planu, kortelės nereikia.</>
+            : "Iš karto gausite Pagrindinį planą. AI funkcijos (titrai iš kalbos, AI balsai ir kadrai) – Premium plane."}</div>}
           {error && <div className="error">{error}</div>}
           {sent ? <div className="hint" style={{ color: "var(--ok)" }}>✅ Jei toks el. paštas užregistruotas, nuoroda išsiųsta. Patikrinkite paštą (ir „Spam“).</div>
             : <button className="btn gold block" disabled={busy}>{busy ? "Palaukite…" : reg ? "Registruotis" : forgot ? "Siųsti nuorodą" : "Prisijungti"}</button>}

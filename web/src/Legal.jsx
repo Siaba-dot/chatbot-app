@@ -41,7 +41,7 @@ export function Terms() {
         Paslaugos teikėjas gali sustabdyti paskyrą, jei pažeidžiamos šios taisyklės ar įstatymai.</p>
       <h3>3. Planai ir apmokėjimas</h3>
       <p>Pagrindinis planas – be dirbtinio intelekto (AI) funkcijų. Premium planas – su AI funkcijomis pagal nurodytas mėnesio
-        ribas{s.price_label ? `; kaina – ${s.price_label}` : ""}. Prenumerata atsinaujina kas mėnesį, kol ją nutrauksite;
+        ribas{s.price_label ? `; kaina – ${s.price_label}` : ""}.{s.trial_days ? ` Užsiregistravę gaunate ${s.trial_days} d. nemokamą Premium bandymą (su mažesnėmis AI ribomis); jam pasibaigus paskyra automatiškai lieka su Pagrindiniu planu, mokestis neimamas.` : ""} Prenumerata atsinaujina kas mėnesį, kol ją nutrauksite;
         nutraukus – Premium galioja iki apmokėto laikotarpio pabaigos. Mokėjimus apdoroja mokėjimų paslaugų teikėjas (Stripe);
         jūsų kortelės duomenų mes nematome ir nesaugome.</p>
       <h3>4. Jūsų turinys</h3>

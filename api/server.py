@@ -90,12 +90,11 @@ def _user_info(username):
     cfg = accounts.users().get(username)
     if not cfg or cfg.get("active", True) is False:
         return None
-    plan = str(cfg.get("plan", "basic")).lower()
-    plan = plan if plan in ("basic", "premium", "admin") else "basic"
+    plan = accounts.effective_plan(cfg)
     minutes = None if plan == "admin" else float(cfg.get("minutes", accounts.DEFAULT_MINUTES))
     left = None if minutes is None else max(0.0, minutes - accounts.used_minutes(username))
     return {"username": username, "name": cfg.get("name") or username, "plan": plan,
-            "plan_title": accounts.PLANS[plan], "ai": plan in AI_PLANS and bool(clips_ui.configured_key()),
+            "plan_title": accounts.PLANS[plan] + (" 🎁 bandymas" if accounts.in_trial(cfg) else ""), "ai": plan in AI_PLANS and bool(clips_ui.configured_key()),
             "pexels": bool(stock_provider()), "stock": STOCK.get(stock_provider() or "", ""),
             "gemini": plan in AI_PLANS and bool(stock_key("gemini")),
             "veo": plan in AI_PLANS and bool(stock_key("gemini")),
@@ -105,7 +104,8 @@ def _user_info(username):
             "limits": accounts.limits_for(username), "contact": app_settings()["contact"],
             "billing": app_settings()["billing"] and username in accounts.managed_users(),
             "subscribed": bool((accounts.managed_users().get(username) or {}).get("stripe_subscription")),
-            "price_label": app_settings().get("price_label", "")}
+            "price_label": app_settings().get("price_label", ""),
+            "trial_until": cfg.get("trial_until") if accounts.in_trial(cfg) else None}
 
 
 def current_user(authorization: str = Header(None), token: str = Query(None)):
@@ -144,6 +144,10 @@ def app_settings():
     out = {"registration": st_.get("registration", True), "contact": st_.get("contact") or accounts.contact()}
     for k in SETTINGS_TEXT:
         out[k] = st_.get(k, "")
+    try:
+        out["trial_days"] = max(0, min(60, int(st_.get("trial_days", 7))))
+    except (TypeError, ValueError):
+        out["trial_days"] = 7
     out["mail"] = bool(stock_key("brevo") and out.get("mail_from"))
     out["billing"] = bool(stock_key("stripe") and out.get("stripe_price"))
     return out
@@ -161,6 +165,7 @@ def public_settings():
 
 class SettingsAdmin(BaseModel):
     registration: bool | None = None
+    trial_days: int | None = None
     contact: str | None = None
     biz_name: str | None = None
     biz_code: str | None = None
@@ -181,12 +186,14 @@ def admin_settings(body: SettingsAdmin, user=Depends(current_user)):
         cur["registration"] = body.registration
     if body.contact is not None:
         cur["contact"] = body.contact.strip()[:200]
+    if body.trial_days is not None:
+        cur["trial_days"] = max(0, min(60, int(body.trial_days)))
     for k in SETTINGS_TEXT:
         v = getattr(body, k)
         if v is not None:
             cur[k] = v.strip()[:300]
     os.makedirs(DATA, exist_ok=True)
-    keep = {k: cur[k] for k in ("registration", "contact", *SETTINGS_TEXT)}
+    keep = {k: cur[k] for k in ("registration", "contact", "trial_days", *SETTINGS_TEXT)}
     with open(os.path.join(DATA, "app_settings.json"), "w", encoding="utf-8") as f:
         json.dump(keep, f, ensure_ascii=False)
     return app_settings()
@@ -225,16 +232,23 @@ def register(body: RegisterBody, request: Request):
     if email in accounts.users():
         raise HTTPException(400, "Šis el. paštas jau užregistruotas – prisijunkite.")
     managed = accounts.managed_users()
+    days = app_settings()["trial_days"]
     managed[email] = {"plan": "basic", "name": body.name.strip()[:80], "email": email, "created": now,
                       "self_registered": True, "consent": now, "password_hash": accounts.hash_password(body.password)}
+    if days:  # 🎁 nemokamas Premium bandymas, vėliau – automatiškai Pagrindinis planas
+        managed[email]["trial_until"] = now + days * 86400
     accounts.save_managed_users(managed)
     _reg_log[ip] = recent + [now]
     st_ = app_settings()
     if st_["mail"]:  # sveikinimas klientui ir žinutė administratorei
         _mail_bg(email, "Sveiki atvykę į Reels montavimo studiją ✨",
                  f"<p>Sveiki, {_esc(body.name.strip())},</p><p>jūsų paskyra sukurta. Prisijungimo vardas – "
-                 f"<b>{_esc(email)}</b>.</p><p>Jūsų planas – <b>Pagrindinis</b>. AI funkcijos (titrai iš kalbos, "
-                 "lietuviški AI balsai, AI kadrai) – Premium plane.</p>")
+                 f"<b>{_esc(email)}</b>.</p>" + (
+                     f"<p>🎁 <b>{days} dienas Premium – nemokamai:</b> išbandykite AI titrus iš kalbos, natūralius "
+                     "lietuviškus AI balsus ir AI kadrus. Po bandymo paskyra lieka su nemokamu Pagrindiniu planu – "
+                     "niekas automatiškai nenuskaičiuojama.</p>" if days else
+                     "<p>Jūsų planas – <b>Pagrindinis</b>. AI funkcijos (titrai iš kalbos, "
+                     "lietuviški AI balsai, AI kadrai) – Premium plane.</p>"))
         if st_.get("biz_email"):
             _mail_bg(st_["biz_email"], f"Nauja registracija: {body.name.strip()[:60]}",
                      f"<p>Užsiregistravo naujas klientas: <b>{_esc(body.name.strip())}</b> ({_esc(email)}).</p>")
@@ -517,7 +531,8 @@ def _admin_row(name, cfg):
             "used": {"minutes": round(accounts.used(name, "minutes"), 1), "ai_clips": int(accounts.used(name, "ai_clips")),
                      "voice_chars": int(accounts.used(name, "voice_chars"))},
             "created": cfg.get("created"), "email": cfg.get("email"), "self_registered": bool(cfg.get("self_registered")),
-            "subscribed": bool(cfg.get("stripe_subscription"))}
+            "subscribed": bool(cfg.get("stripe_subscription")),
+            "trial_until": cfg.get("trial_until") if accounts.in_trial(cfg) else None}
 
 
 @app.get("/api/admin/users")
@@ -544,6 +559,8 @@ def _apply(cfg, body):
     if body.plan is not None:
         if body.plan not in ("basic", "premium", "admin"):
             raise HTTPException(400, "Netinkamas planas")
+        if body.plan != cfg.get("plan", "basic"):
+            cfg.pop("trial_until", None)   # planą pakeitė administratorė – bandymas baigiasi
         cfg["plan"] = body.plan
     if body.active is not None:
         cfg["active"] = bool(body.active)
@@ -1964,6 +1981,8 @@ def _set_plan(username, plan, **extra):
     if username not in managed:
         return
     managed[username]["plan"] = plan
+    if plan == "premium":
+        managed[username].pop("trial_until", None)
     managed[username].update({k: v for k, v in extra.items() if v is not None})
     accounts.save_managed_users(managed)
 
