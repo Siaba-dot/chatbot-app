@@ -420,6 +420,37 @@ def stock_download(user, pid, provider, vid, fmt):
     return path, brief
 
 
+def _brevo_check(key):
+    """Brevo rakto patikra. Ribotas (Restricted) raktas su tik „Transactional email“ teise
+    neturi prieigos prie /account – tada tikrinam per transakcinių laiškų statistiką."""
+    import urllib.request
+    if not key.startswith("xkeysib-"):
+        raise HTTPException(400, "Brevo API raktas prasideda „xkeysib-“. (SMTP raktas „xsmtpsib-“ netinka.)")
+    msg = ""
+    for url in ("https://api.brevo.com/v3/smtp/statistics/aggregatedReport",
+                "https://api.brevo.com/v3/account"):
+        req = urllib.request.Request(url, headers={"User-Agent": "ReelsStudija/1.0", "api-key": key,
+                                                   "accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                r.read()
+            return
+        except Exception as e:
+            code = getattr(e, "code", None)
+            if code is None:
+                raise HTTPException(502, f"Brevo nepasiekiamas ({e})")
+            try:
+                msg = json.loads(e.read().decode()).get("message", "") or msg
+            except Exception:
+                pass
+    low = msg.lower()
+    if "ip" in low and ("unrecogni" in low or "authori" in low):
+        raise HTTPException(400, "Brevo blokuoja serverio IP. Brevo: Security → Authorized IPs pridėkite "
+                                 "2.31.169.169 arba išjunkite IP blokavimą. (" + msg + ")")
+    raise HTTPException(400, "Brevo raktas neveikia" + (f": {msg}" if msg else "") +
+                        ". Patikrinkite, ar nukopijavote visą raktą ir ar „Transactional email“ teisė – „All“.")
+
+
 def _key_status(provider):
     k = stock_key(provider)
     return {"set": bool(k), "tail": k[-4:] if k else ""}
@@ -432,7 +463,7 @@ def _key_save(provider, key):
             _http_json("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
                        {"x-goog-api-key": key}, "Google (Gemini)")
         elif provider == "brevo":
-            _http_json("https://api.brevo.com/v3/account", {"api-key": key, "accept": "application/json"}, "Brevo")
+            _brevo_check(key)
         elif provider == "stripe":
             if not key.startswith(("sk_", "rk_")):
                 raise HTTPException(400, "Stripe slaptasis raktas prasideda „sk_live_“ arba „sk_test_“.")
@@ -1739,8 +1770,24 @@ def send_mail(to, subject, html_body):
         with urllib.request.urlopen(req, timeout=20) as r:
             r.read()
     except Exception as e:
-        detail = getattr(e, "read", lambda: b"")()[:200]
-        raise RuntimeError(f"Laiško išsiųsti nepavyko ({e} {detail!r})")
+        detail = ""
+        try:
+            detail = json.loads(e.read().decode()).get("message", "")
+        except Exception:
+            pass
+        low = detail.lower()
+        if "sender" in low:
+            hint = (f"Siuntėjas {st_['mail_from']} nepatvirtintas Brevo. Brevo: Settings → Senders, Domains → "
+                    "Senders → Add a sender, tada patvirtinkite nuorodą el. laiške.")
+        elif "ip" in low and ("unrecogni" in low or "authori" in low):
+            hint = "Brevo blokuoja serverio IP – Security → Authorized IPs pridėkite 2.31.169.169."
+        elif "not activated" in low or "activate" in low:
+            hint = "Brevo paskyroje dar neaktyvuoti transakciniai laiškai (Transactional) – aktyvuokite arba parašykite Brevo pagalbai."
+        elif getattr(e, "code", None) in (401, 403):
+            hint = "Brevo nepriima rakto – įklijuokite raktą iš naujo („Transactional email“ teisė – „All“)."
+        else:
+            hint = "Laiško išsiųsti nepavyko."
+        raise RuntimeError(hint + (f" (Brevo: {detail})" if detail else f" ({e})"))
 
 
 def _mail_bg(to, subject, html_body):
