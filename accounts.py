@@ -115,15 +115,30 @@ def _password_ok(cfg, password):
 # ---------- AI išlaidų ribos (per mėnesį) ----------
 # ai_clips – AI video kadrai (Google), voice_chars – AI įgarsinimo simboliai. None – be ribos (administratorius).
 DEFAULT_LIMITS = {"basic": {"ai_clips": 0, "voice_chars": 0},
-                  "premium": {"ai_clips": 10, "voice_chars": 20000}}
+                  "premium": {"ai_clips": 10, "voice_chars": 20000},
+                  "trial": {"ai_clips": 2, "voice_chars": 3000}}   # 🎁 Premium bandymas (mažesnės ribos)
+
+
+def in_trial(cfg):
+    """Ar klientas dabar naudojasi nemokamu Premium bandymu (pagrindinis planas + galiojantis trial_until)."""
+    import time as _t
+    return (str((cfg or {}).get("plan", "basic")).lower() == "basic"
+            and float((cfg or {}).get("trial_until") or 0) > _t.time())
+
+
+def effective_plan(cfg):
+    """Planas, pagal kurį veikia funkcijos: bandymo metu – premium."""
+    plan = str((cfg or {}).get("plan", "basic")).lower()
+    plan = plan if plan in ("basic", "premium", "admin") else "basic"
+    return "premium" if in_trial(cfg) else plan
 
 
 def limits_for(username):
     cfg = _secrets_users().get(username) or {}
-    plan = str(cfg.get("plan", "basic")).lower()
+    plan = effective_plan(cfg)
     if plan == "admin":
         return {"ai_clips": None, "voice_chars": None}
-    base = dict(DEFAULT_LIMITS.get(plan, DEFAULT_LIMITS["basic"]))
+    base = dict(DEFAULT_LIMITS["trial" if in_trial(cfg) else plan])
     for k in base:
         if cfg.get(k) is not None:
             base[k] = int(cfg[k])
@@ -183,8 +198,7 @@ def current():
     if not cfg or cfg.get("active", True) is False:  # klientas pašalintas – atjungiam
         st.session_state.pop("account", None)
         return None
-    plan = str(cfg.get("plan", "basic")).lower()
-    plan = plan if plan in ("basic", "premium", "admin") else "basic"
+    plan = effective_plan(cfg)
     view = st.session_state.get("view_as") if plan == "admin" else None
     if view in ("basic", "premium"):  # administratorius žiūri, ką mato klientas (minutės neskaičiuojamos)
         return {"username": u, "name": cfg.get("name") or u, "plan": view, "minutes": None,

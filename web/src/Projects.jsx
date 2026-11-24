@@ -83,6 +83,23 @@ export default function Projects({ user, onUserChange }) {
           )}
         </div>
       )}
+      {user && user.trial_until && (() => {
+        const d = Math.max(1, Math.ceil((user.trial_until * 1000 - Date.now()) / 86400000));
+        return (
+          <div className="card" style={{ marginTop: 14 }}>
+            <b>🎁 Premium bandymas – liko {d} {d === 1 ? "diena" : d < 10 ? "dienos" : "dienų"}</b>
+            <div className="hint" style={{ marginTop: 4 }}>
+              Išbandykite AI titrus iš kalbos, lietuviškus AI balsus ir AI kadrus. Pasibaigus bandymui paskyra lieka su
+              nemokamu Pagrindiniu planu – niekas automatiškai nenuskaičiuojama.
+              {user.contact && !user.billing ? <> Norite pasilikti Premium? Susisiekite: <b style={{ color: "var(--honey)" }}>{user.contact}</b></> : null}
+            </div>
+            {user.billing && (
+              <button className="btn gold" style={{ marginTop: 10 }} onClick={buy} disabled={busy}>
+                ⭐ Pasilikti Premium{user.price_label ? ` – ${user.price_label}` : ""}</button>
+            )}
+          </div>
+        );
+      })()}
       {user && user.plan === "premium" && user.subscribed && (
         <div className="hint" style={{ marginTop: 10 }}>⭐ Premium prenumerata aktyvi ·{" "}
           <button className="btn small ghost" onClick={portal} disabled={busy}>Valdyti prenumeratą / sąskaitas</button></div>
