@@ -151,7 +151,7 @@ export default function Landing({ user }) {
       <section className="hero">
         <img className="logo" src="/logo.svg" alt="" />
         <div className="kicker">LIETUVIŠKA REELS STUDIJA SMULKIAM VERSLUI</div>
-        <h1 className="goldtext">Nufilmuokite. Paspauskite.<br />Gaukite gatavą Reels.</h1>
+        <h1 className="goldtext">Nufilmuokite. Paspauskite.<br />Jūsų Reels jau paruoštas.</h1>
         <p className="lead">Lietuviški titrai, natūralūs AI balsai, muzika ir trys formatai – Instagram, TikTok ir YouTube –
           per kelias minutes, be montavimo žinių.</p>
         <div className="row" style={{ justifyContent: "center", gap: 10 }}>
