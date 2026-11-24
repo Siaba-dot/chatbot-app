@@ -99,7 +99,10 @@ def _user_info(username):
             "pexels": bool(stock_provider()), "stock": STOCK.get(stock_provider() or "", ""),
             "gemini": plan in AI_PLANS and bool(stock_key("gemini")),
             "veo": plan in AI_PLANS and bool(stock_key("gemini")),
-            "minutes_left": left}
+            "minutes_left": left,
+            "ai_clips_left": accounts.left(username, "ai_clips"),
+            "voice_chars_left": accounts.left(username, "voice_chars"),
+            "limits": accounts.limits_for(username)}
 
 
 def current_user(authorization: str = Header(None), token: str = Query(None)):
@@ -351,6 +354,95 @@ def gemini_save(body: KeyBody, user=Depends(admin_user)):
     return _key_save("gemini", body.key)
 
 
+# ---------- 👑 Klientų valdymas ----------
+def _admin_row(name, cfg):
+    plan = str(cfg.get("plan", "basic")).lower()
+    lim = accounts.limits_for(name)
+    return {"username": name, "name": cfg.get("name") or name, "plan": plan,
+            "active": cfg.get("active", True) is not False, "source": cfg.get("source", "managed"),
+            "minutes": None if plan == "admin" else float(cfg.get("minutes", accounts.DEFAULT_MINUTES)),
+            "ai_clips": lim["ai_clips"], "voice_chars": lim["voice_chars"],
+            "used": {"minutes": round(accounts.used(name, "minutes"), 1), "ai_clips": int(accounts.used(name, "ai_clips")),
+                     "voice_chars": int(accounts.used(name, "voice_chars"))},
+            "created": cfg.get("created")}
+
+
+@app.get("/api/admin/users")
+def admin_users(user=Depends(admin_user)):
+    rows = [_admin_row(n, c) for n, c in accounts.users().items()]
+    return {"users": sorted(rows, key=lambda r: (r["plan"] != "admin", r["username"])),
+            "defaults": accounts.DEFAULT_LIMITS, "default_minutes": accounts.DEFAULT_MINUTES}
+
+
+class UserBody(BaseModel):
+    username: str | None = None
+    name: str | None = None
+    password: str | None = None
+    plan: str | None = None
+    active: bool | None = None
+    minutes: float | None = None
+    ai_clips: int | None = None
+    voice_chars: int | None = None
+
+
+def _apply(cfg, body):
+    if body.name is not None:
+        cfg["name"] = body.name.strip()[:80]
+    if body.plan is not None:
+        if body.plan not in ("basic", "premium", "admin"):
+            raise HTTPException(400, "Netinkamas planas")
+        cfg["plan"] = body.plan
+    if body.active is not None:
+        cfg["active"] = bool(body.active)
+    for k in ("minutes", "ai_clips", "voice_chars"):
+        v = getattr(body, k)
+        if v is not None:
+            cfg[k] = max(0, v)
+    if body.password:
+        if len(body.password) < 8:
+            raise HTTPException(400, "Slaptažodis – bent 8 simboliai")
+        cfg["password_hash"] = accounts.hash_password(body.password)
+        cfg.pop("password", None)
+    return cfg
+
+
+@app.post("/api/admin/users")
+def admin_add_user(body: UserBody, user=Depends(admin_user)):
+    name = (body.username or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._@-]{2,40}", name):
+        raise HTTPException(400, "Prisijungimo vardas: 3–40 mažųjų raidžių, skaičių, . _ @ -")
+    if name in accounts.users():
+        raise HTTPException(400, "Toks prisijungimo vardas jau yra")
+    if not body.password:
+        raise HTTPException(400, "Įveskite slaptažodį")
+    managed = accounts.managed_users()
+    managed[name] = _apply({"plan": "premium", "created": time.time()}, body)
+    accounts.save_managed_users(managed)
+    return _admin_row(name, dict(managed[name], source="managed"))
+
+
+@app.put("/api/admin/users/{name}")
+def admin_edit_user(name: str, body: UserBody, user=Depends(admin_user)):
+    managed = accounts.managed_users()
+    if name not in managed:
+        raise HTTPException(400, "Šis klientas aprašytas serverio secrets.toml – jį keisti galima tik ten.")
+    if name == user["username"] and (body.active is False or (body.plan and body.plan != "admin")):
+        raise HTTPException(400, "Negalite išjungti ar pažeminti savęs")
+    managed[name] = _apply(managed[name], body)
+    accounts.save_managed_users(managed)
+    return _admin_row(name, dict(managed[name], source="managed"))
+
+
+@app.delete("/api/admin/users/{name}")
+def admin_delete_user(name: str, user=Depends(admin_user)):
+    managed = accounts.managed_users()
+    if name not in managed:
+        raise HTTPException(400, "Šis klientas aprašytas serverio secrets.toml – jį pašalinti galima tik ten.")
+    managed.pop(name)
+    accounts.save_managed_users(managed)
+    return {"ok": True}  # kliento projektai serveryje lieka (jei sugrąžintumėte – viskas vietoje)
+
+
 @app.get("/api/admin/models")
 def admin_models(user=Depends(admin_user)):
     """Diagnostika: visi Google (Gemini) modeliai, kuriuos leidžia įrašytas raktas."""
@@ -537,6 +629,7 @@ def _run_veo(jid, user, pid, body):
         _job_update(jid, message="Dedu kadrą į projektą…", progress=0.9)  # sustabdžius – čia nutrūksta
         thumb = path + ".thumb.jpg"
         reels_studio.grab_frame(path, thumb, at=1.0)
+        accounts.add_usage(user["username"], "ai_clips", 1)
         _library_add(user, path, body.prompt, fmt)  # 📚 kad būtų galima naudoti ir kituose Reels'uose
         proj = _load(user, pid)
         if body.as_clip:
@@ -705,6 +798,10 @@ def use_library(pid: str, body: LibUse, user=Depends(current_user)):
 def veo_broll(pid: str, body: VeoBody, user=Depends(current_user)):
     """🎬 AI sukuria video kadrą pagal aprašymą (Google Veo, 1–3 min., fone)."""
     _load(user, pid)
+    if accounts.left(user["username"], "ai_clips") == 0:
+        lim = accounts.limits_for(user["username"])["ai_clips"]
+        raise HTTPException(403, f"Šio mėnesio AI kadrų limitas išnaudotas ({lim}). Naudokite kadrus iš „📚 Mano AI "
+                                 "kadrai“ – jie nemokami – arba kreipkitės į studijos administratorių.")
     if user["plan"] not in AI_PLANS:
         raise HTTPException(400, "AI kadrai – Premium plane.")
     if not stock_key("gemini"):
@@ -775,6 +872,15 @@ def voice_sample(voice: str, user=Depends(current_user)):
     return FileResponse(path, media_type="audio/mpeg")
 
 
+def _voice_quota(user, text):
+    """AI įgarsinimo simbolių limitas (tik kai kuriamas naujas įgarsinimas)."""
+    lft = accounts.left(user["username"], "voice_chars")
+    if lft is not None and len(text) > lft:
+        lim = accounts.limits_for(user["username"])["voice_chars"]
+        raise PermissionError(f"Šio mėnesio AI įgarsinimo limitas ({lim} simbolių) – liko {int(lft)}. "
+                              "Sutrumpinkite tekstą arba kreipkitės į studijos administratorių.")
+
+
 @app.post("/api/projects/{pid}/voiceover_preview")
 def voiceover_preview(pid: str, user=Depends(current_user)):
     """▶ Išklausyti tikrąjį įgarsinimą (tas pats failas bus naudojamas video – antrą kartą nemokama)."""
@@ -794,9 +900,11 @@ def voiceover_preview(pid: str, user=Depends(current_user)):
     path = os.path.join(_pdir(user, pid), f"vo_{key}.mp3")
     if not os.path.exists(path):
         try:
+            _voice_quota(user, text)
             engine.tts(client, text, vo.get("voice", "coral"), path, proj["settings"]["subtitle_language"],
                        gemini_key=stock_key("gemini"))
-        except RuntimeError as e:
+            accounts.add_usage(user["username"], "voice_chars", len(text))
+        except (RuntimeError, PermissionError) as e:
             raise HTTPException(400, str(e))
     return {"file": f"vo_{key}.mp3", "text": text, "voice": vo.get("voice")}
 
@@ -1151,8 +1259,13 @@ def _run_job(jid, user, pid, kind, quick, words):
             vo_path = os.path.join(d, f"vo_{vo_key}.mp3")
             if not os.path.exists(vo_path):
                 say("Kuriu AI įgarsinimą…")
+                try:
+                    _voice_quota(user, vo["text"].strip())
+                except PermissionError as e:
+                    raise ValueError(str(e))
                 engine.tts(client, vo["text"].strip(), vo.get("voice", "coral"), vo_path,
                            proj["settings"]["subtitle_language"], gemini_key=stock_key("gemini"))
+                accounts.add_usage(user["username"], "voice_chars", len(vo["text"].strip()))
         prep = None if kind == "prepare" else _load_prep(user, proj)  # „Atpažinti iš naujo“ – visada iš naujo
         if prep is not None and proj.get("prep_vo") != vo_key:
             prep = None  # įgarsinimas pasikeitė – titrai ir montažas pagal naują

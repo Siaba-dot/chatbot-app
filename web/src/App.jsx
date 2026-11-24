@@ -3,6 +3,7 @@ import { api, getToken, setToken } from "./api.js";
 import Login from "./Login.jsx";
 import Projects from "./Projects.jsx";
 import Editor from "./Editor.jsx";
+import Admin from "./Admin.jsx";
 
 // Paprastas maršrutizavimas per # (veikia be serverio nustatymų): #/ – projektai, #/p/<id> – redaktorius
 function useRoute() {
@@ -13,6 +14,7 @@ function useRoute() {
     return () => window.removeEventListener("hashchange", f);
   }, []);
   const m = hash.match(/^#\/p\/([a-f0-9]{12})/);
+  if (hash.startsWith("#/admin")) return { page: "admin" };
   return m ? { page: "editor", id: m[1] } : { page: "projects" };
 }
 
@@ -41,17 +43,23 @@ export default function App() {
           <img src="/logo.svg" alt="" />
           <b>Reels montavimo studija</b>
         </div>
-        {route.page === "editor" && (
+        {route.page !== "projects" && (
           <button className="btn small nav-back" onClick={() => (window.location.hash = "")}>← Mano projektai</button>
+        )}
+        {user.plan === "admin" && route.page !== "admin" && (
+          <button className="btn small nav-back" onClick={() => (window.location.hash = "#/admin")}>👑 Klientai</button>
         )}
         <div className="spacer" />
         <div className="who">
           <b>{user.name}</b>
           {user.plan_title}{user.minutes_left != null ? ` · liko ${Math.floor(user.minutes_left)} min.` : ""}
+          {user.ai_clips_left != null && user.plan !== "basic" ? ` · AI kadrų ${user.ai_clips_left}` : ""}
         </div>
         <button className="btn small ghost" onClick={logout}>Atsijungti</button>
       </header>
-      {route.page === "editor"
+      {route.page === "admin" && user.plan === "admin"
+        ? <Admin me={user} />
+        : route.page === "editor"
         ? <Editor key={route.id} id={route.id} user={user} />
         : <Projects user={user} onUserChange={() => api("/me").then(setUser)} />}
     </>
