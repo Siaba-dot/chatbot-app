@@ -52,6 +52,16 @@ export default function Projects({ user, onUserChange }) {
       <h2>Kurkime naują Reels ✨</h2>
       <div className="hint">Visi jūsų video išsaugomi čia – galite grįžti, pataisyti ir sukurti iš naujo.</div>
       {error && <div className="error">{error}</div>}
+      {user && user.plan === "basic" && (
+        <div className="card" style={{ marginTop: 14 }}>
+          <b>⭐ Jūsų planas – Pagrindinis.</b>
+          <div className="hint" style={{ marginTop: 4 }}>
+            Galite kurti Reels su šablonais, titrais, efektais, filmuoti su sufleriu ir karpyti. AI funkcijos – titrai iš
+            kalbos, natūralūs lietuviški AI balsai ir AI sukurti kadrai – Premium plane.
+            {user.contact ? <> Norite Premium? Susisiekite: <b style={{ color: "var(--honey)" }}>{user.contact}</b></> : null}
+          </div>
+        </div>
+      )}
       {user && user.plan === "admin" && <AdminKey kind="openai" onChange={onUserChange} />}
       {user && user.plan === "admin" && <AdminKey kind="gemini" onChange={onUserChange} />}
       {user && user.plan === "admin" && <AdminKey kind="pixabay" onChange={onUserChange} />}

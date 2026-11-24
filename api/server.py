@@ -28,7 +28,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile  # noqa: E402
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
@@ -102,7 +102,7 @@ def _user_info(username):
             "minutes_left": left,
             "ai_clips_left": accounts.left(username, "ai_clips"),
             "voice_chars_left": accounts.left(username, "voice_chars"),
-            "limits": accounts.limits_for(username)}
+            "limits": accounts.limits_for(username), "contact": app_settings()["contact"]}
 
 
 def current_user(authorization: str = Header(None), token: str = Query(None)):
@@ -128,6 +128,79 @@ def openai_client(user):
 class Login(BaseModel):
     username: str
     password: str
+
+
+# ---------- 📝 Savarankiška registracija ----------
+def app_settings():
+    """Administratoriaus nustatymai: registracija (įjungta / išjungta), kontaktas Premium planui."""
+    try:
+        with open(os.path.join(DATA, "app_settings.json"), encoding="utf-8") as f:
+            st_ = json.load(f)
+    except (OSError, ValueError):
+        st_ = {}
+    return {"registration": st_.get("registration", True), "contact": st_.get("contact") or accounts.contact()}
+
+
+@app.get("/api/public/settings")
+def public_settings():
+    return app_settings()
+
+
+class SettingsAdmin(BaseModel):
+    registration: bool | None = None
+    contact: str | None = None
+
+
+@app.put("/api/admin/settings")
+def admin_settings(body: SettingsAdmin, user=Depends(current_user)):
+    if user["plan"] != "admin":
+        raise HTTPException(403, "Tik administratoriui")
+    cur = app_settings()
+    if body.registration is not None:
+        cur["registration"] = body.registration
+    if body.contact is not None:
+        cur["contact"] = body.contact.strip()[:200]
+    os.makedirs(DATA, exist_ok=True)
+    with open(os.path.join(DATA, "app_settings.json"), "w", encoding="utf-8") as f:
+        json.dump(cur, f, ensure_ascii=False)
+    return cur
+
+
+class RegisterBody(BaseModel):
+    name: str
+    email: str
+    password: str
+    website: str = ""  # „medaus puodas“ robotams – žmonės šio lauko nemato
+
+
+_reg_log = {}
+
+
+@app.post("/api/register")
+def register(body: RegisterBody, request: Request):
+    if not app_settings()["registration"]:
+        raise HTTPException(403, "Registracija šiuo metu išjungta – kreipkitės į studijos administratorių.")
+    ip = request.client.host if request.client else "?"
+    now = time.time()
+    recent = [t for t in _reg_log.get(ip, []) if now - t < 3600]
+    if body.website or len(recent) >= 5:
+        time.sleep(1.0)
+        raise HTTPException(429, "Per daug bandymų – pabandykite vėliau.")
+    email = body.email.strip().lower()
+    if not re.fullmatch(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", email) or len(email) > 80:
+        raise HTTPException(400, "Įrašykite tikrą el. pašto adresą.")
+    if len(body.password) < 8:
+        raise HTTPException(400, "Slaptažodis – bent 8 simboliai.")
+    if not body.name.strip():
+        raise HTTPException(400, "Įrašykite savo vardą arba įmonės pavadinimą.")
+    if email in accounts.users():
+        raise HTTPException(400, "Šis el. paštas jau užregistruotas – prisijunkite.")
+    managed = accounts.managed_users()
+    managed[email] = {"plan": "basic", "name": body.name.strip()[:80], "email": email, "created": now,
+                      "self_registered": True, "password_hash": accounts.hash_password(body.password)}
+    accounts.save_managed_users(managed)
+    _reg_log[ip] = recent + [now]
+    return {"token": make_token(email), "user": _user_info(email)}
 
 
 @app.post("/api/login")
@@ -364,7 +437,7 @@ def _admin_row(name, cfg):
             "ai_clips": lim["ai_clips"], "voice_chars": lim["voice_chars"],
             "used": {"minutes": round(accounts.used(name, "minutes"), 1), "ai_clips": int(accounts.used(name, "ai_clips")),
                      "voice_chars": int(accounts.used(name, "voice_chars"))},
-            "created": cfg.get("created")}
+            "created": cfg.get("created"), "email": cfg.get("email"), "self_registered": bool(cfg.get("self_registered"))}
 
 
 @app.get("/api/admin/users")
@@ -409,7 +482,7 @@ def _apply(cfg, body):
 @app.post("/api/admin/users")
 def admin_add_user(body: UserBody, user=Depends(admin_user)):
     name = (body.username or "").strip().lower()
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._@-]{2,40}", name):
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._@+-]{2,79}", name):
         raise HTTPException(400, "Prisijungimo vardas: 3–40 mažųjų raidžių, skaičių, . _ @ -")
     if name in accounts.users():
         raise HTTPException(400, "Toks prisijungimo vardas jau yra")
