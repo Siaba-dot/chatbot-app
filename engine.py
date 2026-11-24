@@ -10,6 +10,7 @@ paprastas funkcijas, kurioms paduodamas nustatymų žodynas:
 
 client – openai.OpenAI arba None (be AI veikia taisyklės).
 """
+import hashlib
 import json
 import os
 import re
@@ -585,6 +586,73 @@ def _mostly_portrait(clips):
     return tall / total > 0.5
 
 
+# ---------- 🎵 kadrui skirta muzika / įgarsinimas ----------
+def clip_sound_file(c, s):
+    """Garso failas kadrui (muzika iš bibliotekos arba kadro įgarsinimas) arba None."""
+    snd = c.get("sound") or {}
+    if snd.get("kind") == "music":
+        lib = reels_studio.music_library()
+        return lib[snd["track"]]["path"] if snd.get("track") in lib else None
+    if snd.get("kind") == "voice" and snd.get("path") and os.path.exists(snd["path"]):
+        return snd["path"]
+    return None
+
+
+def _clip_src(c, s, image_duration):
+    """Kadro failas montažui: jei kadrui parinkta sava muzika ar įgarsinimas – kopija su tuo garsu
+    (garsas prasideda ten, kur prasideda apkarpyta kadro dalis). Grąžina (kelias, nuotrauka?)."""
+    snd_file = clip_sound_file(c, s)
+    if not snd_file:
+        return c["path"], c.get("image")
+    snd = c["sound"]
+    vol = max(0, min(200, int(snd.get("volume", 100)))) / 100
+    orig = max(0, min(200, int(snd.get("orig", 100)))) / 100
+    voice = snd["kind"] == "voice"
+    key = hashlib.sha1(json.dumps([c["path"], snd_file, vol, orig, image_duration, c.get("trim")],
+                                  sort_keys=True).encode()).hexdigest()[:10]
+    out = f"{c['path']}.snd{key}.mkv"
+    if os.path.exists(out):
+        return out, False
+    tmp = out + ".part.mkv"
+    if c.get("image"):  # nuotrauka -> video; su įgarsinimu – tiek, kiek trunka įgarsinimas
+        d = float(image_duration)
+        if voice:
+            d = max(d, video_editor.media_duration(snd_file) + 0.4)
+        fo = max(0.0, d - 0.6)
+        cmd = ["-loop", "1", "-t", f"{d:.3f}", "-i", c["path"], "-stream_loop", "-1", "-i", snd_file,
+               "-filter_complex",
+               f"[0:v]scale='min(1920,iw)':-2,scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30,format=yuv420p[v];"
+               f"[1:a]atrim=duration={d:.3f},volume={vol:.2f},afade=t=out:st={fo:.3f}:d=0.6,"
+               f"aformat=sample_rates=48000:channel_layouts=stereo[a]",
+               "-map", "[v]", "-map", "[a]", "-t", f"{d:.3f}", "-c:v", "libx264", "-preset", "veryfast",
+               "-crf", "18", "-c:a", "aac", "-b:a", "192k", tmp]
+    else:
+        a, b = c.get("trim") or (0.0, c["duration"])
+        seg = max(0.3, float(b) - float(a))
+        fo = max(0.0, seg - 0.6)
+        has_audio = video_editor.probe(c["path"]).get("has_audio")
+        music = (f"[1:a]atrim=duration={seg:.3f},asetpts=PTS-STARTPTS,volume={vol:.2f},"
+                 + ("" if voice else "afade=t=in:d=0.3,") + f"afade=t=out:st={fo:.3f}:d=0.6,"
+                 f"adelay={int(float(a) * 1000)}:all=1,aformat=sample_rates=48000:channel_layouts=stereo[m]")
+        if has_audio and orig > 0:
+            mix = (f"{music};[0:a]volume={orig:.2f},aformat=sample_rates=48000:channel_layouts=stereo[o];"
+                   f"[o][m]amix=inputs=2:duration=first:normalize=0[a]")
+        else:  # be originalaus garso – tik parinktas garsas (tyla iki kadro pradžios ir po jo)
+            mix = (f"{music};anullsrc=r=48000:cl=stereo,atrim=duration={c['duration']:.3f}[z];"
+                   f"[z][m]amix=inputs=2:duration=first:normalize=0[a]")
+        cmd = ["-i", c["path"], "-stream_loop", "-1", "-i", snd_file, "-filter_complex", mix,
+               "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", tmp]
+    r = _ffmpeg(cmd)
+    if r.returncode != 0 or not os.path.exists(tmp):
+        raise RuntimeError("Nepavyko pridėti kadro garso: " + (r.stderr or "")[-300:])
+    os.replace(tmp, out)
+    return out, False
+
+
+def _clip_paths(clips, s, image_duration):
+    return [_clip_src(c, s, image_duration)[0] for c in clips]
+
+
 def source_for_format(clips, settings, workdir, fmt, vo_path=None, progress=None):
     """Ta pati medžiaga kitu formatu (analizė – pauzės, titrai – lieka ta pati)."""
     s = settings_with_defaults(dict(settings, format=fmt))
@@ -592,8 +660,9 @@ def source_for_format(clips, settings, workdir, fmt, vo_path=None, progress=None
     # Gulsčias papildomas formatas (YouTube 16:9) iš stačios medžiagos – visas vaizdas per vidurį su sulietu
     # fonu (užpildant būtų nukirsta didžioji viršaus ir apačios dalis – žmonės liktų be galvų)
     fill = s["fit"] == "fill" and not (fmt == "16:9" and _mostly_portrait(clips))
-    src, _ = video_editor.concat_clips([c["path"] for c in clips], src, fmt, progress=progress,
-                                       image_duration=photo_duration(clips, s, vo_path),
+    idur = photo_duration(clips, s, vo_path)
+    src, _ = video_editor.concat_clips(_clip_paths(clips, s, idur), src, fmt, progress=progress,
+                                       image_duration=idur,
                                        segments=[_segments(c) for c in clips], transition=s["transition"],
                                        fill=fill)
     return src
@@ -612,11 +681,11 @@ def prepare(clips, settings, workdir, client=None, status=None, progress=None, v
     image_duration = photo_duration(clips, s, vo_path)
     if image_duration != s["image_duration"]:
         say(f"Nuotraukos – po {image_duration:.1f} s, kad tilptų visas įgarsinimas…")
-    src, spans = video_editor.concat_clips([c["path"] for c in clips], src, s["format"],
+    src, spans = video_editor.concat_clips(_clip_paths(clips, s, image_duration), src, s["format"],
                                            progress=lambda p: prog(p * 0.5), image_duration=image_duration,
                                            segments=[_segments(c) for c in clips], transition=s["transition"],
                                            fill=s["fit"] == "fill")
-    protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech"]
+    protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech" or clip_sound_file(c, s)]
     say("Ieškau pauzių ir atpažįstu kalbą…")
     analysis = video_editor.analyze(src, remove_silence=s["remove_silence"] and not vo_path,
                                     subtitles=s["subtitles"] and not vo_path,
