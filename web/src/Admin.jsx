@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
+import AdminKey from "./AdminKey.jsx";
 
 // 👑 Klientų valdymas: pridėti, keisti planą ir AI ribas, išjungti, matyti šio mėnesio naudojimą
 const PLANS = { basic: "Pagrindinis", premium: "Premium", admin: "Administratorius" };
@@ -77,6 +78,74 @@ function UserForm({ initial, isNew, defaults, taken, onCancel, onSave }) {
   );
 }
 
+function TextFields({ st, fields, onSave }) {
+  const [v, setV] = useState(() => Object.fromEntries(fields.map(([k]) => [k, st[k] || ""])));
+  const dirty = fields.some(([k]) => (v[k] || "") !== (st[k] || ""));
+  return (
+    <>
+      {fields.map(([k, label, ph]) => (
+        <div className="field" key={k}><label>{label}</label>
+          <input className="input" value={v[k]} placeholder={ph} onChange={e => setV({ ...v, [k]: e.target.value })} /></div>
+      ))}
+      <button className="btn" disabled={!dirty} onClick={() => onSave(v)}>Išsaugoti</button>
+    </>
+  );
+}
+
+function Section({ id, title, ok, children, open, setOpen }) {
+  return (
+    <div className="card section">
+      <div className="row" style={{ cursor: "pointer" }} onClick={() => setOpen(open === id ? "" : id)}>
+        <b>{title}</b><span className="pill" style={ok ? {} : { color: "var(--danger)", borderColor: "var(--danger)" }}>{ok ? "įjungta" : "neįjungta"}</span>
+        <span className="spacer" /><span className="hint">{open === id ? "▲" : "▼"}</span>
+      </div>
+      {open === id && <div style={{ marginTop: 12 }}>{children}</div>}
+    </div>
+  );
+}
+
+function Business({ st, save, onError }) {
+  const [open, setOpen] = useState("");
+  const [msg, setMsg] = useState("");
+  const webhook = `${window.location.origin}/api/billing/webhook`;
+  async function test() {
+    setMsg("");
+    try { const r = await api("/admin/test_mail", { method: "POST" }); setMsg(`✅ Išsiųsta į ${r.to}`); }
+    catch (e) { onError(e.message); }
+  }
+  return (
+    <>
+      <Section open={open} setOpen={setOpen} id="biz" title="📄 Veiklos duomenys (taisyklėms ir privatumo politikai)" ok={!!st.biz_name}>
+        <div className="hint" style={{ marginBottom: 10 }}>Įrašomi į <a href="#/terms" target="_blank" rel="noreferrer">taisykles</a> ir{" "}
+          <a href="#/privacy" target="_blank" rel="noreferrer">privatumo politiką</a>. Tai šablonai – prieš prekybą verta, kad juos peržiūrėtų teisininkas.</div>
+        <TextFields st={st} onSave={save} fields={[["biz_name", "Vardas, pavardė / įmonė", "pvz. Vardenė Pavardenė, individuali veikla"],
+          ["biz_code", "Asmens / įmonės / individualios veiklos kodas", ""], ["biz_address", "Adresas", "pvz. Vilnius, Lietuva"],
+          ["biz_email", "El. paštas klientams (ir pranešimams jums)", "info@…"]]} />
+      </Section>
+      <Section open={open} setOpen={setOpen} id="mail" title="✉️ El. laiškai (Brevo)" ok={st.mail}>
+        <AdminKey kind="brevo" />
+        <TextFields st={st} onSave={save} fields={[["mail_from", "Siuntėjo el. paštas (patvirtintas Brevo)", "pvz. info@…"],
+          ["mail_name", "Siuntėjo vardas", "Reels montavimo studija"]]} />
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className="btn small" onClick={test} disabled={!st.mail}>✉️ Siųsti bandomąjį laišką</button>
+          {msg && <span className="hint" style={{ color: "var(--ok)" }}>{msg}</span>}
+        </div>
+      </Section>
+      <Section open={open} setOpen={setOpen} id="pay" title="💳 Mokėjimai (Stripe prenumerata)" ok={st.billing}>
+        <ol className="hint" style={{ paddingLeft: 18 }}>
+          <li>Stripe → <b>Product catalog → Add product</b> „Premium“, kaina pvz. 19 € / mėn. (<b>Recurring, Monthly</b>) → nukopijuokite <b>Price ID</b> (price_…).</li>
+          <li>Įklijuokite žemiau slaptąjį raktą, Price ID ir webhook raktą.</li>
+          <li>Webhook adresas: <code style={{ userSelect: "all" }}>{webhook}</code></li>
+          <li>Stripe → <b>Settings → Billing → Customer portal</b> – įjunkite, kad klientai galėtų patys nutraukti prenumeratą.</li>
+        </ol>
+        <AdminKey kind="stripe" />
+        <AdminKey kind="stripe_whsec" />
+        <TextFields st={st} onSave={save} fields={[["stripe_price", "Premium Price ID", "price_…"], ["price_label", "Kaina klientams (rodoma)", "19 € / mėn."]]} />
+      </Section>
+    </>
+  );
+}
+
 function Settings({ onError }) {
   const [st, setSt] = useState(null);
   const [contact, setContact] = useState("");
@@ -87,6 +156,8 @@ function Settings({ onError }) {
   }
   if (!st) return null;
   return (
+    <>
+    <Business st={st} save={save} onError={onError} />
     <div className="card section">
       <div className="switch" onClick={() => save({ registration: !st.registration })}>
         <div className="txt"><b>📝 Klientai gali registruotis patys</b>
@@ -101,6 +172,7 @@ function Settings({ onError }) {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
@@ -167,7 +239,7 @@ export default function Admin({ me }) {
             <div className="info">
               <b>{u.name}</b>
               <span>{u.username} · <span className="pill">{PLANS[u.plan]}</span>{!u.active && " · išjungtas"}{u.source === "secrets" && " · secrets.toml"}
-                {u.self_registered && " · 📝 užsiregistravo pats"}{u.created ? ` · ${new Date(u.created * 1000).toLocaleDateString("lt-LT")}` : ""}</span>
+                {u.self_registered && " · 📝 užsiregistravo pats"}{u.subscribed && " · 💳 prenumerata"}{u.created ? ` · ${new Date(u.created * 1000).toLocaleDateString("lt-LT")}` : ""}</span>
             </div>
             <div className="use">
               <span title="Kalbos atpažinimas">🎙 {u.used.minutes}/{lim(u.minutes)} min</span>

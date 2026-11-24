@@ -4,6 +4,8 @@ import Login from "./Login.jsx";
 import Projects from "./Projects.jsx";
 import Editor from "./Editor.jsx";
 import Admin from "./Admin.jsx";
+import Reset from "./Reset.jsx";
+import { Terms, Privacy } from "./Legal.jsx";
 
 // Paprastas maršrutizavimas per # (veikia be serverio nustatymų): #/ – projektai, #/p/<id> – redaktorius
 function useRoute() {
@@ -15,6 +17,10 @@ function useRoute() {
   }, []);
   const m = hash.match(/^#\/p\/([a-f0-9]{12})/);
   if (hash.startsWith("#/admin")) return { page: "admin" };
+  if (hash.startsWith("#/terms")) return { page: "terms" };
+  if (hash.startsWith("#/privacy")) return { page: "privacy" };
+  const r = hash.match(/^#\/reset\/([\w-]+)/);
+  if (r) return { page: "reset", token: r[1] };
   return m ? { page: "editor", id: m[1] } : { page: "projects" };
 }
 
@@ -33,6 +39,9 @@ export default function App() {
   }, []);
 
   if (checking) return null;
+  if (route.page === "terms") return <Terms />;       // viešai – ir neprisijungus
+  if (route.page === "privacy") return <Privacy />;
+  if (route.page === "reset") return <Reset token={route.token} onLogin={u => setUser(u)} />;
   if (!user) return <Login onLogin={u => setUser(u)} />;
 
   const logout = () => { setToken(""); setUser(null); window.location.hash = ""; };
