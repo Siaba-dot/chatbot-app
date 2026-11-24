@@ -11,6 +11,16 @@ const KINDS = {
     <>Ta pati Google technologija kaip NotebookLM – taisyklingas lietuviškas tarimas. Raktą gausite
       <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer"> aistudio.google.com/apikey</a> →
       „Create API key“ (prisijunkite Google paskyra).</>) },
+  brevo: { title: "✉️ Brevo raktas – el. laiškai (slaptažodžio atkūrimas, sveikinimai)", placeholder: "xkeysib-…", help: (
+    <>Nemokamai iki 300 laiškų per dieną. Užsiregistruokite <a href="https://www.brevo.com" target="_blank" rel="noreferrer">brevo.com</a> →
+      dešinėje viršuje jūsų vardas → „SMTP &amp; API“ → „API Keys“ → „Generate a new API key“. Siuntėjo el. paštą patvirtinkite
+      Brevo skiltyje „Senders, Domains &amp; Dedicated IPs“.</>) },
+  stripe: { title: "💳 Stripe slaptasis raktas – mokėjimai", placeholder: "sk_live_… arba sk_test_…", help: (
+    <><a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer">dashboard.stripe.com → Developers → API keys</a> →
+      „Secret key“. Bandymams – „sk_test_“ raktas (Test mode).</>) },
+  stripe_whsec: { title: "💳 Stripe webhook raktas", placeholder: "whsec_…", help: (
+    <>Stripe → Developers → Webhooks → „Add endpoint“: adresas – žemiau nurodytas, įvykiai – <code>checkout.session.completed</code>,
+      {" "}<code>customer.subscription.updated</code>, <code>customer.subscription.deleted</code>. Tada „Signing secret“ (whsec_…) įklijuokite čia.</>) },
   pixabay: { title: "🎞 Pixabay raktas (nemokamas video intarpams)", placeholder: "Pixabay API raktas", help: (
     <>Nemokami, licencijuoti video intarpams. Užsiregistruokite <a href="https://pixabay.com/accounts/register/" target="_blank" rel="noreferrer">pixabay.com</a>,
       tada atidarykite <a href="https://pixabay.com/api/docs/" target="_blank" rel="noreferrer">pixabay.com/api/docs</a> – raktas matomas

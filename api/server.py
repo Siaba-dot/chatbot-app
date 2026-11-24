@@ -102,7 +102,10 @@ def _user_info(username):
             "minutes_left": left,
             "ai_clips_left": accounts.left(username, "ai_clips"),
             "voice_chars_left": accounts.left(username, "voice_chars"),
-            "limits": accounts.limits_for(username), "contact": app_settings()["contact"]}
+            "limits": accounts.limits_for(username), "contact": app_settings()["contact"],
+            "billing": app_settings()["billing"] and username in accounts.managed_users(),
+            "subscribed": bool((accounts.managed_users().get(username) or {}).get("stripe_subscription")),
+            "price_label": app_settings().get("price_label", "")}
 
 
 def current_user(authorization: str = Header(None), token: str = Query(None)):
@@ -138,7 +141,17 @@ def app_settings():
             st_ = json.load(f)
     except (OSError, ValueError):
         st_ = {}
-    return {"registration": st_.get("registration", True), "contact": st_.get("contact") or accounts.contact()}
+    out = {"registration": st_.get("registration", True), "contact": st_.get("contact") or accounts.contact()}
+    for k in SETTINGS_TEXT:
+        out[k] = st_.get(k, "")
+    out["mail"] = bool(stock_key("brevo") and out.get("mail_from"))
+    out["billing"] = bool(stock_key("stripe") and out.get("stripe_price"))
+    return out
+
+
+# Tekstiniai administratoriaus nustatymai: veiklos duomenys (taisyklėms), el. laiškų siuntėjas, Stripe kaina
+SETTINGS_TEXT = ("biz_name", "biz_code", "biz_address", "biz_email", "mail_from", "mail_name",
+                 "stripe_price", "price_label")
 
 
 @app.get("/api/public/settings")
@@ -149,6 +162,14 @@ def public_settings():
 class SettingsAdmin(BaseModel):
     registration: bool | None = None
     contact: str | None = None
+    biz_name: str | None = None
+    biz_code: str | None = None
+    biz_address: str | None = None
+    biz_email: str | None = None
+    mail_from: str | None = None
+    mail_name: str | None = None
+    stripe_price: str | None = None
+    price_label: str | None = None
 
 
 @app.put("/api/admin/settings")
@@ -160,16 +181,22 @@ def admin_settings(body: SettingsAdmin, user=Depends(current_user)):
         cur["registration"] = body.registration
     if body.contact is not None:
         cur["contact"] = body.contact.strip()[:200]
+    for k in SETTINGS_TEXT:
+        v = getattr(body, k)
+        if v is not None:
+            cur[k] = v.strip()[:300]
     os.makedirs(DATA, exist_ok=True)
+    keep = {k: cur[k] for k in ("registration", "contact", *SETTINGS_TEXT)}
     with open(os.path.join(DATA, "app_settings.json"), "w", encoding="utf-8") as f:
-        json.dump(cur, f, ensure_ascii=False)
-    return cur
+        json.dump(keep, f, ensure_ascii=False)
+    return app_settings()
 
 
 class RegisterBody(BaseModel):
     name: str
     email: str
     password: str
+    consent: bool = False   # sutikimas su taisyklėmis ir privatumo politika
     website: str = ""  # „medaus puodas“ robotams – žmonės šio lauko nemato
 
 
@@ -193,13 +220,24 @@ def register(body: RegisterBody, request: Request):
         raise HTTPException(400, "Slaptažodis – bent 8 simboliai.")
     if not body.name.strip():
         raise HTTPException(400, "Įrašykite savo vardą arba įmonės pavadinimą.")
+    if not body.consent:
+        raise HTTPException(400, "Pažymėkite, kad sutinkate su taisyklėmis ir privatumo politika.")
     if email in accounts.users():
         raise HTTPException(400, "Šis el. paštas jau užregistruotas – prisijunkite.")
     managed = accounts.managed_users()
     managed[email] = {"plan": "basic", "name": body.name.strip()[:80], "email": email, "created": now,
-                      "self_registered": True, "password_hash": accounts.hash_password(body.password)}
+                      "self_registered": True, "consent": now, "password_hash": accounts.hash_password(body.password)}
     accounts.save_managed_users(managed)
     _reg_log[ip] = recent + [now]
+    st_ = app_settings()
+    if st_["mail"]:  # sveikinimas klientui ir žinutė administratorei
+        _mail_bg(email, "Sveiki atvykę į Reels montavimo studiją ✨",
+                 f"<p>Sveiki, {_esc(body.name.strip())},</p><p>jūsų paskyra sukurta. Prisijungimo vardas – "
+                 f"<b>{_esc(email)}</b>.</p><p>Jūsų planas – <b>Pagrindinis</b>. AI funkcijos (titrai iš kalbos, "
+                 "lietuviški AI balsai, AI kadrai) – Premium plane.</p>")
+        if st_.get("biz_email"):
+            _mail_bg(st_["biz_email"], f"Nauja registracija: {body.name.strip()[:60]}",
+                     f"<p>Užsiregistravo naujas klientas: <b>{_esc(body.name.strip())}</b> ({_esc(email)}).</p>")
     return {"token": make_token(email), "user": _user_info(email)}
 
 
@@ -255,7 +293,8 @@ STOCK = {"pexels": "Pexels", "pixabay": "Pixabay"}
 
 
 def stock_key(provider):
-    env = {"pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY", "gemini": "GEMINI_API_KEY"}[provider]
+    env = {"pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY", "gemini": "GEMINI_API_KEY",
+           "brevo": "BREVO_API_KEY", "stripe": "STRIPE_SECRET_KEY", "stripe_whsec": "STRIPE_WEBHOOK_SECRET"}[provider]
     if os.environ.get(env):
         return os.environ[env].strip()
     try:
@@ -392,6 +431,15 @@ def _key_save(provider, key):
         if provider == "gemini":
             _http_json("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
                        {"x-goog-api-key": key}, "Google (Gemini)")
+        elif provider == "brevo":
+            _http_json("https://api.brevo.com/v3/account", {"api-key": key, "accept": "application/json"}, "Brevo")
+        elif provider == "stripe":
+            if not key.startswith(("sk_", "rk_")):
+                raise HTTPException(400, "Stripe slaptasis raktas prasideda „sk_live_“ arba „sk_test_“.")
+            _http_json("https://api.stripe.com/v1/balance", {"Authorization": "Bearer " + key}, "Stripe")
+        elif provider == "stripe_whsec":
+            if not key.startswith("whsec_"):
+                raise HTTPException(400, "Webhook raktas prasideda „whsec_“.")
         elif provider == "pexels":
             _pexels("/videos/search", {"query": "nature", "per_page": 1}, key=key)
         else:
@@ -437,7 +485,8 @@ def _admin_row(name, cfg):
             "ai_clips": lim["ai_clips"], "voice_chars": lim["voice_chars"],
             "used": {"minutes": round(accounts.used(name, "minutes"), 1), "ai_clips": int(accounts.used(name, "ai_clips")),
                      "voice_chars": int(accounts.used(name, "voice_chars"))},
-            "created": cfg.get("created"), "email": cfg.get("email"), "self_registered": bool(cfg.get("self_registered"))}
+            "created": cfg.get("created"), "email": cfg.get("email"), "self_registered": bool(cfg.get("self_registered")),
+            "subscribed": bool(cfg.get("stripe_subscription"))}
 
 
 @app.get("/api/admin/users")
@@ -1645,3 +1694,245 @@ def music_sample(name: str):
 
 
 _ = video_editor  # (naudojama engine; importas – kad klaida išryškėtų paleidžiant)
+
+
+# =====================================================================================================
+# 💼 Verslas: el. laiškai (Brevo), slaptažodžio atkūrimas, Stripe prenumeratos
+# =====================================================================================================
+for _kind in ("brevo", "stripe", "stripe_whsec"):
+    def _mk(kind):
+        def status(user=Depends(admin_user)):
+            return _key_status(kind)
+
+        def save(body: KeyBody, user=Depends(admin_user)):
+            return _key_save(kind, body.key)
+        app.get(f"/api/admin/{kind}")(status)
+        app.post(f"/api/admin/{kind}")(save)
+    _mk(_kind)
+
+
+def _origin(request):
+    """Svetainės adresas nuorodoms laiškuose (pagal užklausą – veikia ir su sslip.io, ir su domenu)."""
+    o = request.headers.get("origin")
+    if o:
+        return o.rstrip("/")
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost"
+    proto = request.headers.get("x-forwarded-proto") or ("https" if "sslip.io" in host or "." in host else "http")
+    return f"{proto}://{host}"
+
+
+def send_mail(to, subject, html_body):
+    """El. laiškas per Brevo. Nepavykus – RuntimeError."""
+    import urllib.request
+    st_ = app_settings()
+    key = stock_key("brevo")
+    if not key or not st_.get("mail_from"):
+        raise RuntimeError("El. laiškų siuntimas neįjungtas")
+    body = {"sender": {"email": st_["mail_from"], "name": st_.get("mail_name") or "Reels montavimo studija"},
+            "to": [{"email": to}], "subject": subject,
+            "htmlContent": f"<div style='font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1b2333'>"
+                           f"{html_body}<p style='color:#888;font-size:12px;margin-top:24px'>Reels montavimo studija</p></div>"}
+    req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(body).encode(),
+                                 headers={"api-key": key, "Content-Type": "application/json",
+                                          "accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            r.read()
+    except Exception as e:
+        detail = getattr(e, "read", lambda: b"")()[:200]
+        raise RuntimeError(f"Laiško išsiųsti nepavyko ({e} {detail!r})")
+
+
+def _mail_bg(to, subject, html_body):
+    def run():
+        try:
+            send_mail(to, subject, html_body)
+        except Exception as e:
+            print("Laiškas neišsiųstas:", e, file=sys.stderr)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _esc(x):
+    import html as _h
+    return _h.escape(str(x or ""))
+
+
+# ---------- 🔑 Slaptažodžio atkūrimas ----------
+_RESETS = os.path.join(DATA, "password_resets.json")
+
+
+def _resets():
+    try:
+        with open(_RESETS, encoding="utf-8") as f:
+            return {k: v for k, v in json.load(f).items() if v["exp"] > time.time()}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_resets(d):
+    os.makedirs(DATA, exist_ok=True)
+    with open(_RESETS, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+    os.chmod(_RESETS, 0o600)
+
+
+class ForgotBody(BaseModel):
+    email: str
+
+
+@app.post("/api/password/forgot")
+def password_forgot(body: ForgotBody, request: Request):
+    """Siunčia nuorodą naujam slaptažodžiui (galioja 1 val.). Atsakymas visada tas pats – neatskleidžiama,
+    ar toks el. paštas užregistruotas."""
+    st_ = app_settings()
+    if not st_["mail"]:
+        raise HTTPException(503, "Slaptažodžio atkūrimas el. paštu dar neįjungtas – kreipkitės į studiją"
+                                 + (f": {st_['contact']}" if st_.get("contact") else "."))
+    email = body.email.strip().lower()
+    managed = accounts.managed_users()
+    name = email if email in managed else next((n for n, c in managed.items() if c.get("email") == email), None)
+    if name and managed[name].get("active", True) is not False:
+        token = _secrets.token_urlsafe(32)
+        d = _resets()
+        d[hashlib.sha256(token.encode()).hexdigest()] = {"user": name, "exp": time.time() + 3600}
+        _save_resets(d)
+        link = f"{_origin(request)}/#/reset/{token}"
+        _mail_bg(managed[name].get("email") or email, "Naujas slaptažodis – Reels montavimo studija",
+                 f"<p>Sveiki, {_esc(managed[name].get('name') or name)},</p><p>gavome prašymą pakeisti slaptažodį. "
+                 f"Spauskite nuorodą (galioja 1 valandą):</p><p><a href='{link}' style='background:#E39B2E;color:#1c1004;"
+                 f"padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold'>Sukurti naują slaptažodį</a>"
+                 f"</p><p>Jei to neprašėte – tiesiog ignoruokite šį laišką.</p>")
+    time.sleep(0.5)
+    return {"ok": True}
+
+
+class ResetBody(BaseModel):
+    token: str
+    password: str
+
+
+@app.post("/api/password/reset")
+def password_reset(body: ResetBody):
+    if len(body.password) < 8:
+        raise HTTPException(400, "Slaptažodis – bent 8 simboliai.")
+    d = _resets()
+    h = hashlib.sha256(body.token.encode()).hexdigest()
+    rec = d.pop(h, None)
+    if not rec:
+        raise HTTPException(400, "Nuoroda nebegalioja – paprašykite naujos.")
+    managed = accounts.managed_users()
+    if rec["user"] not in managed:
+        raise HTTPException(400, "Paskyra nerasta.")
+    managed[rec["user"]]["password_hash"] = accounts.hash_password(body.password)
+    managed[rec["user"]].pop("password", None)
+    accounts.save_managed_users(managed)
+    _save_resets(d)
+    return {"token": make_token(rec["user"]), "user": _user_info(rec["user"])}
+
+
+@app.post("/api/admin/test_mail")
+def admin_test_mail(user=Depends(admin_user)):
+    to = app_settings().get("biz_email") or app_settings().get("mail_from")
+    try:
+        send_mail(to, "Bandomasis laiškas – Reels montavimo studija", "<p>El. laiškai veikia ✅</p>")
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "to": to}
+
+
+# ---------- 💳 Stripe prenumeratos ----------
+def _stripe(path, data=None, method="POST"):
+    import urllib.parse
+    import urllib.request
+    key = stock_key("stripe")
+    if not key:
+        raise HTTPException(400, "Mokėjimai neįjungti")
+    req = urllib.request.Request("https://api.stripe.com/v1" + path, method=method,
+                                 data=urllib.parse.urlencode(data or {}).encode() if method == "POST" else None,
+                                 headers={"Authorization": "Bearer " + key})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        detail = getattr(e, "read", lambda: b"")()[:300].decode(errors="ignore")
+        print("Stripe klaida:", e, detail, file=sys.stderr)
+        raise HTTPException(502, "Mokėjimų sistema šiuo metu nepasiekiama – pabandykite vėliau.")
+
+
+@app.post("/api/billing/checkout")
+def billing_checkout(request: Request, user=Depends(current_user)):
+    st_ = app_settings()
+    if not st_["billing"]:
+        raise HTTPException(400, "Mokėjimai dar neįjungti – kreipkitės į studiją.")
+    cfg = accounts.managed_users().get(user["username"])
+    if not cfg:
+        raise HTTPException(400, "Šiai paskyrai apmokėjimas internetu negalimas – kreipkitės į studiją.")
+    o = _origin(request)
+    data = {"mode": "subscription", "line_items[0][price]": st_["stripe_price"], "line_items[0][quantity]": "1",
+            "success_url": o + "/#/?paid=1", "cancel_url": o + "/#/", "client_reference_id": user["username"],
+            "metadata[username]": user["username"], "subscription_data[metadata][username]": user["username"],
+            "allow_promotion_codes": "true", "locale": "lt"}
+    if cfg.get("stripe_customer"):
+        data["customer"] = cfg["stripe_customer"]
+    elif cfg.get("email"):
+        data["customer_email"] = cfg["email"]
+    return {"url": _stripe("/checkout/sessions", data)["url"]}
+
+
+@app.post("/api/billing/portal")
+def billing_portal(request: Request, user=Depends(current_user)):
+    cfg = accounts.managed_users().get(user["username"]) or {}
+    if not cfg.get("stripe_customer"):
+        raise HTTPException(400, "Prenumeratos nėra.")
+    return {"url": _stripe("/billing_portal/sessions", {"customer": cfg["stripe_customer"],
+                                                        "return_url": _origin(request) + "/#/"})["url"]}
+
+
+def _stripe_verify(payload, header, secret, tolerance=300):
+    parts = dict(p.split("=", 1) for p in (header or "").split(",") if "=" in p)
+    sigs = [v for k, v in (p.split("=", 1) for p in (header or "").split(",") if "=" in p) if k == "v1"]
+    t = parts.get("t")
+    if not t or not sigs or abs(time.time() - int(t)) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), f"{t}.".encode() + payload, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(expected, s_) for s_ in sigs)
+
+
+def _set_plan(username, plan, **extra):
+    managed = accounts.managed_users()
+    if username not in managed:
+        return
+    managed[username]["plan"] = plan
+    managed[username].update({k: v for k, v in extra.items() if v is not None})
+    accounts.save_managed_users(managed)
+
+
+@app.post("/api/billing/webhook")
+async def billing_webhook(request: Request):
+    """Stripe praneša apie apmokėjimą / prenumeratos pabaigą → planas keičiamas automatiškai."""
+    payload = await request.body()
+    secret = stock_key("stripe_whsec")
+    if not secret or not _stripe_verify(payload, request.headers.get("stripe-signature"), secret):
+        raise HTTPException(400, "Neteisingas parašas")
+    ev = json.loads(payload)
+    obj = (ev.get("data") or {}).get("object") or {}
+    kind = ev.get("type", "")
+    if kind == "checkout.session.completed":
+        name = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("username")
+        if name:
+            _set_plan(name, "premium", stripe_customer=obj.get("customer"), stripe_subscription=obj.get("subscription"),
+                      paid_since=time.time())
+            cfg = accounts.managed_users().get(name) or {}
+            if cfg.get("email") and app_settings()["mail"]:
+                _mail_bg(cfg["email"], "Premium planas įjungtas ⭐",
+                         f"<p>Sveiki, {_esc(cfg.get('name') or name)},</p><p>ačiū už apmokėjimą! Jūsų studijoje "
+                         "įjungtas <b>Premium</b> planas: titrai iš kalbos, natūralūs lietuviški AI balsai ir AI kadrai.</p>")
+    elif kind in ("customer.subscription.deleted", "customer.subscription.updated"):
+        if kind == "customer.subscription.deleted" or obj.get("status") in ("canceled", "unpaid", "incomplete_expired"):
+            name = (obj.get("metadata") or {}).get("username")
+            if not name:
+                name = next((n for n, c in accounts.managed_users().items()
+                             if c.get("stripe_subscription") == obj.get("id")), None)
+            if name:
+                _set_plan(name, "basic", stripe_subscription="")
+    return {"received": True}

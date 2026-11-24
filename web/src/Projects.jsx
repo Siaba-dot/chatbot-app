@@ -31,6 +31,23 @@ export default function Projects({ user, onUserChange }) {
     }
   }
 
+  async function buy() {
+    setBusy(true);
+    try { window.location.href = (await api("/billing/checkout", { method: "POST" })).url; }
+    catch (e) { setError(e.message); setBusy(false); }
+  }
+  async function portal() {
+    setBusy(true);
+    try { window.location.href = (await api("/billing/portal", { method: "POST" })).url; }
+    catch (e) { setError(e.message); setBusy(false); }
+  }
+  useEffect(() => {  // grįžus iš apmokėjimo – atnaujinam planą
+    if (window.location.hash.includes("paid=1")) {
+      window.location.hash = "";
+      setTimeout(() => onUserChange && onUserChange(), 1500);
+    }
+  }, []);  // eslint-disable-line
+
   async function rename(e, p) {
     e.stopPropagation();
     const title = window.prompt("Naujas pavadinimas:", p.title);
@@ -58,9 +75,17 @@ export default function Projects({ user, onUserChange }) {
           <div className="hint" style={{ marginTop: 4 }}>
             Galite kurti Reels su šablonais, titrais, efektais, filmuoti su sufleriu ir karpyti. AI funkcijos – titrai iš
             kalbos, natūralūs lietuviški AI balsai ir AI sukurti kadrai – Premium plane.
-            {user.contact ? <> Norite Premium? Susisiekite: <b style={{ color: "var(--honey)" }}>{user.contact}</b></> : null}
+            {user.contact && !user.billing ? <> Norite Premium? Susisiekite: <b style={{ color: "var(--honey)" }}>{user.contact}</b></> : null}
           </div>
+          {user.billing && (
+            <button className="btn gold" style={{ marginTop: 10 }} onClick={buy} disabled={busy}>
+              ⭐ Įsigyti Premium{user.price_label ? ` – ${user.price_label}` : ""}</button>
+          )}
         </div>
+      )}
+      {user && user.plan === "premium" && user.subscribed && (
+        <div className="hint" style={{ marginTop: 10 }}>⭐ Premium prenumerata aktyvi ·{" "}
+          <button className="btn small ghost" onClick={portal} disabled={busy}>Valdyti prenumeratą / sąskaitas</button></div>
       )}
       {user && user.plan === "admin" && <AdminKey kind="openai" onChange={onUserChange} />}
       {user && user.plan === "admin" && <AdminKey kind="gemini" onChange={onUserChange} />}
