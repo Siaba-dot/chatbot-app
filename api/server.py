@@ -1803,7 +1803,7 @@ def clip_thumb(pid: str, cid: str, user=Depends(current_user)):
     return FileResponse(thumb, media_type="image/jpeg")
 
 
-@app.get("/api/music/{name}")
+@app.get("/api/music/{name:path}")
 def music_sample(name: str):
     lib = reels_studio.music_library()
     if name not in lib:

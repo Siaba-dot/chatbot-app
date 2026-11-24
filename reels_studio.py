@@ -537,15 +537,15 @@ MUSIC = {
     "romantiska": ("🌸 Romantiška", "Švelnūs varpeliai – vestuvės, dovanos, gėlės."),
     "tropical_house": ("🌴 Tropical house", "Vasariška marimba ir šokių ritmas – kelionės, poilsis, vasaros akcijos."),
     "deep_house": ("🎧 Deep house", "122 BPM, gilus bosas – mada, naktinis gyvenimas, stilingi pristatymai."),
-    "trap": ("🔥 Trap / hip-hop", "808 bosas ir greiti hi-hat'ai – jaunimas, gatvės stilius, sportas."),
+    "trap": ("🔥 Trap ir hip-hop", "808 bosas ir greiti hi-hat'ai – jaunimas, gatvės stilius, sportas."),
     "phonk": ("🏎 Phonk", "TikTok mėgstamas „cowbell“ ir sodrus bosas – automobiliai, sportas, transformacijos."),
     "reggaeton": ("💃 Reggaeton", "Karštas „dembow“ ritmas – šokiai, vakarėliai, vasara."),
-    "funky": ("🕺 Funk / disco", "Šokinėjantis bosas ir gitara – gera nuotaika, renginiai, maistas."),
+    "funky": ("🕺 Funk ir disco", "Šokinėjantis bosas ir gitara – gera nuotaika, renginiai, maistas."),
     "retro_80": ("🌆 Retro 80-ieji", "Sintezatorių arpedžio – nostalgija, technologijos, naktinis miestas."),
     "motyvuojanti": ("🚀 Motyvuojanti", "Pianinas ir plojimai, kylanti nuotaika – verslas, pristatymai, pasiekimai."),
     "akustine": ("🎸 Akustinė", "Gitaros kirčiai ir plojimai – šeima, kasdienybė, rankų darbai, kavinės."),
     "kaledine": ("🎄 Kalėdinė", "Rogių skambalai ir varpeliai – Kalėdų akcijos, dovanos, šventės."),
-    "spa": ("🧘 SPA / ramybė", "Lėti pasažai be būgnų – grožio salonai, masažai, joga."),
+    "spa": ("🧘 SPA ir ramybė", "Lėti pasažai be būgnų – grožio salonai, masažai, joga."),
 }
 
 
