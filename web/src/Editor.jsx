@@ -53,6 +53,15 @@ function fmtTime(t) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// 📲 Ar naršyklė moka dalintis video failu (telefonuose – taip; daugumoje kompiuterių – ne)
+const CAN_SHARE = (() => {
+  try {
+    return !!(navigator.share && navigator.canShare &&
+      navigator.canShare({ files: [new File([new Blob(["x"])], "t.mp4", { type: "video/mp4" })] }) &&
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent + (navigator.maxTouchPoints > 1 ? " iPad" : "")));
+  } catch (e) { return false; }
+})();
+
 export default function Editor({ id, user }) {
   const [proj, setProj] = useState(null);
   const [opts, setOpts] = useState(null);
@@ -73,6 +82,8 @@ export default function Editor({ id, user }) {
   const [recording, setRecording] = useState(false);
   const [trimming, setTrimming] = useState(null);  // karpomas įrašas
   const [sounding, setSounding] = useState(null);  // kadras, kuriam renkamas garsas
+  const shareBlobs = useRef({});                    // 📲 dalinimuisi paruošti video failai
+  const [sharing, setSharing] = useState("");
   const [autoplay, setAutoplay] = useState(false);  // groti tik ką tik sukurtą peržiūrą
 
   useEffect(() => {
@@ -203,6 +214,43 @@ export default function Editor({ id, user }) {
 
   const live = useMemo(() => fileUrl(`/projects/${id}/tile/live`, "&v=" + saved), [id, saved]);
   if (error && !proj) return <div className="page"><div className="error">{error}</div></div>;
+  const out0 = (proj && proj.outputs) || {};
+  const finalAt = out0.final && out0.final.at;
+  useEffect(() => {  // telefone iš anksto parsisiunčiam pagrindinį video – kad „Dalintis“ atsidarytų iškart
+    if (!finalAt || !CAN_SHARE) return;
+    const f = (out0.final.formats || [{ file: "reels.mp4" }])[0];
+    prefetch(f.file, finalAt).catch(() => {});
+  }, [finalAt]);  // eslint-disable-line
+
+  async function prefetch(file, at) {
+    const k = file + "@" + at;
+    if (!shareBlobs.current[k]) {
+      shareBlobs.current[k] = fetch(fileUrl(`/projects/${id}/files/${file}`, "&v=" + at))
+        .then(r => { if (!r.ok) throw new Error("Nepavyko gauti video"); return r.blob(); })
+        .then(b => new File([b], `${(proj.title || "reels").replace(/[^\wąčęėįšųūž -]/gi, "").trim() || "reels"}.mp4`, { type: "video/mp4" }));
+      shareBlobs.current[k].catch(() => { delete shareBlobs.current[k]; });
+    }
+    return shareBlobs.current[k];
+  }
+
+  async function shareVideo(f) {
+    const cap = out0.final.caption;
+    if (cap && navigator.clipboard) {  // aprašymą nukopijuojam – programėlėje tereikės įklijuoti
+      navigator.clipboard.writeText(cap.caption + "\n\n" + (cap.hashtags || []).join(" ")).catch(() => {});
+    }
+    const k = f.file + "@" + finalAt;
+    setSharing(f.file);
+    try {
+      const file = await prefetch(f.file, finalAt);
+      await navigator.share({ files: [file] });
+      setToast(cap ? "Aprašymas nukopijuotas – programėlėje jį įklijuokite 📋" : "Pasidalinta ✅");
+    } catch (e) {
+      if (e && e.name === "AbortError") { /* naudotoja uždarė langą */ }
+      else if (e && e.name === "NotAllowedError" && shareBlobs.current[k]) setToast("Video paruoštas – paspauskite „Dalintis“ dar kartą");
+      else setError("Nepavyko pasidalinti: " + ((e && e.message) || "nežinoma klaida") + ". Atsisiųskite video ir įkelkite ranka.");
+    } finally { setSharing(""); }
+  }
+
   if (!proj || !opts || !s) return <div className="page hint">Kraunama…</div>;
 
   const tileUrl = (kind, name) => fileUrl(`/projects/${id}/tile/${kind}?name=${encodeURIComponent(name)}`,
@@ -300,11 +348,14 @@ export default function Editor({ id, user }) {
                                    style={{ aspectRatio: f.fmt.replace(":", " / ") }} />}
                   <b>{f.fmt}</b>
                   <span className="hint">{{ "9:16": "Reels, TikTok, Shorts", "16:9": "YouTube", "4:5": "Instagram įrašas", "1:1": "Kvadratas" }[f.fmt]}</span>
-                  <a className="btn small gold" href={fileUrl(`/projects/${id}/files/${f.file}`, "&download=1")}>⬇ Video</a>
+                  {CAN_SHARE && <button className="btn small gold" onClick={() => shareVideo(f)} disabled={!!sharing}>
+                    {sharing === f.file ? "Ruošiama…" : "📲 Dalintis"}</button>}
+                  <a className={"btn small" + (CAN_SHARE ? "" : " gold")} href={fileUrl(`/projects/${id}/files/${f.file}`, "&download=1")}>⬇ Video</a>
                   {f.cover && <a className="btn small" href={fileUrl(`/projects/${id}/files/${f.cover}`, "&download=1")}>⬇ Viršelis</a>}
                 </div>
               ))}
             </div>
+            {CAN_SHARE && <div className="hint" style={{ margin: "8px 0" }}>📲 „Dalintis“ – pasirinkite Instagram, TikTok ar Facebook. Aprašymas su grotažymėmis nukopijuojamas automatiškai – programėlėje tiesiog įklijuokite.</div>}
             {out.final.caption && (
               <>
                 <div className="caption">{out.final.caption.caption}
