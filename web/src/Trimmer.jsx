@@ -16,9 +16,28 @@ export default function Trimmer({ id, clip, onClose, onSaved, setError }) {
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const [shown, setShown] = useState(false);   // video kadras jau matomas
+  const [frameT, setFrameT] = useState(clip.trim ? clip.trim[0] : 0);
   const video = useRef(null);
   const bar = useRef(null);
   const drag = useRef(null);
+
+  // Kol video kadras nematomas (iPhone neužkrauna video be paspaudimo), rodom kadro paveikslėlį
+  useEffect(() => {
+    if (shown) return;
+    const h = setTimeout(() => setFrameT(Math.round(t * 10) / 10), 120);
+    return () => clearTimeout(h);
+  }, [t, shown]);
+
+  function primed() {  // iPhone: tyliai paleidžiam ir sustabdom, kad parodytų kadrą
+    const v = video.current;
+    setReady(true);
+    if (!v) return;
+    v.muted = true;
+    const p = v.play();
+    const done = () => { v.pause(); v.muted = false; try { v.currentTime = a; } catch (e) { /* */ } };
+    if (p && p.then) p.then(done).catch(() => { v.muted = false; }); else done();
+  }
 
   // grojam tik pasirinktą dalį
   useEffect(() => {
@@ -49,6 +68,7 @@ export default function Trimmer({ id, clip, onClose, onSaved, setError }) {
     if (drag.current === "a") { const na = Math.min(x, b - 0.3); setA(na); if (v) v.currentTime = na; }
     else if (drag.current === "b") { const nb = Math.max(x, a + 0.3); setB(nb); if (v) v.currentTime = nb; }
     else if (v) { v.currentTime = x; }
+    if (!v || !shown) setT(x);
   }
   const up = () => { drag.current = null; };
 
@@ -91,9 +111,12 @@ export default function Trimmer({ id, clip, onClose, onSaved, setError }) {
         </div>
         <div className="trim-video">
           <video ref={video} src={fileUrl(`/projects/${id}/clips/${clip.id}/preview`)} playsInline preload="auto"
-                 onLoadedData={() => { setReady(true); video.current.currentTime = a; }}
-                 onPause={() => setPlaying(false)} onPlay={() => setPlaying(true)} onClick={toggle} />
-          {!ready && <div className="empty">Ruošiama peržiūra…</div>}
+                 onLoadedMetadata={primed}
+                 onLoadedData={() => { setReady(true); setShown(true); try { video.current.currentTime = a; } catch (e) { /* */ } }}
+                 onPause={() => setPlaying(false)} onPlay={() => { setPlaying(true); setShown(true); }} onClick={toggle} />
+          {!shown && <img className="trim-frame" alt="" onClick={toggle}
+                          src={fileUrl(`/projects/${id}/clips/${clip.id}/frame`, `&t=${frameT}`)} />}
+          {!ready && <div className="empty small-note">Ruošiama peržiūra…</div>}
         </div>
 
         <div className="trim-bar" ref={bar} onPointerDown={e => { drag.current = "t"; move(e); }}>

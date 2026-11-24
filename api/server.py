@@ -1335,6 +1335,20 @@ def clip_preview(pid: str, cid: str, user=Depends(current_user)):
     return FileResponse(out, media_type="video/mp4")
 
 
+@app.get("/api/projects/{pid}/clips/{cid}/frame")
+def clip_frame(pid: str, cid: str, t: float = 0.0, user=Depends(current_user)):
+    """Vienas kadras karpymo lange (rodomas iškart, kol telefonas dar neužkrovė video)."""
+    c = _clip(_load(user, pid), cid)
+    t = max(0.0, min(float(c.get("duration") or 0) - 0.05, round(t, 1)))
+    out = f"{c['path']}.f{int(t * 10)}.jpg"
+    if not os.path.exists(out):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", c["path"],
+                        "-vf", "scale=-2:'min(480,ih)'", "-frames:v", "1", "-q:v", "4", out], capture_output=True)
+        if not os.path.exists(out):
+            raise HTTPException(500, "Nepavyko paimti kadro")
+    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
 @app.get("/api/projects/{pid}/clips/{cid}/strip")
 def clip_strip(pid: str, cid: str, user=Depends(current_user)):
     """Kadrų juosta karpymui: 12 kadrų vienoje eilėje."""
