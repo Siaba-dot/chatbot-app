@@ -1176,7 +1176,8 @@ def _save_prep(user, proj, prep):
 def _public(proj):
     """Projekto vaizdas naršyklei – be vidinių failų kelių."""
     p = dict(proj)
-    p["clips"] = [{k: v for k, v in c.items() if k not in ("path",)} for c in proj.get("clips", [])]
+    p["clips"] = [{k: ({kk: vv for kk, vv in v.items() if kk != "path"} if k == "sound" and isinstance(v, dict) else v)
+                   for k, v in c.items() if k not in ("path",)} for c in proj.get("clips", [])]
     p["broll"] = [{k: v for k, v in b.items() if k not in ("path",)} for b in proj.get("broll", [])]
     p.setdefault("prepared", False)
     p.setdefault("words", None)
@@ -1309,6 +1310,61 @@ def trim_clip(pid: str, cid: str, body: TrimBody, user=Depends(current_user)):
     if b - a < 0.3:
         raise HTTPException(400, "Palikite bent 0,3 s")
     c["trim"] = None if a <= 0.01 and b >= c["duration"] - 0.01 else [round(a, 3), round(b, 3)]
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+    _save(user, proj)
+    return _public(proj)
+
+
+class SoundBody(BaseModel):
+    kind: str = "none"          # none | music | voice
+    track: str | None = None    # muzika iš bibliotekos
+    text: str | None = None     # kadro įgarsinimo tekstas
+    voice: str | None = None
+    volume: int = 100           # parinkto garso garsumas, %
+    orig: int = 100             # kadro originalaus garso garsumas, %
+
+
+@app.put("/api/projects/{pid}/clips/{cid}/sound")
+def clip_sound(pid: str, cid: str, body: SoundBody, user=Depends(current_user)):
+    """🎵 Kadrui skirta muzika arba įgarsinimas (skamba tik per tą kadrą)."""
+    proj = _load(user, pid)
+    c = next((c for c in proj["clips"] if c["id"] == cid), None)
+    if not c:
+        raise HTTPException(404, "Įrašas nerastas")
+    vol, orig = max(0, min(200, int(body.volume))), max(0, min(200, int(body.orig)))
+    if body.kind == "none":
+        c.pop("sound", None)
+    elif body.kind == "music":
+        if body.track not in reels_studio.music_library():
+            raise HTTPException(400, "Tokios muzikos nėra")
+        c["sound"] = {"kind": "music", "track": body.track, "volume": vol, "orig": orig}
+    elif body.kind == "voice":
+        text = (body.text or "").strip()[:1500]
+        voice = body.voice or "coral"
+        if not text:
+            raise HTTPException(400, "Įrašykite, ką balsas turi pasakyti.")
+        if user["plan"] not in AI_PLANS:
+            raise HTTPException(400, "AI įgarsinimas – Premium plane.")
+        if voice not in engine.VOICES and voice not in engine.GEMINI_VOICES:
+            raise HTTPException(400, "Nežinomas balsas")
+        client = openai_client(user)
+        google = voice.startswith("g:")
+        if (google and not stock_key("gemini")) or (not google and client is None):
+            raise HTTPException(400, "Šiam balsui nėra rakto.")
+        lang = proj["settings"].get("subtitle_language", "lt")
+        key = hashlib.sha1((engine.TTS_VERSION + "|" + text + "|" + voice + "|" + lang).encode()).hexdigest()[:12]
+        path = os.path.join(_pdir(user, pid), f"vo_{key}.mp3")
+        if not os.path.exists(path):
+            try:
+                _voice_quota(user, text)
+                engine.tts(client, text, voice, path, lang, gemini_key=stock_key("gemini"))
+                accounts.add_usage(user["username"], "voice_chars", len(text))
+            except (RuntimeError, PermissionError) as e:
+                raise HTTPException(400, str(e))
+        c["sound"] = {"kind": "voice", "text": text, "voice": voice, "path": path, "file": f"vo_{key}.mp3",
+                      "length": round(video_editor.media_duration(path), 1), "volume": vol, "orig": orig}
+    else:
+        raise HTTPException(400, "Netinkamas garso tipas")
     proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     _save(user, proj)
     return _public(proj)
