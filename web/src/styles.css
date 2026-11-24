@@ -298,3 +298,17 @@ textarea.input { resize: vertical; min-height: 70px; }
   .grid-projects { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 }
 .proj .thumb, .proj.new { aspect-ratio: 4 / 5; background-position: center 30%; }
+
+/* ✂ karpymas */
+.trim-video { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 10; max-height: 46vh; margin: 0 auto 12px; }
+.trim-video video { width: 100%; height: 100%; object-fit: contain; }
+.trim-video .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+.trim-bar { position: relative; height: 64px; border-radius: 10px; overflow: hidden; background: #0A1830; touch-action: none; cursor: pointer; user-select: none; }
+.trim-strip { position: absolute; inset: 0; background-size: 100% 100%; background-repeat: no-repeat; }
+.trim-dim { position: absolute; top: 0; bottom: 0; background: rgba(3, 9, 20, .72); }
+.trim-sel { position: absolute; top: 0; bottom: 0; border: 3px solid var(--honey); border-left-width: 0; border-right-width: 0; }
+.trim-h { position: absolute; top: -3px; bottom: -3px; width: 18px; z-index: 2; background: var(--honey); cursor: ew-resize; touch-action: none; }
+.trim-h.l { left: 0; border-radius: 8px 0 0 8px; }
+.trim-h.r { right: 0; border-radius: 0 8px 8px 0; }
+.trim-h::after { content: ""; position: absolute; left: 7px; top: 22px; bottom: 22px; width: 4px; border-radius: 2px; background: #6b4a12; }
+.trim-head { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px #000; pointer-events: none; }
