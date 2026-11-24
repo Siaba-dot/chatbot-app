@@ -9,10 +9,23 @@ const genPassword = () => {
 };
 const lim = v => (v == null ? "∞" : v);
 
-function UserForm({ initial, isNew, defaults, onCancel, onSave }) {
+// Prisijungimo vardas iš „Vardas / įmonė“: be lietuviškų raidžių ir tarpų, unikalus
+const LT = { ą: "a", č: "c", ę: "e", ė: "e", į: "i", š: "s", ų: "u", ū: "u", ž: "z" };
+function slug(name, taken) {
+  let base = name.toLowerCase().replace(/[ąčęėįšųūž]/g, c => LT[c]).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "").slice(0, 30);
+  if (base.length < 3) base = (base + "klientas").slice(0, 12);
+  let u = base, n = 2;
+  while (taken.has(u)) u = base + n++;
+  return u;
+}
+
+function UserForm({ initial, isNew, defaults, taken, onCancel, onSave }) {
   const [f, setF] = useState(() => ({ username: "", name: "", plan: "premium", password: isNew ? genPassword() : "",
     minutes: "", ai_clips: "", voice_chars: "", active: true, ...initial }));
-  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
+  const [manual, setManual] = useState(false);  // prisijungimo vardas įrašytas ranka – nebekeičiam
+  const set = (k, v) => setF(x => ({ ...x, [k]: v,
+    ...(k === "name" && isNew && !manual ? { username: v.trim() ? slug(v, taken) : "" } : {}) }));
   const d = defaults[f.plan] || {};
   const num = v => (v === "" || v == null ? null : Number(v));
   return (
@@ -20,12 +33,13 @@ function UserForm({ initial, isNew, defaults, onCancel, onSave }) {
       <form className="card" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}
             onSubmit={e => { e.preventDefault(); onSave({ ...f, minutes: num(f.minutes), ai_clips: num(f.ai_clips), voice_chars: num(f.voice_chars), password: f.password || null }); }}>
         <h3 className="serif" style={{ marginTop: 0, fontSize: 22 }}>{isNew ? "＋ Naujas klientas" : `✏️ ${f.username}`}</h3>
-        {isNew && (
-          <div className="field"><label>Prisijungimo vardas</label>
-            <input className="input" value={f.username} onChange={e => set("username", e.target.value.toLowerCase())} placeholder="pvz. salonas.ruta" required /></div>
-        )}
         <div className="field"><label>Vardas / įmonė</label>
-          <input className="input" value={f.name} onChange={e => set("name", e.target.value)} placeholder="Grožio salonas Rūta" /></div>
+          <input className="input" value={f.name} onChange={e => set("name", e.target.value)} placeholder="Grožio salonas Rūta" autoFocus={isNew} /></div>
+        {isNew && (
+          <div className="field"><label>Prisijungimo vardas {!manual && f.username && <span className="hint">– pasiūlytas automatiškai, galite pakeisti</span>}</label>
+            <input className="input" value={f.username} required placeholder="užsipildys pagal pavadinimą"
+                   onChange={e => { setManual(true); setF(x => ({ ...x, username: e.target.value.toLowerCase().replace(/\s/g, "") })); }} /></div>
+        )}
         <div className="field"><label>Planas</label>
           <div className="chips">{Object.entries(PLANS).map(([k, l]) => (
             <button key={k} type="button" className={"chip" + (f.plan === k ? " on" : "")} onClick={() => set("plan", k)}>{l}</button>))}</div></div>
@@ -135,7 +149,7 @@ export default function Admin({ me }) {
           </div>
         ))}
       </div>
-      {edit && <UserForm isNew={!!edit.new} defaults={data.defaults} onCancel={() => setEdit(null)} onSave={save}
+      {edit && <UserForm isNew={!!edit.new} defaults={data.defaults} taken={new Set(data.users.map(u => u.username))} onCancel={() => setEdit(null)} onSave={save}
                          initial={edit.user ? { username: edit.user.username, name: edit.user.name, plan: edit.user.plan, active: edit.user.active,
                            minutes: edit.user.minutes ?? "", ai_clips: edit.user.ai_clips ?? "", voice_chars: edit.user.voice_chars ?? "" } : {}} />}
     </div>
