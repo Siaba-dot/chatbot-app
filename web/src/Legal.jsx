@@ -12,7 +12,7 @@ function useBiz() {
 function Shell({ title, children }) {
   return (
     <div className="page legal">
-      <button className="btn small ghost" onClick={() => (window.location.hash = "")}>← Atgal</button>
+      <button className="btn small ghost" onClick={() => (window.history.length > 1 ? window.history.back() : (window.location.hash = "#/home"))}>← Atgal</button>
       <h2>{title}</h2>
       <div className="card">{children}</div>
     </div>
@@ -96,6 +96,48 @@ export function Privacy() {
         duomenų apsaugos inspekcijai (www.vdai.lrv.lt).</p>
       <h3>Slapukai</h3>
       <p>Naudojame tik būtiną naršyklės saugyklą prisijungimui ir nustatymams; reklaminių ar sekimo slapukų nenaudojame.</p>
+    </Shell>
+  );
+}
+
+export function Refund() {
+  const s = useBiz();
+  if (!s) return null;
+  const email = s.biz_email || s.contact || "[el. paštas]";
+  return (
+    <Shell title="Grąžinimai ir atšaukimas">
+      <Who s={s} />
+      <h3>Nemokamas planas ir bandymas</h3>
+      <p>Pagrindinis planas – nemokamas. {s.trial_days ? `Nemokamas ${s.trial_days} d. Premium bandymas kortelės nereikalauja; jam pasibaigus paskyra automatiškai lieka su Pagrindiniu planu ir jokie mokesčiai neimami.` : ""}</p>
+      <h3>Premium prenumerata</h3>
+      <p>Premium{s.price_label ? ` (${s.price_label})` : ""} mokama kas mėnesį iš anksto kortele per „Stripe“. Prenumerata
+        atsinaujina automatiškai kiekvieną mėnesį, kol ją nutrauksite. Sąskaitos (kvitai) siunčiamos el. paštu ir pasiekiamos
+        skiltyje „Valdyti prenumeratą“.</p>
+      <h3>Kaip atšaukti prenumeratą</h3>
+      <ul>
+        <li>Bet kada patys: „Mano projektai“ → „Valdyti prenumeratą / sąskaitas“ → „Atšaukti“.</li>
+        <li>Arba parašykite el. paštu {email} – atšauksime per 1 darbo dieną.</li>
+      </ul>
+      <p>Atšaukus Premium galioja iki apmokėto laikotarpio pabaigos, vėliau mokestis nebeimamas, o paskyra lieka su
+        Pagrindiniu planu. Jūsų projektai ir video neištrinami.</p>
+      <h3>14 dienų atsisakymo teisė</h3>
+      <p>Jei esate vartotojas, per 14 dienų nuo pirmojo Premium apmokėjimo galite atsisakyti sutarties be priežasties –
+        parašykite {email}. Jei per šį laiką AI funkcijomis dar nesinaudojote – grąžiname visą sumą. Jei jau naudojotės,
+        pagal Lietuvos Respublikos civilinį kodeksą grąžiname sumą, atskaičius proporcingą dalį už jau suteiktas paslaugas
+        (panaudotą laikotarpį).</p>
+      <h3>Kiti atvejai</h3>
+      <ul>
+        <li>Jei dėl mūsų kaltės Studija ilgiau nei 48 val. neveikė ar AI funkcijos nebuvo suteiktos – parašykite, ir
+          grąžinsime proporcingą sumą arba pratęsime prenumeratą.</li>
+        <li>Klaidingai ar dvigubai nuskaičiuoti pinigai grąžinami visada.</li>
+        <li>Kitais atvejais jau prasidėjusio mėnesio mokestis negrąžinamas, bet prenumeratą galite nutraukti, kad kitas
+          mėnuo nebūtų apmokestintas.</li>
+      </ul>
+      <h3>Kaip grąžinami pinigai</h3>
+      <p>Pinigus grąžiname per 14 dienų nuo prašymo patvirtinimo – į tą pačią kortelę, kuria mokėjote. Bankui pervesti
+        lėšas gali prireikti dar 5–10 darbo dienų.</p>
+      <p className="hint">Ginčai sprendžiami derybomis, o nepavykus – Lietuvos Respublikos teisės aktų nustatyta tvarka;
+        vartotojai gali kreiptis į Valstybinę vartotojų teisių apsaugos tarnybą (www.vvtat.lt).</p>
     </Shell>
   );
 }
