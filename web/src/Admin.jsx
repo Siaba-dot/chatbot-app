@@ -104,7 +104,7 @@ function Section({ id, title, ok, children, open, setOpen }) {
   );
 }
 
-function Business({ st, save, onError }) {
+function Business({ st, save, onError, reload }) {
   const [open, setOpen] = useState("");
   const [msg, setMsg] = useState("");
   const webhook = `${window.location.origin}/api/billing/webhook`;
@@ -124,13 +124,14 @@ function Business({ st, save, onError }) {
           ["biz_email", "El. paštas klientams (ir pranešimams jums)", "info@…"]]} />
       </Section>
       <Section open={open} setOpen={setOpen} id="mail" title="✉️ El. laiškai (Brevo)" ok={st.mail}>
-        <AdminKey kind="brevo" />
+        <AdminKey kind="brevo" onChange={reload} />
         <TextFields st={st} onSave={save} fields={[["mail_from", "Siuntėjo el. paštas (patvirtintas Brevo)", "pvz. info@…"],
           ["mail_name", "Siuntėjo vardas", "Reels montavimo studija"]]} />
         <div className="row" style={{ marginTop: 10 }}>
           <button className="btn small" onClick={test} disabled={!st.mail}>✉️ Siųsti bandomąjį laišką</button>
           {msg && <span className="hint" style={{ color: "var(--ok)" }}>{msg}</span>}
         </div>
+        {!st.mail && <div className="hint" style={{ marginTop: 6 }}>Mygtukas suaktyvės, kai bus išsaugoti abu: Brevo raktas ir siuntėjo el. paštas.</div>}
       </Section>
       <Section open={open} setOpen={setOpen} id="pay" title="💳 Mokėjimai (Stripe prenumerata)" ok={st.billing}>
         <ol className="hint" style={{ paddingLeft: 18 }}>
@@ -139,7 +140,7 @@ function Business({ st, save, onError }) {
           <li>Webhook adresas: <code style={{ userSelect: "all" }}>{webhook}</code></li>
           <li>Stripe → <b>Settings → Billing → Customer portal</b> – įjunkite, kad klientai galėtų patys nutraukti prenumeratą.</li>
         </ol>
-        <AdminKey kind="stripe" />
+        <AdminKey kind="stripe" onChange={reload} />
         <AdminKey kind="stripe_whsec" />
         <TextFields st={st} onSave={save} fields={[["stripe_price", "Premium Price ID", "price_…"], ["price_label", "Kaina klientams (rodoma)", "19 € / mėn."]]} />
       </Section>
@@ -150,7 +151,8 @@ function Business({ st, save, onError }) {
 function Settings({ onError }) {
   const [st, setSt] = useState(null);
   const [contact, setContact] = useState("");
-  useEffect(() => { api("/public/settings").then(x => { setSt(x); setContact(x.contact || ""); }).catch(() => {}); }, []);
+  const reload = () => api("/public/settings").then(x => { setSt(x); setContact(x.contact || ""); }).catch(() => {});
+  useEffect(() => { reload(); }, []);
   async function save(patch) {
     try { const x = await api("/admin/settings", { method: "PUT", body: patch }); setSt(x); setContact(x.contact || ""); }
     catch (e) { onError(e.message); }
@@ -158,7 +160,7 @@ function Settings({ onError }) {
   if (!st) return null;
   return (
     <>
-    <Business st={st} save={save} onError={onError} />
+    <Business st={st} save={save} onError={onError} reload={reload} />
     <div className="card section">
       <div className="switch" onClick={() => save({ registration: !st.registration })}>
         <div className="txt"><b>📝 Klientai gali registruotis patys</b>
