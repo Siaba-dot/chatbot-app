@@ -999,12 +999,94 @@ def upload_clip(pid: str, file: UploadFile = File(...), recorded: bool = Form(Fa
 def delete_clip(pid: str, cid: str, user=Depends(current_user)):
     proj = _load(user, pid)
     for c in [c for c in proj["clips"] if c["id"] == cid]:
-        if c["path"].startswith(_pdir(user, pid)) and os.path.exists(c["path"]):
+        shared = any(o["path"] == c["path"] for o in proj["clips"] if o["id"] != cid)  # padalintas įrašas
+        if not shared and c["path"].startswith(_pdir(user, pid)) and os.path.exists(c["path"]):
             os.unlink(c["path"])
     proj["clips"] = [c for c in proj["clips"] if c["id"] != cid]
     proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     _save(user, proj)
     return _public(proj)
+
+
+# ---------- ✂ Karpymas (kaip CapCut / Instagram) ----------
+def _clip(proj, cid):
+    c = next((c for c in proj["clips"] if c["id"] == cid), None)
+    if not c:
+        raise HTTPException(404, "Įrašas nerastas")
+    if c.get("image"):
+        raise HTTPException(400, "Nuotraukos karpyti nereikia")
+    return c
+
+
+class TrimBody(BaseModel):
+    start: float
+    end: float
+
+
+@app.put("/api/projects/{pid}/clips/{cid}/trim")
+def trim_clip(pid: str, cid: str, body: TrimBody, user=Depends(current_user)):
+    proj = _load(user, pid)
+    c = _clip(proj, cid)
+    a, b = max(0.0, body.start), min(c["duration"], body.end)
+    if b - a < 0.3:
+        raise HTTPException(400, "Palikite bent 0,3 s")
+    c["trim"] = None if a <= 0.01 and b >= c["duration"] - 0.01 else [round(a, 3), round(b, 3)]
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+    _save(user, proj)
+    return _public(proj)
+
+
+class SplitBody(BaseModel):
+    at: float
+
+
+@app.post("/api/projects/{pid}/clips/{cid}/split")
+def split_clip(pid: str, cid: str, body: SplitBody, user=Depends(current_user)):
+    """Padalinti įrašą į dvi dalis (tas pats failas, skirtingi apkarpymai) – dalis galima perdėlioti ar ištrinti."""
+    proj = _load(user, pid)
+    c = _clip(proj, cid)
+    a, b = c.get("trim") or (0.0, c["duration"])
+    if not (a + 0.3 <= body.at <= b - 0.3):
+        raise HTTPException(400, "Padalinkite ne arčiau nei 0,3 s nuo krašto")
+    second = dict(c, id=uuid.uuid4().hex[:10], trim=[round(body.at, 3), round(b, 3)])
+    c["trim"] = [round(a, 3), round(body.at, 3)]
+    i = proj["clips"].index(c)
+    proj["clips"].insert(i + 1, second)
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+    _save(user, proj)
+    return _public(proj)
+
+
+@app.get("/api/projects/{pid}/clips/{cid}/preview")
+def clip_preview(pid: str, cid: str, user=Depends(current_user)):
+    """Lengva peržiūros kopija (MP4, ~640 px) – groja bet kurioje naršyklėje, ir iPhone."""
+    c = _clip(_load(user, pid), cid)
+    out = c["path"] + ".preview.mp4"
+    if not os.path.exists(out):
+        tmp = out + ".part.mp4"
+        r = subprocess.run(video_editor.limit_threads(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", c["path"], "-vf", "scale=-2:'min(640,ih)',format=yuv420p",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-c:a", "aac", "-b:a", "96k",
+             "-movflags", "+faststart", tmp]), capture_output=True, text=True)
+        if r.returncode != 0:
+            raise HTTPException(500, "Nepavyko paruošti peržiūros")
+        os.replace(tmp, out)
+    return FileResponse(out, media_type="video/mp4")
+
+
+@app.get("/api/projects/{pid}/clips/{cid}/strip")
+def clip_strip(pid: str, cid: str, user=Depends(current_user)):
+    """Kadrų juosta karpymui: 12 kadrų vienoje eilėje."""
+    c = _clip(_load(user, pid), cid)
+    out = c["path"] + ".strip.jpg"
+    if not os.path.exists(out):
+        n = 12
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", c["path"], "-vf",
+                        f"fps={n}/{max(0.5, c['duration']):.3f},scale=-2:96,tile={n}x1", "-frames:v", "1", out],
+                       capture_output=True)
+        if not os.path.exists(out):
+            raise HTTPException(500, "Nepavyko paruošti kadrų juostos")
+    return FileResponse(out, media_type="image/jpeg")
 
 
 class ClipOrder(BaseModel):

@@ -3,6 +3,7 @@ import { api, fileUrl, upload, waitJob } from "./api.js";
 import Recorder from "./Recorder.jsx";
 import Broll from "./Broll.jsx";
 import Voice from "./Voice.jsx";
+import Trimmer from "./Trimmer.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
@@ -69,6 +70,7 @@ export default function Editor({ id, user }) {
   const camInput = useRef(null);
   const [over, setOver] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [trimming, setTrimming] = useState(null);  // karpomas įrašas
   const [autoplay, setAutoplay] = useState(false);  // groti tik ką tik sukurtą peržiūrą
 
   useEffect(() => {
@@ -340,8 +342,9 @@ export default function Editor({ id, user }) {
                     <img src={fileUrl(`/projects/${id}/clips/${c.id}/thumb`)} alt="" />
                     <div className="info">
                       <b>{c.name}</b>
-                      <span>{c.image ? "Nuotrauka" : fmtTime(c.duration)} · {c.audio === "speech" ? "🎙 kalba" : c.audio === "silent" ? "🔇 be kalbos" : "be garso"}</span>
+                      <span>{c.image ? "Nuotrauka" : c.trim ? `✂ ${fmtTime(c.trim[0])}–${fmtTime(c.trim[1])} (${(c.trim[1] - c.trim[0]).toFixed(1)} s)` : fmtTime(c.duration)} · {c.audio === "speech" ? "🎙 kalba" : c.audio === "silent" ? "🔇 be kalbos" : "be garso"}</span>
                     </div>
+                    {!c.image && <button className="btn small" onClick={() => setTrimming(c)} title="Karpyti">✂</button>}
                     <button className="btn small ghost" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Aukštyn">↑</button>
                     <button className="btn small ghost" onClick={() => move(i, 1)} disabled={i === proj.clips.length - 1} aria-label="Žemyn">↓</button>
                     <button className="btn small ghost danger" onClick={() => removeClip(c.id)} aria-label="Pašalinti">✕</button>
@@ -600,6 +603,8 @@ export default function Editor({ id, user }) {
         )}
       </div>
       {toast && <div className="toast">{toast}</div>}
+      {trimming && <Trimmer id={id} clip={trimming} onClose={() => setTrimming(null)} setError={setError}
+                            onSaved={p => { setProj(p); setLines(null); setSaved(n => n + 1); setToast("Įrašas apkarpytas ✂"); }} />}
       {recording && <Recorder projectId={id} format={s.format} fit={s.fit || "fill"} onFitChange={v => set({ fit: v })} onClose={() => setRecording(false)} onRecorded={onRecorded} />}
     </div>
   );
