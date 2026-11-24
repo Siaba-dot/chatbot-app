@@ -59,13 +59,105 @@ def check_password(username, password):
 
 
 def _secrets_users():
+    """Visi klientai: iš Secrets (secrets.toml) ir pridėti per administravimą (DATA_DIR/users.json).
+    Tas pats vardas Secrets'uose turi pirmenybę."""
     try:
-        users = st.secrets.get("users")
+        users = st.secrets.get("users") or {}
     except Exception:  # Secrets failo nėra
+        users = {}
+    out = {str(k): dict(v, source="managed") for k, v in managed_users().items()}
+    out.update({str(k): dict(dict(v), source="secrets") for k, v in users.items()})
+    return out
+
+
+# ---------- Klientai, valdomi per naršyklę (administravimas) ----------
+def _users_file():
+    return os.path.join(DATA_DIR, "users.json")
+
+
+def managed_users():
+    try:
+        with open(_users_file(), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
         return {}
-    if not users:
-        return {}
-    return {str(k): dict(v) for k, v in users.items()}
+
+
+def save_managed_users(users):
+    with _lock:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = _users_file() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(users, f, ensure_ascii=False, indent=1)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, _users_file())
+
+
+def hash_password(password):
+    """Slaptažodis saugomas tik kaip PBKDF2 maiša (ne atviru tekstu)."""
+    import hashlib
+    import secrets as _s
+    salt = _s.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 200_000).hex()
+    return f"pbkdf2${salt}${digest}"
+
+
+def _password_ok(cfg, password):
+    stored = str(cfg.get("password_hash") or "")
+    if stored.startswith("pbkdf2$"):
+        import hashlib
+        _, salt, digest = stored.split("$", 2)
+        test = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 200_000).hex()
+        return hmac.compare_digest(test, digest)
+    return hmac.compare_digest(str(cfg.get("password", "")).encode(), password.encode())
+
+
+# ---------- AI išlaidų ribos (per mėnesį) ----------
+# ai_clips – AI video kadrai (Google), voice_chars – AI įgarsinimo simboliai. None – be ribos (administratorius).
+DEFAULT_LIMITS = {"basic": {"ai_clips": 0, "voice_chars": 0},
+                  "premium": {"ai_clips": 10, "voice_chars": 20000}}
+
+
+def limits_for(username):
+    cfg = _secrets_users().get(username) or {}
+    plan = str(cfg.get("plan", "basic")).lower()
+    if plan == "admin":
+        return {"ai_clips": None, "voice_chars": None}
+    base = dict(DEFAULT_LIMITS.get(plan, DEFAULT_LIMITS["basic"]))
+    for k in base:
+        if cfg.get(k) is not None:
+            base[k] = int(cfg[k])
+    return base
+
+
+def used(username, kind, month=None):
+    """Panaudota šį mėnesį: kind – "minutes" | "ai_clips" | "voice_chars"."""
+    data = _load()
+    if kind == "minutes":
+        return float(data.get(month or _month(), {}).get(username, 0.0))
+    return float(data.get(f"{month or _month()}:{kind}", {}).get(username, 0))
+
+
+def add_usage(username, kind, amount):
+    if not username or amount <= 0:
+        return
+    if kind == "minutes":
+        return add_minutes_for(username, amount)
+    with _lock:
+        data = _load()
+        m = data.setdefault(f"{_month()}:{kind}", {})
+        m[username] = round(m.get(username, 0) + amount, 2)
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = _usage_file() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, _usage_file())
+
+
+def left(username, kind):
+    """Kiek liko šį mėnesį (None – be ribos)."""
+    lim = limits_for(username).get(kind)
+    return None if lim is None else max(0, lim - used(username, kind))
 
 
 def enabled():
@@ -116,7 +208,7 @@ def _check(username, password):
     if not cfg or cfg.get("active", True) is False:
         hmac.compare_digest(b"x", b"y")  # vienodas laikas, kad nesimatytų, ar vardas egzistuoja
         return None
-    return key if hmac.compare_digest(str(cfg.get("password", "")).encode(), password.encode()) else None
+    return key if _password_ok(cfg, password) else None
 
 
 # Prekės ženklo istorija prisijungimo puslapyje (trumpa versija + visa išskleidžiama)

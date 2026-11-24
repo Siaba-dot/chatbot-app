@@ -1,0 +1,143 @@
+import React, { useEffect, useState } from "react";
+import { api } from "./api.js";
+
+// 👑 Klientų valdymas: pridėti, keisti planą ir AI ribas, išjungti, matyti šio mėnesio naudojimą
+const PLANS = { basic: "Pagrindinis", premium: "Premium", admin: "Administratorius" };
+const genPassword = () => {
+  const a = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from(crypto.getRandomValues(new Uint32Array(12)), x => a[x % a.length]).join("");
+};
+const lim = v => (v == null ? "∞" : v);
+
+function UserForm({ initial, isNew, defaults, onCancel, onSave }) {
+  const [f, setF] = useState(() => ({ username: "", name: "", plan: "premium", password: isNew ? genPassword() : "",
+    minutes: "", ai_clips: "", voice_chars: "", active: true, ...initial }));
+  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
+  const d = defaults[f.plan] || {};
+  const num = v => (v === "" || v == null ? null : Number(v));
+  return (
+    <div className="modal" onClick={onCancel}>
+      <form className="card" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}
+            onSubmit={e => { e.preventDefault(); onSave({ ...f, minutes: num(f.minutes), ai_clips: num(f.ai_clips), voice_chars: num(f.voice_chars), password: f.password || null }); }}>
+        <h3 className="serif" style={{ marginTop: 0, fontSize: 22 }}>{isNew ? "＋ Naujas klientas" : `✏️ ${f.username}`}</h3>
+        {isNew && (
+          <div className="field"><label>Prisijungimo vardas</label>
+            <input className="input" value={f.username} onChange={e => set("username", e.target.value.toLowerCase())} placeholder="pvz. salonas.ruta" required /></div>
+        )}
+        <div className="field"><label>Vardas / įmonė</label>
+          <input className="input" value={f.name} onChange={e => set("name", e.target.value)} placeholder="Grožio salonas Rūta" /></div>
+        <div className="field"><label>Planas</label>
+          <div className="chips">{Object.entries(PLANS).map(([k, l]) => (
+            <button key={k} type="button" className={"chip" + (f.plan === k ? " on" : "")} onClick={() => set("plan", k)}>{l}</button>))}</div></div>
+        <div className="field"><label>{isNew ? "Slaptažodis (perduokite klientui)" : "Naujas slaptažodis (palikite tuščią – nekeisti)"}</label>
+          <div className="row" style={{ flexWrap: "nowrap" }}>
+            <input className="input" value={f.password} onChange={e => set("password", e.target.value)} placeholder={isNew ? "" : "nekeisti"} />
+            <button type="button" className="btn small" onClick={() => set("password", genPassword())}>🎲</button>
+          </div></div>
+        {f.plan !== "admin" && (
+          <>
+            <div className="hint" style={{ marginBottom: 6 }}>Mėnesio ribos (tuščia – pagal planą):</div>
+            <div className="row" style={{ flexWrap: "nowrap", gap: 8 }}>
+              <div className="field" style={{ flex: 1 }}><label>🎙 Atpažinimo min.</label>
+                <input className="input" type="number" min="0" value={f.minutes ?? ""} onChange={e => set("minutes", e.target.value)} placeholder="60" /></div>
+              <div className="field" style={{ flex: 1 }}><label>🎬 AI kadrų</label>
+                <input className="input" type="number" min="0" value={f.ai_clips ?? ""} onChange={e => set("ai_clips", e.target.value)} placeholder={String(d.ai_clips ?? 0)} /></div>
+              <div className="field" style={{ flex: 1 }}><label>🗣 Įgarsinimo simb.</label>
+                <input className="input" type="number" min="0" step="1000" value={f.voice_chars ?? ""} onChange={e => set("voice_chars", e.target.value)} placeholder={String(d.voice_chars ?? 0)} /></div>
+            </div>
+          </>
+        )}
+        {!isNew && (
+          <div className="switch" onClick={() => set("active", !f.active)}>
+            <div className="txt"><b>Aktyvus</b><span>Išjungus klientas nebegalės prisijungti (projektai lieka).</span></div>
+            <div className={"toggle" + (f.active ? " on" : "")} />
+          </div>
+        )}
+        <div className="row" style={{ marginTop: 12 }}>
+          <button type="button" className="btn ghost" onClick={onCancel}>Atšaukti</button>
+          <span className="spacer" />
+          <button className="btn gold">{isNew ? "Sukurti" : "Išsaugoti"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+export default function Admin({ me }) {
+  const [data, setData] = useState(null);
+  const [edit, setEdit] = useState(null);   // {user} | {new:true}
+  const [error, setError] = useState("");
+  const [created, setCreated] = useState(null);  // naujo kliento prisijungimo duomenys (parodomi vieną kartą)
+  const load = () => api("/admin/users").then(setData).catch(e => setError(e.message));
+  useEffect(() => { load(); }, []);
+
+  async function save(f) {
+    setError("");
+    try {
+      if (edit.new) {
+        await api("/admin/users", { method: "POST", body: f });
+        setCreated({ username: f.username, password: f.password });
+      } else {
+        const { username, ...rest } = f;
+        await api(`/admin/users/${encodeURIComponent(edit.user.username)}`, { method: "PUT", body: rest });
+      }
+      setEdit(null);
+      load();
+    } catch (e) { setError(e.message); }
+  }
+  async function remove(u) {
+    if (!window.confirm(`Pašalinti klientą „${u.username}“? Jo projektai serveryje liks.`)) return;
+    try { await api(`/admin/users/${encodeURIComponent(u.username)}`, { method: "DELETE" }); load(); }
+    catch (e) { setError(e.message); }
+  }
+
+  if (!data) return <div className="page hint">{error || "Kraunama…"}</div>;
+  const link = window.location.origin;
+  return (
+    <div className="page">
+      <div className="kicker">ADMINISTRAVIMAS</div>
+      <div className="row"><h2 style={{ margin: 0 }}>👑 Klientai</h2><span className="spacer" />
+        <button className="btn gold" onClick={() => setEdit({ new: true })}>＋ Naujas klientas</button></div>
+      <div className="hint" style={{ margin: "4px 0 14px" }}>
+        Ribos – per mėnesį. Numatyta: Premium – {data.defaults.premium.ai_clips} AI kadrų ir {data.defaults.premium.voice_chars} įgarsinimo
+        simbolių, Pagrindinis – AI nėra. Kadrai iš „📚 Mano AI kadrai“ – nemokami.
+      </div>
+      {error && <div className="error">⚠ {error}</div>}
+      {created && (
+        <div className="card section">
+          <b>✅ Klientas sukurtas.</b> Perduokite jam:
+          <div className="caption" style={{ marginTop: 8 }}>{`Studija: ${link}\nPrisijungimo vardas: ${created.username}\nSlaptažodis: ${created.password}`}</div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn small" onClick={() => navigator.clipboard.writeText(`Studija: ${link}\nPrisijungimo vardas: ${created.username}\nSlaptažodis: ${created.password}`)}>📋 Kopijuoti</button>
+            <button className="btn small ghost" onClick={() => setCreated(null)}>Uždaryti</button>
+            <span className="hint">Slaptažodis daugiau nebus rodomas.</span>
+          </div>
+        </div>
+      )}
+      <div className="users">
+        {data.users.map(u => (
+          <div key={u.username} className={"user" + (u.active ? "" : " off")}>
+            <div className="info">
+              <b>{u.name}</b>
+              <span>{u.username} · <span className="pill">{PLANS[u.plan]}</span>{!u.active && " · išjungtas"}{u.source === "secrets" && " · secrets.toml"}</span>
+            </div>
+            <div className="use">
+              <span title="Kalbos atpažinimas">🎙 {u.used.minutes}/{lim(u.minutes)} min</span>
+              <span title="AI kadrai">🎬 {u.used.ai_clips}/{lim(u.ai_clips)}</span>
+              <span title="AI įgarsinimo simboliai">🗣 {u.used.voice_chars}/{lim(u.voice_chars)}</span>
+            </div>
+            {u.source === "managed" ? (
+              <div className="row" style={{ gap: 4 }}>
+                <button className="btn small ghost icon" onClick={() => setEdit({ user: u })} title="Keisti">✏️</button>
+                {u.username !== me.username && <button className="btn small ghost danger icon" onClick={() => remove(u)} title="Pašalinti">🗑</button>}
+              </div>
+            ) : <span className="hint" title="Keičiama serverio secrets.toml">🔒</span>}
+          </div>
+        ))}
+      </div>
+      {edit && <UserForm isNew={!!edit.new} defaults={data.defaults} onCancel={() => setEdit(null)} onSave={save}
+                         initial={edit.user ? { username: edit.user.username, name: edit.user.name, plan: edit.user.plan, active: edit.user.active,
+                           minutes: edit.user.minutes ?? "", ai_clips: edit.user.ai_clips ?? "", voice_chars: edit.user.voice_chars ?? "" } : {}} />}
+    </div>
+  );
+}
