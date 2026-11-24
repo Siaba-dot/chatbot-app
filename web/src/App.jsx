@@ -52,7 +52,7 @@ export default function App() {
         <div className="spacer" />
         <div className="who">
           <b>{user.name}</b>
-          {user.plan_title}{user.minutes_left != null ? ` · liko ${Math.floor(user.minutes_left)} min.` : ""}
+          {user.plan_title}{user.minutes_left != null && user.plan === "premium" ? ` · liko ${Math.floor(user.minutes_left)} min.` : ""}
           {user.ai_clips_left != null && user.plan !== "basic" ? ` · AI kadrų ${user.ai_clips_left}` : ""}
         </div>
         <button className="btn small ghost" onClick={logout}>Atsijungti</button>

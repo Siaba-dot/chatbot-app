@@ -77,6 +77,33 @@ function UserForm({ initial, isNew, defaults, taken, onCancel, onSave }) {
   );
 }
 
+function Settings({ onError }) {
+  const [st, setSt] = useState(null);
+  const [contact, setContact] = useState("");
+  useEffect(() => { api("/public/settings").then(x => { setSt(x); setContact(x.contact || ""); }).catch(() => {}); }, []);
+  async function save(patch) {
+    try { const x = await api("/admin/settings", { method: "PUT", body: patch }); setSt(x); setContact(x.contact || ""); }
+    catch (e) { onError(e.message); }
+  }
+  if (!st) return null;
+  return (
+    <div className="card section">
+      <div className="switch" onClick={() => save({ registration: !st.registration })}>
+        <div className="txt"><b>📝 Klientai gali registruotis patys</b>
+          <span>Prisijungimo puslapyje – „Registruotis“. Naujas klientas gauna Pagrindinį planą; sumokėjusį perkelkite į ⭐ Premium.</span></div>
+        <div className={"toggle" + (st.registration ? " on" : "")} />
+      </div>
+      <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
+        <label>Kontaktas Premium planui (rodomas Pagrindinio plano klientams)</label>
+        <div className="row" style={{ flexWrap: "nowrap" }}>
+          <input className="input" value={contact} onChange={e => setContact(e.target.value)} placeholder="pvz. info@jusu.lt arba +370 600 00000" />
+          <button className="btn" onClick={() => save({ contact })} disabled={contact === (st.contact || "")}>Išsaugoti</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Admin({ me }) {
   const [data, setData] = useState(null);
   const [edit, setEdit] = useState(null);   // {user} | {new:true}
@@ -99,6 +126,11 @@ export default function Admin({ me }) {
       load();
     } catch (e) { setError(e.message); }
   }
+  async function upgrade(u) {
+    if (!window.confirm(`Perkelti „${u.name}“ į Premium? AI funkcijos jam atsivers iškart.`)) return;
+    try { await api(`/admin/users/${encodeURIComponent(u.username)}`, { method: "PUT", body: { plan: "premium" } }); load(); }
+    catch (e) { setError(e.message); }
+  }
   async function remove(u) {
     if (!window.confirm(`Pašalinti klientą „${u.username}“? Jo projektai serveryje liks.`)) return;
     try { await api(`/admin/users/${encodeURIComponent(u.username)}`, { method: "DELETE" }); load(); }
@@ -117,6 +149,7 @@ export default function Admin({ me }) {
         simbolių, Pagrindinis – AI nėra. Kadrai iš „📚 Mano AI kadrai“ – nemokami.
       </div>
       {error && <div className="error">⚠ {error}</div>}
+      <Settings onError={setError} />
       {created && (
         <div className="card section">
           <b>✅ Klientas sukurtas.</b> Perduokite jam:
@@ -133,7 +166,8 @@ export default function Admin({ me }) {
           <div key={u.username} className={"user" + (u.active ? "" : " off")}>
             <div className="info">
               <b>{u.name}</b>
-              <span>{u.username} · <span className="pill">{PLANS[u.plan]}</span>{!u.active && " · išjungtas"}{u.source === "secrets" && " · secrets.toml"}</span>
+              <span>{u.username} · <span className="pill">{PLANS[u.plan]}</span>{!u.active && " · išjungtas"}{u.source === "secrets" && " · secrets.toml"}
+                {u.self_registered && " · 📝 užsiregistravo pats"}{u.created ? ` · ${new Date(u.created * 1000).toLocaleDateString("lt-LT")}` : ""}</span>
             </div>
             <div className="use">
               <span title="Kalbos atpažinimas">🎙 {u.used.minutes}/{lim(u.minutes)} min</span>
@@ -142,6 +176,7 @@ export default function Admin({ me }) {
             </div>
             {u.source === "managed" ? (
               <div className="row" style={{ gap: 4 }}>
+                {u.plan === "basic" && <button className="btn small gold" onClick={() => upgrade(u)} title="Perkelti į Premium (sumokėjo)">⭐ Premium</button>}
                 <button className="btn small ghost icon" onClick={() => setEdit({ user: u })} title="Keisti">✏️</button>
                 {u.username !== me.username && <button className="btn small ghost danger icon" onClick={() => remove(u)} title="Pašalinti">🗑</button>}
               </div>
