@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import { api, setToken } from "./api.js";
 import Story from "./Story.jsx";
 
-export default function Login({ onLogin }) {
-  const [mode, setMode] = useState("login");   // login | register
+export default function Login({ onLogin, initialMode = "login" }) {
+  const [mode, setMode] = useState(initialMode);   // login | register | forgot
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -44,6 +44,9 @@ export default function Login({ onLogin }) {
   return (
     <div className="login">
       <div className="login-box">
+        <div style={{ textAlign: "left", marginBottom: 6 }}>
+          <button type="button" className="btn small ghost" onClick={() => (window.location.hash = "#/home")}>← Apie studiją</button>
+        </div>
         <img className="logo" src="/logo.svg" alt="" />
         <div className="kicker">LIETUVIŠKA STUDIJA · BALTIJOS GINTARO DVASIA</div>
         <h1 className="goldtext">Reels montavimo studija</h1>
@@ -99,7 +102,7 @@ export default function Login({ onLogin }) {
           )}
         </form>
         <div className="hint" style={{ marginTop: 14 }}>
-          <a href="#/terms">Naudojimosi taisyklės</a> · <a href="#/privacy">Privatumo politika</a>
+          <a href="#/pricing">Kainos</a> · <a href="#/terms">Naudojimosi taisyklės</a> · <a href="#/privacy">Privatumo politika</a> · <a href="#/refund">Grąžinimai</a>
         </div>
       </div>
     </div>

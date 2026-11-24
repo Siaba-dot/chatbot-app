@@ -160,7 +160,7 @@ SETTINGS_TEXT = ("biz_name", "biz_code", "biz_address", "biz_email", "mail_from"
 
 @app.get("/api/public/settings")
 def public_settings():
-    return app_settings()
+    return dict(app_settings(), limits=accounts.DEFAULT_LIMITS, minutes=accounts.DEFAULT_MINUTES)
 
 
 class SettingsAdmin(BaseModel):

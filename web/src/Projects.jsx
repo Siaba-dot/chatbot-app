@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api, fileUrl } from "./api.js";
 import AdminKey from "./AdminKey.jsx";
+import { SiteFooter, usePublic } from "./Landing.jsx";
 
 function ago(t) {
   const s = Date.now() / 1000 - t;
@@ -18,6 +19,7 @@ export default function Projects({ user, onUserChange }) {
   useEffect(() => { api("/projects").then(setList).catch(e => setError(e.message)); }, []);
 
   const [naming, setNaming] = useState(null);  // naujo projekto pavadinimas (langas)
+  const pub = usePublic();
 
   async function create(e) {
     e && e.preventDefault();
@@ -150,6 +152,7 @@ export default function Projects({ user, onUserChange }) {
       {list && list.length === 0 && (
         <p className="hint" style={{ marginTop: 18 }}>Dar neturite projektų – spauskite „Naujas Reels“.</p>
       )}
+      <SiteFooter s={pub} />
     </div>
   );
 }
