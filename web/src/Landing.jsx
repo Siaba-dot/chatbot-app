@@ -99,6 +99,7 @@ export function Plans({ s, user, onBuy, busy }) {
           <li><b>Natūralūs lietuviški AI balsai</b> (iki {num(prem.voice_chars)} simbolių / mėn.)</li>
           <li><b>AI sukurti video kadrai</b> (iki {num(prem.ai_clips)} / mėn.)</li>
           <li>AI įgarsinimas atskirai kiekvienam kadrui</li>
+          <li>AI parašytas aprašymas su grotažymėmis</li>
           <li>AI tekstai įgarsinimui ir idėjos</li>
           <li>Prenumeratą galite nutraukti bet kada</li>
         </ul>
@@ -112,7 +113,7 @@ export function Plans({ s, user, onBuy, busy }) {
 const STEPS = [
   ["🎬", "Nufilmuokite arba įkelkite", "Filmuokite telefonu ar kompiuteriu – tekstas slenka ekrane kaip suflerio. Arba įkelkite turimus video ir nuotraukas."],
   ["✨", "Pasirinkite stilių", "Šablonas, titrų stilius, muzika, efektai. Pauzės iškerpamos ir titrai sudedami automatiškai."],
-  ["📲", "Atsisiųskite ir skelbkite", "Gausite Reels / TikTok, Instagram 4:5 ir YouTube versijas, viršelį ir aprašymą su grotažymėmis."],
+  ["📲", "Atsisiųskite ir skelbkite", "Gausite Reels / TikTok, Instagram 4:5 ir YouTube versijas ir viršelį. Premium plane – dar ir AI parašytą aprašymą su grotažymėmis."],
 ];
 const FEATURES = [
   ["🇱🇹", "Lietuviški titrai", "AI atpažįsta lietuvišką kalbą ir sudeda modernius, animuotus titrus."],
