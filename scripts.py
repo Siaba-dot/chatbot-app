@@ -10,6 +10,9 @@ SECTORS = {
     "grozis": ("💇 Grožis, kirpykla, manikiūras", "mūsų salone", "nauja šukuosena",
                ["hair salon", "hairdresser cutting hair", "makeup artist", "manicure", "woman mirror", "beauty salon"],
                "✨ Prabangus pianinas"),
+    "mada": ("👗 Mada ir stilius", "mūsų parduotuvėje", "nauja sezono kolekcija",
+             ["fashion model", "clothing store", "woman outfit", "fashion accessories", "shopping bags", "street style"],
+             "🎧 Deep house"),
     "kavine": ("☕ Kavinė, restoranas", "mūsų kavinėje", "naujas sezoninis meniu",
                ["barista coffee", "restaurant food", "chef cooking", "dessert", "cafe interior", "friends eating"],
                "🍸 Lounge"),
@@ -45,6 +48,77 @@ SECTORS = {
                 ["dog grooming", "cute dog", "cat", "pet care", "dog walking", "veterinarian"], "🎸 Akustinė"),
     "kita": ("💼 Kita paslauga", "pas mus", "mūsų paslauga",
              ["small business", "happy customer", "team work", "handshake", "shop", "city"], "🚀 Motyvuojanti"),
+}
+
+# Kai tema neįrašyta – kiekvienam variantui parenkama vis kita sričiai būdinga tema (su jai tinkamais vaizdais)
+TOPICS = {
+    "grozis": [("plaukų kirpimas ir šukuosenos", ["hairdresser cutting hair", "hair salon", "hair styling"]),
+               ("plaukų dažymas", ["hair coloring", "hair dye salon", "blonde hair"]),
+               ("manikiūras ir nagų dizainas", ["manicure", "nail polish", "nail art"]),
+               ("pedikiūras", ["pedicure", "spa feet", "nail salon"]),
+               ("makiažas šventei", ["makeup artist", "makeup brush", "woman makeup"]),
+               ("antakių ir blakstienų priežiūra", ["eyelash extension", "eyebrows", "beauty face"]),
+               ("veido procedūros", ["facial treatment", "skin care", "face mask spa"])],
+    "mada": [("nauja sezono kolekcija", ["fashion model", "clothing rack", "fashion runway"]),
+             ("stiliaus patarimai", ["woman outfit", "mirror outfit", "street style"]),
+             ("aksesuarai ir papuošalai", ["fashion accessories", "jewelry", "handbag"]),
+             ("avalynė", ["shoes", "sneakers", "high heels"]),
+             ("asmeninis stilistas", ["personal stylist", "clothing store", "shopping"]),
+             ("išpardavimas", ["shopping bags", "sale shopping", "clothing store"])],
+    "kavine": [("sezoninis meniu", ["restaurant food", "chef cooking", "plating food"]),
+               ("aromatinga kava", ["barista coffee", "latte art", "coffee beans"]),
+               ("pusryčiai", ["breakfast", "pancakes", "brunch"]),
+               ("desertai", ["dessert", "cake slice", "chocolate cake"]),
+               ("pietūs darbo dienomis", ["lunch plate", "soup", "salad bowl"]),
+               ("jauki vieta susitikimams", ["cafe interior", "friends cafe", "cozy cafe"])],
+    "kepykla": [("šviežia duona", ["bakery bread", "bread oven", "sourdough"]),
+                ("tortai užsakymui", ["cake decorating", "birthday cake", "wedding cake"]),
+                ("croissant'ai ir bandelės", ["croissant", "pastry", "cinnamon roll"]),
+                ("sausainiai", ["cookies", "baking cookies", "gingerbread"])],
+    "nt": [("butas pardavimui", ["modern apartment", "living room", "apartment interior"]),
+           ("namas su sklypu", ["house exterior", "garden house", "family house"]),
+           ("nuoma", ["keys door", "apartment keys", "moving boxes"]),
+           ("būsto vertinimas", ["real estate agent", "city aerial", "handshake"])],
+    "sportas": [("treniruotės pradedantiesiems", ["gym workout", "fitness beginner", "personal trainer"]),
+                ("bėgimas", ["running", "jogging park", "running shoes"]),
+                ("jėgos treniruotės", ["weights", "dumbbells", "strength training"]),
+                ("tempimo pratimai", ["stretching", "yoga", "flexibility"]),
+                ("grupinės treniruotės", ["group fitness", "fitness class", "aerobics"])],
+    "sveikata": [("masažas", ["spa massage", "back massage", "massage oil"]),
+                 ("SPA ritualai", ["spa candles", "spa towels", "relaxation"]),
+                 ("kineziterapija", ["physiotherapy", "rehabilitation", "stretching therapy"]),
+                 ("joga ir meditacija", ["yoga", "meditation", "calm nature"])],
+    "rankudarbai": [("nauja kolekcija", ["handmade craft", "crafting hands", "artisan workshop"]),
+                    ("dovanos šventėms", ["gift wrapping", "gift box", "christmas gift"]),
+                    ("užsakymų pakavimas", ["packaging box", "online shopping", "parcel"]),
+                    ("individualūs užsakymai", ["artisan", "sewing", "pottery"])],
+    "renginiai": [("vestuvės", ["wedding", "wedding couple", "wedding rings"]),
+                  ("gimtadieniai", ["birthday party", "balloons", "birthday cake candles"]),
+                  ("įmonių vakarėliai", ["corporate event", "party celebration", "event lights"]),
+                  ("fotosesija", ["photographer camera", "photo shoot", "portrait photography"])],
+    "auto": [("padangų keitimas", ["tires", "tire change", "car wheel"]),
+             ("techninė apžiūra ir remontas", ["car repair", "mechanic", "car engine"]),
+             ("automobilio plovimas", ["car wash", "car cleaning", "car detailing"]),
+             ("kondicionieriaus pildymas", ["car air conditioning", "car interior", "mechanic tools"])],
+    "statyba": [("buto remontas", ["renovation", "painting wall", "new home interior"]),
+                ("vonios kambario įrengimas", ["bathroom renovation", "tiles", "modern bathroom"]),
+                ("stogo darbai", ["roof construction", "roofer", "house roof"]),
+                ("baldai pagal užsakymą", ["carpenter", "woodworking", "kitchen furniture"])],
+    "mokymai": [("nauji kursai", ["online course", "laptop work", "notebook writing"]),
+                ("individualios konsultacijos", ["office meeting", "consultation", "coach"]),
+                ("komandos mokymai", ["team", "workshop", "presentation"]),
+                ("kalbų pamokos", ["teacher", "learning", "students"])],
+    "turizmas": [("savaitgalio poilsis", ["lake nature", "cabin", "weekend getaway"]),
+                 ("kelionės į šiltus kraštus", ["beach", "tropical", "airplane"]),
+                 ("kalnų žygiai", ["mountains", "hiking", "mountain view"]),
+                 ("jaukūs kambariai", ["hotel room", "bedroom", "hotel"])],
+    "gyvunai": [("šunų kirpimas", ["dog grooming", "dog bath", "cute dog"]),
+                ("kačių priežiūra", ["cat", "cat grooming", "kitten"]),
+                ("augintinių maistas", ["pet food", "dog eating", "pet store"]),
+                ("šunų dresūra", ["dog training", "dog walking", "puppy"])],
+    "kita": [("mūsų paslaugos", ["small business", "happy customer", "team work"]),
+             ("kokybė ir patikimumas", ["handshake", "quality", "professional"]),
+             ("klientų aptarnavimas", ["customer service", "shop", "smiling staff"])],
 }
 
 GOALS = {
@@ -219,17 +293,22 @@ def scenes_for(text, sector, queries=None):
 def template_variants(sector, goal, topic, seconds=30, n=3, offset=0, avoid=()):
     """Šablonų variantai: kiekvieną kartą atsitiktinai parenkami, ką tik rodyti (avoid) – praleidžiami."""
     sec = SECTORS.get(sector, SECTORS["kita"])
-    topic = topic.strip() or sec[2]
+    own = topic.strip()
     tpls = TEMPLATES.get(goal, TEMPLATES["pristatymas"])
     out = []
     rnd = random.Random()
-    pool = sec[3][:]
     avoid = set(avoid or ())
     order = list(range(len(tpls)))
     rnd.shuffle(order)
-    fresh = [i for i in order if _fill(tpls[i][:1], topic, sec[1])[0] not in avoid]
+    fresh = [i for i in order if _fill(tpls[i][:1], own or sec[2], sec[1])[0] not in avoid]
     order = fresh + [i for i in order if i not in fresh]
-    for k in order[:n]:
+    themes = TOPICS.get(sector) or [(sec[2], [])]
+    themes = rnd.sample(themes, len(themes))
+    for j, k in enumerate(order[:n]):
+        topic, tq = (own, []) if own else themes[j % len(themes)]
+        pool = sec[3][:]
+        rnd.shuffle(pool)
+        pool = tq + [q for q in pool if q not in tq]
         lines = _fill(tpls[k], topic, sec[1])
         extra = EXTRA.get(goal, [])[:]
         rnd.shuffle(extra)
@@ -237,7 +316,6 @@ def template_variants(sector, goal, topic, seconds=30, n=3, offset=0, avoid=()):
             lines.insert(len(lines) - 1, extra.pop())
         lines = _fit(lines, seconds)
         text = " ".join(lines)
-        rnd.shuffle(pool)
         out.append({"title": lines[0], "text": text, "scenes": scenes_for(text, sector, pool)})
     return out
 
@@ -254,7 +332,9 @@ def ai_variants(client, ai_json, sector, goal, topic, seconds=30, n=3, language=
         "English stock-video search query of 1-3 concrete visual words that illustrates it. "
         "Reply only JSON: {\"variants\": [{\"title\": \"short hook\", \"text\": \"full script\", "
         "\"scenes\": [{\"text\": \"...\", \"query\": \"...\"}]}]}"),
-        {"topic": topic or sec[2], "avoid_these_hooks": list(avoid)[:9]})
+        {"topic": topic or ("(no topic given – choose a DIFFERENT typical service or product of this business area for "
+                            "each variant, e.g. " + ", ".join(t for t, _ in TOPICS.get(sector, [])[:6]) + ")"),
+         "avoid_these_hooks": list(avoid)[:9]})
     out = []
     for v in (j.get("variants") or [])[:n]:
         text = str(v.get("text") or " ".join(str(s.get("text", "")) for s in v.get("scenes") or [])).strip()
