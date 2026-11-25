@@ -55,6 +55,15 @@ function fmtTime(t) {
 }
 
 // 📲 Ar naršyklė moka dalintis video failu (telefonuose – taip; daugumoje kompiuterių – ne)
+// 💻 Kompiuteryje – tiesioginės nuorodos į platformų įkėlimo puslapius (ir kuris formatas joms tinka)
+const PUBLISH = [
+  ["Instagram", "https://www.instagram.com/", "9:16"],
+  ["TikTok", "https://www.tiktok.com/upload", "9:16"],
+  ["Facebook", "https://www.facebook.com/reels/create", "9:16"],
+  ["YouTube Shorts", "https://studio.youtube.com/", "9:16"],
+  ["YouTube (16:9)", "https://studio.youtube.com/", "16:9"],
+];
+
 // Telefone „Dalintis“ rodomas visada; jei naršyklė neleidžia dalintis failu (pvz. Instagram / Facebook vidinė
 // naršyklė) – video atsisiunčiamas ir paaiškinama, ką daryti toliau.
 const CAN_SHARE = (() => {
@@ -267,6 +276,18 @@ export default function Editor({ id, user }) {
     return shareBlobs.current[k];
   }
 
+  function publishTo(url, fmt) {  // 💻 kompiuteryje: atsisiųsti + nukopijuoti aprašymą + atidaryti įkėlimo puslapį
+    window.open(url, "_blank", "noopener");
+    const fs = out0.final.formats || [{ fmt: s.format, file: "reels.mp4" }];
+    const f = fs.find(x => x.fmt === fmt) || fs[0];
+    const a = document.createElement("a");
+    a.href = fileUrl(`/projects/${id}/files/${f.file}`, "&download=1");
+    document.body.appendChild(a); a.click(); a.remove();
+    const cap = out0.final.caption;
+    if (cap && navigator.clipboard) navigator.clipboard.writeText(cap.caption + "\n\n" + (cap.hashtags || []).join(" ")).catch(() => {});
+    setToast(`Video ${f.fmt} atsisiunčiamas, aprašymas nukopijuotas 📋`);
+  }
+
   async function shareVideo(f) {
     const cap = out0.final.caption;
     if (cap && navigator.clipboard) {  // aprašymą nukopijuojam – programėlėje tereikės įklijuoti
@@ -395,6 +416,18 @@ export default function Editor({ id, user }) {
                 </div>
               ))}
             </div>
+            {!CAN_SHARE && (
+              <div className="publish">
+                <b>📤 Įkelti į socialinius tinklus</b>
+                <div className="hint" style={{ margin: "2px 0 8px" }}>Paspaudus: video atsisiunčia, aprašymas su grotažymėmis nukopijuojamas ir atsidaro
+                  įkėlimo puslapis – nutempkite video į jį ir įklijuokite aprašymą (Ctrl+V).</div>
+                <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                  {PUBLISH.map(([name, url, fmt]) => (
+                    <button key={name} className="btn small" onClick={() => publishTo(url, fmt)}>{name}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             {CAN_SHARE && <div className="hint" style={{ margin: "8px 0" }}>📲 „Dalintis“ – pasirinkite Instagram, TikTok ar Facebook. Aprašymas su grotažymėmis nukopijuojamas automatiškai – programėlėje tiesiog įklijuokite.</div>}
             {out.final.caption && (
               <>
