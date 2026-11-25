@@ -479,7 +479,7 @@ export default function Editor({ id, user }) {
                     <div className="info">
                       <b>{c.name}</b>
                       <span>{c.image ? "Nuotrauka" : c.trim ? `✂ ${fmtTime(c.trim[0])}–${fmtTime(c.trim[1])} (${(c.trim[1] - c.trim[0]).toFixed(1)} s)` : fmtTime(c.duration)} · {c.audio === "speech" ? "🎙 kalba" : c.audio === "silent" ? "🔇 be kalbos" : "be garso"}</span>
-                      {c.sound && <span style={{ color: "var(--honey)" }}>{c.sound.kind === "music" ? `🎵 ${c.sound.track}` : `🎙 „${c.sound.text.slice(0, 40)}${c.sound.text.length > 40 ? "…" : ""}“`}</span>}
+                      {c.sound && <span style={{ color: "var(--honey)" }}>{c.sound.kind === "music" ? `🎵 ${c.sound.track}` : c.sound.kind === "file" ? `${c.sound.voice ? "🎙" : "🎵"} ${c.sound.name}` : `🎙 „${c.sound.text.slice(0, 40)}${c.sound.text.length > 40 ? "…" : ""}“`}</span>}
                     </div>
                     {!c.image && <button className="btn small" onClick={() => setTrimming(c)} title="Karpyti">✂</button>}
                     <button className={"btn small" + (c.sound ? " gold" : "")} onClick={() => setSounding(c)} title="Muzika ar įgarsinimas šiam kadrui" aria-label="Kadro garsas">🎵</button>
@@ -743,11 +743,15 @@ export default function Editor({ id, user }) {
       </div>
       {toast && <div className="toast">{toast}</div>}
       {trimming && <Trimmer id={id} clip={trimming} onClose={() => setTrimming(null)} setError={setError}
+                            opts={opts} projLines={proj.prepared ? proj.lines : null} lineTexts={lines}
+                            span={(proj.clip_spans || {})[trimming.id]} onSaveLines={saveLines}
+                            onSoundSaved={(p, k) => { setProj(p); setLines(null); setSaved(n => n + 1);
+                              setToast(k === "none" ? "Garsas pašalintas" : k === "upvoice" ? "Balso įrašas pridėtas 🎙" : k === "upmusic" ? "Jūsų muzika pridėta 🎵" : "Kadrui parinkta muzika 🎵"); }}
                             onSaved={p => { setProj(p); setLines(null); setSaved(n => n + 1); setToast("Įrašas apkarpytas ✂"); }} />}
       {sounding && <ClipSound id={id} clip={sounding} opts={opts} user={user} globalMusic={s.music} setError={setError}
                               onClose={() => setSounding(null)}
                               onSaved={(p, k) => { setProj(p); setLines(null); setSaved(n => n + 1);
-                                setToast(k === "none" ? "Kadro garsas pašalintas" : k === "voice" ? "Kadro įgarsinimas paruoštas 🎙" : "Kadrui parinkta muzika 🎵"); }} />}
+                                setToast(k === "none" ? "Kadro garsas pašalintas" : k === "voice" ? "Kadro įgarsinimas paruoštas 🎙" : k === "upvoice" ? "Balso įrašas pridėtas 🎙" : k === "upmusic" ? "Jūsų muzika pridėta 🎵" : k === "file" ? "Garsumas išsaugotas" : "Kadrui parinkta muzika 🎵"); }} />}
       {recording && <Recorder projectId={id} format={s.format} fit={s.fit || "fill"} onFitChange={v => set({ fit: v })} onClose={() => setRecording(false)} onRecorded={onRecorded} />}
     </div>
   );

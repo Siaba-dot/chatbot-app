@@ -30,7 +30,7 @@ export async function api(path, { method = "GET", body } = {}) {
 }
 
 // Failo įkėlimas su eiga (XHR – fetch neturi įkėlimo eigos)
-export function upload(path, file, { recorded = false, onProgress } = {}) {
+export function upload(path, file, { recorded = false, onProgress, fields = {} } = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api" + path);
@@ -46,6 +46,7 @@ export function upload(path, file, { recorded = false, onProgress } = {}) {
     const fd = new FormData();
     fd.append("file", file, file.name || (recorded ? "irasas.webm" : "failas"));
     fd.append("recorded", recorded ? "true" : "false");
+    Object.entries(fields).forEach(([k, v]) => fd.append(k, String(v)));
     xhr.send(fd);
   });
 }

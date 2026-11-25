@@ -593,7 +593,7 @@ def clip_sound_file(c, s):
     if snd.get("kind") == "music":
         lib = reels_studio.music_library()
         return lib[snd["track"]]["path"] if snd.get("track") in lib else None
-    if snd.get("kind") == "voice" and snd.get("path") and os.path.exists(snd["path"]):
+    if snd.get("kind") in ("voice", "file") and snd.get("path") and os.path.exists(snd["path"]):
         return snd["path"]
     return None
 
@@ -607,7 +607,7 @@ def _clip_src(c, s, image_duration):
     snd = c["sound"]
     vol = max(0, min(200, int(snd.get("volume", 100)))) / 100
     orig = max(0, min(200, int(snd.get("orig", 100)))) / 100
-    voice = snd["kind"] == "voice"
+    voice = snd["kind"] == "voice" or (snd["kind"] == "file" and snd.get("voice"))
     key = hashlib.sha1(json.dumps([c["path"], snd_file, vol, orig, image_duration, c.get("trim")],
                                   sort_keys=True).encode()).hexdigest()[:10]
     out = f"{c['path']}.snd{key}.mkv"
@@ -696,7 +696,13 @@ def prepare(clips, settings, workdir, client=None, status=None, progress=None, v
                                                  "" if client is not None else s["voiceover"]["text"], status=say)
         analysis["words"], analysis["subtitle_mode"] = words, mode
     prog(1.0)
+    keep = analysis.get("keep") or [(0.0, analysis["info"]["duration"])]
+
+    def edited(t):  # sujungtos medžiagos laikas -> sumontuoto video laikas (iškirptos pauzės)
+        return sum(max(0.0, min(b, t) - a) for a, b in keep)
     return {"src": src, "analysis": analysis, "format": s["format"], "vo": vo_path,
+            "spans": [[round(edited(a), 3), round(edited(b), 3)] if (a is not None) else None
+                      for a, b in ((sp or (None, None)) for sp in spans)],
             "lines": video_editor.edit_lines(analysis["words"])}
 
 

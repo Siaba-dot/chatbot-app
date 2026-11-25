@@ -389,3 +389,25 @@ textarea.input { resize: vertical; min-height: 70px; }
 .variant textarea { flex: 1; min-height: 140px; }
 .variant .btn { white-space: normal; max-width: 100%; }
 .publish { margin: 12px 0 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.02); }
+
+/* ✂ karpymo lango juostos: muzika ir titrai */
+.trim-lane { position: relative; height: 34px; margin-top: 6px; border-radius: 8px; border: 1px dashed var(--line); }
+.trim-lane .lane-add { position: absolute; inset: 0; width: 100%; background: transparent; border: 0; color: var(--muted);
+  text-align: left; padding: 0 12px; cursor: pointer; font-size: 13.5px; }
+.trim-lane .lane-add:hover { color: var(--text); }
+.trim-lane .lane-bar { position: absolute; top: 2px; bottom: 2px; border-radius: 6px; border: 0; padding: 0 10px; cursor: pointer;
+  background: linear-gradient(90deg, rgba(227,155,46,.9), rgba(255,213,138,.85)); color: #1C1004; font-size: 12.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.trim-lane .lane-bar.voice { background: linear-gradient(90deg, #4A7BD0, #7FA8F0); color: #fff; cursor: default; display: flex; align-items: center; }
+.trim-sub { position: absolute; left: 6%; right: 6%; bottom: 12%; text-align: center; color: #fff; font-weight: 800; font-size: 17px;
+  text-shadow: 0 2px 4px #000, 0 0 2px #000; pointer-events: none; }
+.trim-subs { display: grid; gap: 6px; margin: 4px 0 12px; }
+.trim-subs .input.now { border-color: var(--amber); box-shadow: 0 0 0 1px rgba(227,155,46,.35) inset; }
+.music-pick { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; background: var(--ink-2); }
+.music-list { max-height: 260px; overflow: auto; display: grid; gap: 2px; }
+.music-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+.music-row:hover { background: rgba(255,255,255,.04); }
+.music-row.on { background: rgba(227,155,46,.16); outline: 1px solid var(--amber); }
+.music-row .info { flex: 1; min-width: 0; display: grid; }
+.music-row .info span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music-row .play { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--text); color: var(--ink); cursor: pointer; flex: none; }
