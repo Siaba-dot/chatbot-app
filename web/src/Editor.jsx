@@ -5,6 +5,7 @@ import Broll from "./Broll.jsx";
 import Voice from "./Voice.jsx";
 import Trimmer from "./Trimmer.jsx";
 import ClipSound from "./ClipSound.jsx";
+import ScriptGen from "./ScriptGen.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
@@ -170,7 +171,7 @@ export default function Editor({ id, user }) {
   }
 
   // ---------- darbai ----------
-  async function run(kind) {
+  async function run(kind, settingsNow) {
     setError("");
     try {
       if (kind === "prepare") {
@@ -182,7 +183,7 @@ export default function Editor({ id, user }) {
         setToast(r.note || `Titrai paruošti: ${(r.words || []).length} žodž. ✓`);
         setTab("subs");
       } else {
-        await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: s } });
+        await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: settingsNow || s } });
         const j = await api(`/projects/${id}/render`, { method: "POST", body: { quick: kind === "preview" } });
         setJob(j);
         await waitJob(j.id, setJob);
@@ -378,6 +379,14 @@ export default function Editor({ id, user }) {
 
         {tab === "media" && (
           <div className="section">
+            <ScriptGen id={id} user={user} opts={opts} s={s} setError={setError} setToast={setToast} setJob={setJob}
+              onPrompter={text => { try { localStorage.setItem("script_" + id, text); } catch (e) { /* */ } setRecording(true); }}
+              onVoice={(text, voice) => { set({ voiceover: { ...(s.voiceover || {}), on: true, text, ...(voice ? { voice } : {}) } }); setTab("voice"); setToast("Tekstas įkeltas į įgarsinimą 🎙"); }}
+              onAutoDone={async () => {
+                const p = await api("/projects/" + id);
+                setProj(p); setS(p.settings); setLines(null);
+                run("preview", p.settings);
+              }} />
             <div className="section">
               <h3>Formatas</h3>
               <Chips items={Object.entries(opts.formats)} value={s.format} onChange={v => set({ format: v })} />

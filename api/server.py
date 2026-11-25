@@ -1107,6 +1107,170 @@ def gen_voice_text(pid: str, body: VoiceTextBody, user=Depends(current_user)):
     return {"text": text}
 
 
+# ---------- ✨ Scenarijai pagal verslo sritį + automatinis video ----------
+import scripts  # noqa: E402
+
+
+@app.get("/api/scripts/options")
+def scripts_options():
+    return {"sectors": {k: v[0] for k, v in scripts.SECTORS.items()}, "goals": scripts.GOALS,
+            "lengths": list(scripts.LENGTHS)}
+
+
+class ScriptBody(BaseModel):
+    sector: str = "kita"
+    goal: str = "pristatymas"
+    topic: str = ""
+    seconds: int = 30
+    offset: int = 0
+    avoid: list[str] = []
+
+
+@app.post("/api/projects/{pid}/scripts")
+def gen_scripts(pid: str, body: ScriptBody, user=Depends(current_user)):
+    """3 skirtingi tekstų variantai sufleriui / įgarsinimui (AI – Premium, be AI – šablonai)."""
+    proj = _load(user, pid)
+    sector = body.sector if body.sector in scripts.SECTORS else "kita"
+    goal = body.goal if body.goal in scripts.GOALS else "pristatymas"
+    secs = max(10, min(90, int(body.seconds)))
+    topic = body.topic.strip()[:300]
+    client = openai_client(user)
+    if client is not None:
+        try:
+            v = scripts.ai_variants(client, reels_studio._ai_json, sector, goal, topic, secs, 3,
+                                    video_editor.LANGUAGES.get(proj["settings"]["subtitle_language"], "Lithuanian"),
+                                    [str(a)[:120] for a in body.avoid])
+            if v:
+                return {"variants": v, "ai": True}
+        except Exception as e:  # AI nepavyko – grąžinam šablonus
+            print("AI scenarijai nepavyko:", e, file=sys.stderr)
+    return {"variants": scripts.template_variants(sector, goal, topic, secs, 3, body.offset), "ai": False}
+
+
+class AutoVideoBody(BaseModel):
+    sector: str = "kita"
+    text: str
+    scenes: list[dict] = []
+    voice: str | None = None   # AI įgarsinimas (Premium); None – be balso, tik titrai ir muzika
+
+
+def _run_auto_video(jid, user, pid, body):
+    try:
+        proj = _load(user, pid)
+        d = _pdir(user, pid)
+        fmt = proj["settings"]["format"]
+        provider = stock_provider()
+        text = body.text.strip()[:3000]
+        scenes = [{"text": str(sc.get("text", "")).strip()[:600], "query": str(sc.get("query", "")).strip()[:60]}
+                  for sc in body.scenes if str(sc.get("text", "")).strip()] or scripts.scenes_for(text, body.sector)
+        pool = scripts.SECTORS.get(body.sector, scripts.SECTORS["kita"])[3]
+        for i, sc in enumerate(scenes):
+            sc["query"] = sc["query"] or pool[i % len(pool)]
+        settings = dict(proj["settings"])
+        total = None
+        if body.voice:  # 🎙 įgarsinimas – iš anksto, kad žinotume tikslią trukmę (tas pats failas bus naudojamas video)
+            _job_update(jid, message="Kuriu AI įgarsinimą…", progress=0.05)
+            client = openai_client(user)
+            lang = settings["subtitle_language"]
+            key = hashlib.sha1((engine.TTS_VERSION + "|" + text + "|" + body.voice + "|" + lang).encode()).hexdigest()[:12]
+            vo_path = os.path.join(d, f"vo_{key}.mp3")
+            if not os.path.exists(vo_path):
+                _voice_quota(user, text)
+                engine.tts(client, text, body.voice, vo_path, lang, gemini_key=stock_key("gemini"))
+                accounts.add_usage(user["username"], "voice_chars", len(text))
+            total = video_editor.media_duration(vo_path) * settings.get("speed", 1.0) + 0.6
+            settings["voiceover"] = {"on": True, "text": text, "voice": body.voice}
+            settings["clip_gain"] = 0
+        else:
+            settings["voiceover"] = dict(settings.get("voiceover") or {}, on=False)
+            settings["subtitle_text"] = text
+            total = max(6.0, len(text.split()) / 2.3 + 1.0)
+        weights = [max(1, len(sc["text"])) for sc in scenes]
+        need = [total * w / sum(weights) for w in weights]
+        # ankstesni automatiškai sudėti kadrai pakeičiami naujais (jūsų pačių įkelta medžiaga lieka)
+        for c in [c for c in proj["clips"] if c.get("auto")]:
+            if c["path"].startswith(d) and os.path.exists(c["path"]):
+                os.unlink(c["path"])
+        proj["clips"] = [c for c in proj["clips"] if not c.get("auto")]
+        cdir = os.path.join(d, "clips")
+        os.makedirs(cdir, exist_ok=True)
+        used, carry, added = set(), 0.0, 0
+        for i, sc in enumerate(scenes):
+            want = need[i] + carry
+            _job_update(jid, message=f"Ieškau vaizdo {i + 1}/{len(scenes)}: „{sc['query']}“…",
+                        progress=0.15 + 0.8 * i / len(scenes))
+            cand = []
+            for q in (sc["query"], pool[i % len(pool)]):
+                try:
+                    cand = [v for v in stock_search(q, fmt, 1, 12, provider) if v["id"] not in used]
+                except HTTPException:
+                    cand = []
+                if cand:
+                    break
+            if not cand:
+                carry = want
+                continue
+            best = next((v for v in cand if (v.get("duration") or 0) >= want), max(cand, key=lambda v: v.get("duration") or 0))
+            used.add(best["id"])
+            src, _ = stock_download(user, pid, provider, best["id"], fmt)
+            cid = uuid.uuid4().hex[:10]
+            path = os.path.join(cdir, cid + ".mp4")
+            # be originalaus garso (stock garsas nereikalingas – bus balsas ar muzika)
+            if engine._ffmpeg(["-i", src, "-an", "-c:v", "copy", path]).returncode != 0:
+                shutil.copy(src, path)
+            clip = engine.add_clip(path, f"🎞 {sc['query']}")
+            dur = clip["duration"]
+            use = min(dur, max(1.5, want))
+            if use < dur - 0.05:
+                clip["trim"] = [0.0, round(use, 3)]
+            carry = max(0.0, want - use)
+            clip.update(id=cid, auto=True, scene=sc["text"][:200])
+            proj["clips"].append(clip)
+            added += 1
+        if not added:
+            raise ValueError("Tinkamų vaizdų nerasta – pabandykite kitą variantą arba įkelkite savo medžiagą.")
+        if not settings.get("music"):
+            music = scripts.SECTORS.get(body.sector, scripts.SECTORS["kita"])[4]
+            settings["music"] = music if music in reels_studio.music_library() else None
+        settings["subtitles"] = True
+        proj["settings"] = engine.settings_with_defaults(settings)
+        proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+        _save(user, proj)
+        _job_update(jid, status="done", progress=1.0, message=f"Sudėta {added} vaizdų ✅", result={"clips": added})
+    except Exception as e:
+        _job_update(jid, status="error", message=str(e)[:300])
+
+
+@app.post("/api/projects/{pid}/auto_video")
+def auto_video(pid: str, body: AutoVideoBody, user=Depends(current_user)):
+    """🎬 Video iš scenarijaus: kiekvienai scenai parenkamas vaizdas, pridedamas balsas (arba titrai ir muzika)."""
+    _load(user, pid)
+    if not body.text.strip():
+        raise HTTPException(400, "Nėra teksto.")
+    if not stock_provider():
+        raise HTTPException(400, "Vaizdų paieškos raktas (Pixabay) neįrašytas – kreipkitės į administratorių.")
+    if body.voice:
+        if user["plan"] not in AI_PLANS:
+            raise HTTPException(400, "AI įgarsinimas – Premium plane. Galite kurti video be balso – su titrais ir muzika.")
+        google = body.voice.startswith("g:")
+        if body.voice not in engine.VOICES and body.voice not in engine.GEMINI_VOICES:
+            raise HTTPException(400, "Nežinomas balsas")
+        if (google and not stock_key("gemini")) or (not google and openai_client(user) is None):
+            raise HTTPException(400, "Šiam balsui nėra rakto.")
+        lft = accounts.left(user["username"], "voice_chars")
+        if lft is not None and len(body.text.strip()) > lft:
+            raise HTTPException(400, f"Šio mėnesio AI įgarsinimo limitas – liko {int(lft)} simbolių. Sutrumpinkite tekstą.")
+    with _jobs_lock:
+        if any(j["user"] == user["username"] and j["kind"] == "auto" and j["status"] in ("queued", "running")
+               for j in _jobs.values()):
+            raise HTTPException(429, "Palaukite – ankstesnis video dar dėliojamas.")
+        jid = uuid.uuid4().hex[:12]
+        _jobs[jid] = {"id": jid, "user": user["username"], "project": pid, "kind": "auto", "status": "running",
+                      "progress": 0.0, "message": "Pradedu…", "created": time.time(), "result": None}
+    threading.Thread(target=_run_auto_video, args=(jid, user, pid, body), daemon=True).start()
+    return _jobs[jid]
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True}
