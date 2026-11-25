@@ -770,6 +770,7 @@ class VeoBody(BaseModel):
     mode: str = "card"
     pos: str = "auto"
     as_clip: bool = False
+    replace: str | None = None   # kadro id: automatiškai parinktą vaizdą pakeisti AI sukurtu
 
 
 def _veo_prompt_en(client, prompt):
@@ -805,7 +806,25 @@ def _run_veo(jid, user, pid, body):
         accounts.add_usage(user["username"], "ai_clips", 1)
         _library_add(user, path, body.prompt, fmt)  # 📚 kad būtų galima naudoti ir kituose Reels'uose
         proj = _load(user, pid)
-        if body.as_clip:
+        old = next((c for c in proj["clips"] if c["id"] == body.replace), None) if body.replace else None
+        if old is not None:  # scenos vaizdas -> AI kadras (ta pati vieta, tas pats ilgis kiek įmanoma)
+            want = (old["trim"][1] - old["trim"][0]) if old.get("trim") else old["duration"]
+            cpath = os.path.join(_pdir(user, pid), "clips", old["id"] + "_ai.mp4")
+            os.makedirs(os.path.dirname(cpath), exist_ok=True)
+            if engine._ffmpeg(["-i", path, "-an", "-c:v", "copy", cpath]).returncode != 0:  # be AI garso
+                shutil.copy(path, cpath)
+            clip = engine.add_clip(cpath, "✨ AI · " + body.prompt[:40])
+            clip.update(id=old["id"], scene=old.get("scene"), visual=old.get("visual"), query=old.get("query"),
+                        ai_scene=True)
+            if want < clip["duration"] - 0.05:
+                clip["trim"] = [0.0, round(want, 3)]
+            if old.get("sound"):
+                clip["sound"] = old["sound"]
+            if old.get("auto") and old["path"].startswith(_pdir(user, pid)) and os.path.exists(old["path"]):
+                os.unlink(old["path"])
+            proj["clips"] = [clip if c["id"] == old["id"] else c for c in proj["clips"]]
+            proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+        elif body.as_clip:
             clip = engine.add_clip(path, "AI kadras · " + body.prompt[:40])
             clip["id"] = uuid.uuid4().hex[:10]
             proj["clips"].append(clip)
@@ -1151,6 +1170,26 @@ def gen_scripts(pid: str, body: ScriptBody, user=Depends(current_user)):
                                                   [str(a)[:120] for a in body.avoid]), "ai": False}
 
 
+class PromptBody(BaseModel):
+    prompt: str
+
+
+@app.post("/api/projects/{pid}/prompt_plan")
+def prompt_plan(pid: str, body: PromptBody, user=Depends(current_user)):
+    """✨ „Aprašykite video“: AI iš laisvo teksto suplanuoja visą video (tekstas, scenos, vaizdai)."""
+    proj = _load(user, pid)
+    if len(body.prompt.strip()) < 10:
+        raise HTTPException(400, "Aprašykite plačiau: kam skirtas video, apie ką, kokia nuotaika ir trukmė.")
+    client = openai_client(user)
+    if client is None:
+        raise HTTPException(400, "Video pagal aprašymą kuria AI – tai Premium funkcija.")
+    try:
+        return scripts.plan_from_prompt(client, reels_studio._ai_json, body.prompt,
+                                        video_editor.LANGUAGES.get(proj["settings"]["subtitle_language"], "Lithuanian"))
+    except ValueError as e:
+        raise HTTPException(502, str(e))
+
+
 class AutoVideoBody(BaseModel):
     sector: str = "kita"
     text: str
@@ -1209,7 +1248,8 @@ def _run_auto_video(jid, user, pid, body):
         fmt = proj["settings"]["format"]
         provider = stock_provider()
         text = body.text.strip()[:3000]
-        scenes = [{"text": str(sc.get("text", "")).strip()[:600], "query": str(sc.get("query", "")).strip()[:60]}
+        scenes = [{"text": str(sc.get("text", "")).strip()[:600], "query": str(sc.get("query", "")).strip()[:60],
+                   "visual": str(sc.get("visual", "")).strip()[:400]}
                   for sc in body.scenes if str(sc.get("text", "")).strip()] or scripts.scenes_for(text, body.sector)
         pool = scripts.SECTORS.get(body.sector, scripts.SECTORS["kita"])[3]
         for i, sc in enumerate(scenes):
@@ -1270,7 +1310,7 @@ def _run_auto_video(jid, user, pid, body):
             if use < dur - 0.05:
                 clip["trim"] = [0.0, round(use, 3)]
             carry = max(0.0, want - use)
-            clip.update(id=cid, auto=True, scene=sc["text"][:200])
+            clip.update(id=cid, auto=True, scene=sc["text"][:200], visual=sc.get("visual") or "", query=sc["query"])
             proj["clips"].append(clip)
             added += 1
         if not added:

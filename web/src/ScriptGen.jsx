@@ -18,13 +18,16 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
   const [ai, setAi] = useState(!!mem.ai);
   const [offset, setOffset] = useState(mem.offset || 0);
   const [busy, setBusy] = useState("");
+  const [mode, setMode] = useState(mem.mode || ((user.ai) ? "prompt" : "sector"));
+  const [prompt, setPrompt] = useState(mem.prompt || "");
+  const [plan, setPlan] = useState(mem.plan || null);
   const aiVoice = user.ai || user.gemini;
   const [voice, setVoice] = useState(() => mem.voice || (s.voiceover && s.voiceover.voice) ||
     (user.gemini ? Object.keys(opts.gemini_voices || {})[0] : "coral"));
   useEffect(() => {
-    try { localStorage.setItem("sg_state_" + id, JSON.stringify({ goal, topic, secs, vars, ai, offset, voice })); }
+    try { localStorage.setItem("sg_state_" + id, JSON.stringify({ goal, topic, secs, vars, ai, offset, voice, mode, prompt, plan })); }
     catch { /* privatus langas */ }
-  }, [id, goal, topic, secs, vars, ai, offset, voice]);
+  }, [id, goal, topic, secs, vars, ai, offset, voice, mode, prompt, plan]);
 
   const [left, setLeft] = useState(user.auto_videos_left);
   const refreshLeft = () => api("/me").then(u => setLeft(u.auto_videos_left)).catch(() => {});
@@ -46,17 +49,26 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
     finally { setBusy(""); }
   }
 
+  async function makePlan() {
+    setBusy("plan");
+    try {
+      const r = await api(`/projects/${id}/prompt_plan`, { method: "POST", body: { prompt } });
+      setPlan({ ...r, orig: r.text });
+    } catch (e) { setError(e.message); }
+    finally { setBusy(""); }
+  }
+
   function edit(i, text) {
     setVars(vars.map((v, k) => (k === i ? { ...v, text } : v)));
   }
 
-  async function auto(v) {
+  async function auto(v, sec = sector) {
     setBusy("auto");
     try {
       // tekstas pakeistas ranka – scenos sudaromos iš naujo pagal sakinius
       const scenes = v.text === v.orig ? v.scenes : [];
       const j = await api(`/projects/${id}/auto_video`, { method: "POST", body: {
-        sector, text: v.text, scenes, voice: aiVoice && voice !== "none" ? voice : null } });
+        sector: sec || "kita", text: v.text, scenes, voice: aiVoice && voice !== "none" ? voice : null } });
       setJob && setJob(j);
       await waitJob(j.id, setJob || (() => {}));
       setJob && setJob(null);
@@ -75,12 +87,63 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
   return (
     <div className="card section">
       <div className="row" style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>
-        <b>✨ Scenarijus pagal verslo sritį</b>
-        <span className="hint">tekstas sufleriui, įgarsinimui arba visas video automatiškai</span>
+        <b>✨ Sukurti video su AI</b>
+        <span className="hint">aprašykite video arba pasirinkite verslo sritį</span>
         <span className="spacer" /><span className="hint">{open ? "▲" : "▼"}</span>
       </div>
       {open && (
         <div style={{ marginTop: 12 }}>
+          <div className="chips" style={{ marginBottom: 12 }}>
+            <button type="button" className={"chip" + (mode === "prompt" ? " on" : "")} onClick={() => setMode("prompt")}>✨ Aprašykite video</button>
+            <button type="button" className={"chip" + (mode === "sector" ? " on" : "")} onClick={() => setMode("sector")}>📋 Pagal verslo sritį</button>
+          </div>
+          {mode === "prompt" && (!user.ai ? (
+            <p className="hint">✨ Video pagal jūsų aprašymą kuria AI – tai Premium funkcija. Pagrindiniame plane naudokite „📋 Pagal verslo sritį“.</p>
+          ) : (
+            <>
+              <div className="field">
+                <label>Aprašykite, kokio video norite – kaip ChatGPT</label>
+                <textarea className="input" rows={4} maxLength={1500} value={prompt} onChange={e => setPrompt(e.target.value)}
+                          placeholder="Pvz.: 30 s video mano kavinei Kaune: jaukus rytas, kava ir šilti croissant'ai, pakviesk į pusryčius savaitgalį. Nuotaika šilta, balsas moteriškas." />
+              </div>
+              <button className="btn gold" onClick={makePlan} disabled={!!busy || prompt.trim().length < 10}>
+                {busy === "plan" ? "AI planuoja…" : plan ? "✨ Suplanuoti iš naujo" : "✨ Suplanuoti video"}</button>
+              {plan && (
+                <div className="card variant" style={{ marginTop: 14 }}>
+                  <b>{plan.title || "Jūsų video"}</b>
+                  <label className="hint" style={{ marginTop: 8 }}>Tekstas įgarsinimui (galite taisyti) · ~{Math.round(plan.text.split(/\s+/).length / 2.3)} s</label>
+                  <textarea className="input" rows={5} value={plan.text} onChange={e => setPlan({ ...plan, text: e.target.value })} />
+                  {plan.text === plan.orig && (
+                    <div className="scenes">
+                      {plan.scenes.map((sc, i) => (
+                        <div key={i} className="scene"><b>{i + 1}.</b> {sc.text}<span className="hint"> 🎞 {sc.query}</span></div>
+                      ))}
+                    </div>
+                  )}
+                  {aiVoice && (
+                    <div className="field" style={{ marginTop: 8 }}>
+                      <label>Balsas{plan.voice === "female" ? " (siūlomas moteriškas)" : plan.voice === "male" ? " (siūlomas vyriškas)" : ""}</label>
+                      <select className="input" value={voice} onChange={e => setVoice(e.target.value)}>
+                        {voices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        <option value="none">Be balso – tik titrai ir muzika</option>
+                      </select>
+                    </div>
+                  )}
+                  <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                    <button className="btn gold" onClick={() => auto(plan, plan.sector)} disabled={!!busy}>
+                      {busy === "auto" ? "Kuriama…" : "🎬 Kurti video"}</button>
+                    <button className="btn small" onClick={() => onPrompter(plan.text)} disabled={!!busy}>📜 Filmuosiu pati (sufleris)</button>
+                  </div>
+                  <div className="hint" style={{ marginTop: 8 }}>
+                    Vaizdai parenkami iš nemokamos bibliotekos. Norite tikslesnio vaizdo? Po to prie scenos kadro spauskite
+                    <b> ✨</b> – AI sukurs jį pagal aprašymą (naudoja AI kadrų limitą).
+                    {left != null && <> Šį mėnesį dar galite sukurti <b>{left}</b> automatinių video.</>}
+                  </div>
+                </div>
+              )}
+            </>
+          ))}
+          {mode === "sector" && (<>
           <div className="field">
             <label>Verslo sritis</label>
             <select className="input" value={sector} onChange={e => setSector(e.target.value)}>
@@ -157,6 +220,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
               </div>
             </>
           )}
+          </>)}
         </div>
       )}
     </div>

@@ -411,3 +411,5 @@ textarea.input { resize: vertical; min-height: 70px; }
 .music-row .info { flex: 1; min-width: 0; display: grid; }
 .music-row .info span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .music-row .play { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--text); color: var(--ink); cursor: pointer; flex: none; }
+.scenes { display: grid; gap: 4px; margin: 8px 0; font-size: 13.5px; }
+.scene { padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,.03); }

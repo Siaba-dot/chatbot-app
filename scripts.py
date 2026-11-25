@@ -348,3 +348,34 @@ def ai_variants(client, ai_json, sector, goal, topic, seconds=30, n=3, language=
             s["query"] = s["query"] or sec[3][i % len(sec[3])]
         out.append({"title": str(v.get("title") or sentences(text)[0])[:120], "text": text, "scenes": scenes})
     return out
+
+
+def plan_from_prompt(client, ai_json, prompt, language="Lithuanian"):
+    """✨ Laisvas aprašymas (kaip ChatGPT) -> visas video planas: tekstas įgarsinimui ir scenos su vaizdais."""
+    j = ai_json(client, (
+        f"You are a video director for short vertical business videos (Reels/TikTok). The user describes the video they "
+        f"want. Write the voiceover script in {language} with perfect grammar and diacritics, natural spoken style, "
+        "strong first-line hook, short call to action at the end, no emojis or hashtags. Respect the requested length "
+        "(default ~30 s, ~2.2 words per second). Split it into 3-8 scenes (one or two sentences each). For each scene "
+        "give: 'query' – an English stock-video search query of 1-3 concrete visual words; 'visual' – one vivid English "
+        "sentence describing the shot for a text-to-video model (subject, action, setting, light, camera). "
+        "Also pick 'sector' – the closest of: " + ", ".join(SECTORS) + "; 'voice' – female, male or any; "
+        "'title' – a short project title in the same language. "
+        "Reply only JSON: {\"title\": \"...\", \"sector\": \"...\", \"voice\": \"female\", \"text\": \"full script\", "
+        "\"scenes\": [{\"text\": \"...\", \"query\": \"...\", \"visual\": \"...\"}]}"),
+        {"request": prompt[:1500]})
+    sector = j.get("sector") if j.get("sector") in SECTORS else "kita"
+    scenes = [{"text": str(sc.get("text", "")).strip()[:600], "query": str(sc.get("query", "")).strip()[:60],
+               "visual": str(sc.get("visual", "")).strip()[:400]}
+              for sc in (j.get("scenes") or []) if str(sc.get("text", "")).strip()]
+    text = str(j.get("text") or " ".join(sc["text"] for sc in scenes)).strip()
+    if not text:
+        raise ValueError("AI nesuplanavo video – pabandykite aprašyti kitaip.")
+    if not scenes:
+        scenes = scenes_for(text, sector)
+    pool = SECTORS[sector][3]
+    for i, sc in enumerate(scenes):
+        sc["query"] = sc.get("query") or pool[i % len(pool)]
+        sc.setdefault("visual", "")
+    return {"title": str(j.get("title") or "")[:80], "sector": sector, "voice": str(j.get("voice") or "any"),
+            "text": text, "scenes": scenes}
