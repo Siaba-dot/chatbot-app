@@ -686,7 +686,8 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
             if end <= a:
                 continue
             text = " ".join(_ass_escape(plain(w[0])) for w in ph)
-            est = min(width - 2 * margin, len(text) * fsize * 0.44)
+            # tikras teksto plotis (šriftas pasviręs – su atsarga); netelpantis tekstas laužomas į 2 eilutes
+            est = min(width - 2 * margin, text_width(L["font"], fsize, text) * 1.08 + fsize * 0.3)
             x0, x1 = round(width / 2 - est / 2 - fsize * 0.3), round(width / 2 + est / 2 + fsize * 0.4)
             dur = max(0.25, min(spoken, end) - a)
             fx = (f"{pos}\\1c&H{color}&\\clip({x0},0,{x0},{height})"

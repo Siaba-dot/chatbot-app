@@ -1084,7 +1084,7 @@ def voiceover_preview(pid: str, user=Depends(current_user)):
 
 @app.get("/api/projects/{pid}/voiceover/{name}")
 def voiceover_file(pid: str, name: str, user=Depends(current_user)):
-    if not re.fullmatch(r"vo_[a-f0-9]{12}\.mp3", name):
+    if not re.fullmatch(r"(vo|aud)_[a-f0-9]{12}\.mp3", name):
         raise HTTPException(404, "Nėra")
     path = os.path.join(_pdir(user, pid), name)
     if not os.path.exists(path):
@@ -1398,6 +1398,10 @@ def _save_prep(user, proj, prep):
     proj["lines"] = [[round(float(a), 3), round(float(b), 3), t] for a, b, t in
                      video_editor.edit_lines(prep["analysis"]["words"])]
     proj["line_texts"] = None  # naudotojo pataisyti sakiniai
+    kt = proj.pop("keep_texts", None)
+    if kt and len(kt) == len(proj["lines"]):
+        proj["line_texts"] = kt
+    proj["clip_spans"] = {c["id"]: sp for c, sp in zip(proj.get("clips", []), prep.get("spans") or []) if sp}
 
 
 def _public(proj):
@@ -1565,6 +1569,12 @@ def clip_sound(pid: str, cid: str, body: SoundBody, user=Depends(current_user)):
         if body.track not in reels_studio.music_library():
             raise HTTPException(400, "Tokios muzikos nėra")
         c["sound"] = {"kind": "music", "track": body.track, "volume": vol, "orig": orig}
+    elif body.kind == "file":  # įkeltas garsas – keičiami tik garsumai
+        cur = c.get("sound") or {}
+        if cur.get("kind") != "file":
+            raise HTTPException(400, "Pirmiausia įkelkite garso failą.")
+        cur.update(volume=vol, orig=orig)
+        c["sound"] = cur
     elif body.kind == "voice":
         text = (body.text or "").strip()[:1500]
         voice = body.voice or "coral"
@@ -1592,6 +1602,52 @@ def clip_sound(pid: str, cid: str, body: SoundBody, user=Depends(current_user)):
                       "length": round(video_editor.media_duration(path), 1), "volume": vol, "orig": orig}
     else:
         raise HTTPException(400, "Netinkamas garso tipas")
+    if proj.get("line_texts"):  # pataisyti titrai – atstatomi po naujo paruošimo, jei sakinių skaičius nepasikeis
+        proj["keep_texts"] = proj["line_texts"]
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+    _save(user, proj)
+    return _public(proj)
+
+
+@app.post("/api/projects/{pid}/clips/{cid}/sound_upload")
+def clip_sound_upload(pid: str, cid: str, file: UploadFile = File(...), voice: bool = Form(False),
+                      user=Depends(current_user)):
+    """⬆ Sava muzika ar balso įrašas kadrui (MP3, M4A, WAV, MP4…) – garsas ištraukiamas ir sutvarkomas."""
+    proj = _load(user, pid)
+    c = next((c for c in proj["clips"] if c["id"] == cid), None)
+    if not c:
+        raise HTTPException(404, "Įrašas nerastas")
+    d = _pdir(user, pid)
+    tmp = os.path.join(d, "upload_" + uuid.uuid4().hex[:8])
+    size = 0
+    with open(tmp, "wb") as f:
+        while chunk := file.file.read(1 << 20):
+            size += len(chunk)
+            if size > 200 * 1024 * 1024:
+                f.close()
+                os.unlink(tmp)
+                raise HTTPException(413, "Failas per didelis (iki 200 MB)")
+            f.write(chunk)
+    try:
+        h = hashlib.sha1(open(tmp, "rb").read(1 << 22) + str(size).encode()).hexdigest()[:12]
+        name = f"aud_{h}.mp3"
+        out = os.path.join(d, name)
+        if not os.path.exists(out):
+            r = engine._ffmpeg(["-i", tmp, "-vn", "-ac", "2", "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "192k", out])
+            if r.returncode != 0 or not os.path.exists(out):
+                raise HTTPException(400, "Garso nepavyko perskaityti – įkelkite MP3, M4A, WAV arba MP4 failą su garsu.")
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+    length = video_editor.media_duration(out)
+    if length < 0.3:
+        raise HTTPException(400, "Faile nėra garso.")
+    old = c.get("sound") or {}
+    c["sound"] = {"kind": "file", "voice": bool(voice), "path": out, "file": name,
+                  "name": os.path.splitext(file.filename or "garsas")[0][:60], "length": round(length, 1),
+                  "volume": 100, "orig": int(old.get("orig", 0 if voice else (100 if c.get("audio") == "speech" else 30)))}
+    if proj.get("line_texts"):
+        proj["keep_texts"] = proj["line_texts"]
     proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
     _save(user, proj)
     return _public(proj)
