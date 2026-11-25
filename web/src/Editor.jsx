@@ -55,11 +55,11 @@ function fmtTime(t) {
 }
 
 // 📲 Ar naršyklė moka dalintis video failu (telefonuose – taip; daugumoje kompiuterių – ne)
+// Telefone „Dalintis“ rodomas visada; jei naršyklė neleidžia dalintis failu (pvz. Instagram / Facebook vidinė
+// naršyklė) – video atsisiunčiamas ir paaiškinama, ką daryti toliau.
 const CAN_SHARE = (() => {
   try {
-    return !!(navigator.share && navigator.canShare &&
-      navigator.canShare({ files: [new File([new Blob(["x"])], "t.mp4", { type: "video/mp4" })] }) &&
-      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent + (navigator.maxTouchPoints > 1 ? " iPad" : "")));
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent + (navigator.maxTouchPoints > 1 ? " iPad" : ""));
   } catch (e) { return false; }
 })();
 
@@ -251,7 +251,7 @@ export default function Editor({ id, user }) {
   const out0 = (proj && proj.outputs) || {};
   const finalAt = out0.final && out0.final.at;
   useEffect(() => {  // telefone iš anksto parsisiunčiam pagrindinį video – kad „Dalintis“ atsidarytų iškart
-    if (!finalAt || !CAN_SHARE) return;
+    if (!finalAt || !CAN_SHARE || !navigator.share) return;
     const f = (out0.final.formats || [{ file: "reels.mp4" }])[0];
     prefetch(f.file, finalAt).catch(() => {});
   }, [finalAt]);  // eslint-disable-line
@@ -274,8 +274,14 @@ export default function Editor({ id, user }) {
     }
     const k = f.file + "@" + finalAt;
     setSharing(f.file);
+    const fallback = () => {
+      window.location.href = fileUrl(`/projects/${id}/files/${f.file}`, "&download=1");
+      setToast("Ši naršyklė neleidžia dalintis tiesiai – video atsisiunčiamas. Įkelkite jį programėlėje (aprašymas nukopijuotas).");
+    };
+    if (!navigator.share) { setSharing(""); fallback(); return; }
     try {
       const file = await prefetch(f.file, finalAt);
+      if (navigator.canShare && !navigator.canShare({ files: [file] })) { fallback(); return; }
       await navigator.share({ files: [file] });
       setToast(cap ? "Aprašymas nukopijuotas – programėlėje jį įklijuokite 📋" : "Pasidalinta ✅");
     } catch (e) {
