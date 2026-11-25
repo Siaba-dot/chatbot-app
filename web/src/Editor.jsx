@@ -208,6 +208,21 @@ export default function Editor({ id, user }) {
     run("preview", p.settings);
   }
 
+  async function autoFromText(text, voice) {  // 🎙 įgarsinimo tekstas -> automatiškai parinkti vaizdai
+    setError("");
+    try {
+      await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: s } });
+      let sector = "kita";
+      try { sector = localStorage.getItem("sg_sector") || "kita"; } catch (e) { /* */ }
+      const j = await api(`/projects/${id}/auto_video`, { method: "POST", body: { sector, text, scenes: [], voice } });
+      setJob(j);
+      await waitJob(j.id, setJob);
+      setJob(null);
+      setToast("Vaizdai sudėti – kuriu peržiūrą 🎬");
+      afterAuto();
+    } catch (e) { setJob(null); setError(e.message); }
+  }
+
   async function reshuffle() {  // 🔄 kiti vaizdai tam pačiam tekstui
     setError("");
     try {
@@ -632,7 +647,8 @@ export default function Editor({ id, user }) {
         )}
 
         {tab === "voice" && (
-          <Voice id={id} s={s} set={set} setS={setS} opts={opts} user={user} setToast={setToast} setError={setError} />
+          <Voice id={id} s={s} set={set} setS={setS} opts={opts} user={user} setToast={setToast} setError={setError}
+                 clipsCount={proj.clips.length} busyJob={!!job} onAuto={autoFromText} />
         )}
 
         {tab === "sound" && (

@@ -25,7 +25,7 @@ function VoiceList({ voices, vo, setVo, sample, playing }) {
   );
 }
 
-export default function Voice({ id, s, set, setS, opts, user, setToast, setError }) {
+export default function Voice({ id, s, set, setS, opts, user, setToast, setError, clipsCount = 0, onAuto, busyJob }) {
   const vo = s.voiceover || { on: false, text: "", voice: "coral" };
   const [topic, setTopic] = useState("");
   const [secs, setSecs] = useState(30);
@@ -114,6 +114,16 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
           <span className="hint">Tai tiksliai tas balsas ir tekstas, kurie bus video.</span>
         </div>
         {pv && pv !== "busy" && <audio src={pv} controls autoPlay style={{ width: "100%", marginTop: 8 }} />}
+        {vo.text.trim() && onAuto && (
+          <div className="card" style={{ marginTop: 12, borderColor: "var(--amber)" }}>
+            <b>Kitas žingsnis – vaizdai</b>
+            <div className="hint" style={{ margin: "4px 0 10px" }}>
+              {clipsCount ? `Projekte yra ${clipsCount} kadr. – spauskite „▶ Peržiūra“, o jei patinka – „KURTI VIDEO“. Arba leiskite studijai parinkti vaizdus pagal tekstą.`
+                : "Projekte dar nėra vaizdų. Įkelkite ar nufilmuokite savo medžiagą skiltyje „🎬 Medžiaga“ – arba leiskite studijai parinkti vaizdus pagal šį tekstą."}
+            </div>
+            <button className="btn gold" disabled={busyJob} onClick={() => onAuto(vo.text, vo.on ? vo.voice : null)}>🎬 Parinkti vaizdus automatiškai</button>
+          </div>
+        )}
       </div>
 
       <div className="section">

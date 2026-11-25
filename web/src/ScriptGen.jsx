@@ -9,16 +9,22 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
   const [o, setO] = useState(null);
   const [open, setOpen] = useState(() => load("sg_open", "1") === "1");
   const [sector, setSector] = useState(() => load("sg_sector", ""));
-  const [goal, setGoal] = useState("pristatymas");
-  const [topic, setTopic] = useState("");
-  const [secs, setSecs] = useState(30);
-  const [vars, setVars] = useState(null);
-  const [ai, setAi] = useState(false);
-  const [offset, setOffset] = useState(0);
+  // kas pasirinkta ir sugeneruota – išsaugoma šiam projektui (perjungus skiltį ar atnaujinus puslapį neprarandama)
+  const mem = (() => { try { return JSON.parse(localStorage.getItem("sg_state_" + id) || "{}"); } catch { return {}; } })();
+  const [goal, setGoal] = useState(mem.goal || "pristatymas");
+  const [topic, setTopic] = useState(mem.topic || "");
+  const [secs, setSecs] = useState(mem.secs || 30);
+  const [vars, setVars] = useState(mem.vars || null);
+  const [ai, setAi] = useState(!!mem.ai);
+  const [offset, setOffset] = useState(mem.offset || 0);
   const [busy, setBusy] = useState("");
   const aiVoice = user.ai || user.gemini;
-  const [voice, setVoice] = useState(() => (s.voiceover && s.voiceover.voice) ||
+  const [voice, setVoice] = useState(() => mem.voice || (s.voiceover && s.voiceover.voice) ||
     (user.gemini ? Object.keys(opts.gemini_voices || {})[0] : "coral"));
+  useEffect(() => {
+    try { localStorage.setItem("sg_state_" + id, JSON.stringify({ goal, topic, secs, vars, ai, offset, voice })); }
+    catch { /* privatus langas */ }
+  }, [id, goal, topic, secs, vars, ai, offset, voice]);
 
   useEffect(() => { api("/scripts/options").then(setO).catch(() => {}); }, []);
   useEffect(() => save("sg_open", open ? "1" : "0"), [open]);
@@ -130,6 +136,14 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                     </div>
                   </div>
                 ))}
+              </div>
+              <div className="card" style={{ marginTop: 10, borderColor: "var(--amber)" }}>
+                <b>Kaip gauti video?</b>
+                <ol className="hint" style={{ fontSize: 13.5, paddingLeft: 18, margin: "6px 0 0" }}>
+                  <li>Po patikusiu variantu spauskite <b>„🎬 Video automatiškai“</b> – studija parinks vaizdus{aiVoice ? ", sukurs balsą" : ""} ir parodys peržiūrą.</li>
+                  <li>Peržiūrėkite kairėje. Jei patinka – spauskite <b>„KURTI VIDEO“</b> (galutinis video 3 formatais).</li>
+                  <li>Turite savo video? Spauskite <b>„🎙 Į įgarsinimą“</b> arba <b>„📜 Į suflerį“</b> ir įkelkite ar nufilmuokite medžiagą žemiau.</li>
+                </ol>
               </div>
               <div className="hint" style={{ marginTop: 8 }}>
                 🎬 Automatinis video kiekvienam sakiniui parenka tinkamą vaizdą, uždeda {aiVoice ? "balsą, " : ""}titrus ir muziką.
