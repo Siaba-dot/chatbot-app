@@ -70,6 +70,10 @@ TEMPLATES = {
          "Trečia – sąžiningos kainos be staigmenų.", "Išbandykite patys – registruokitės jau šiandien!"],
         ["Kas mes tokie?", "Esame komanda, kuri myli savo darbą.", "{Kur} rasite: {t}.",
          "Kiekvieną dieną stengiamės, kad išeitumėte su šypsena.", "Sekite mus ir sužinokite daugiau!"],
+        ["Sveiki! Malonu susipažinti.", "{Kur} rasite tai, ko ieškote: {t}.", "Mums svarbu ne tik rezultatas, bet ir jūsų savijauta.", "Kiekvieną kartą stengiamės nustebinti.", "Ateikite susipažinti – kava mūsų!"],
+        ["Ką daryti, jei norite geriausio?", "Rinktis tuos, kurie išmano savo darbą.", "Mūsų specializacija – {t}.", "Turime patirties ir daugybę laimingų klientų.", "Užsiregistruokite ir įsitikinkite patys!"],
+        ["Šis video – tiems, kurie dar mūsų nepažįsta.", "Esame vietinis verslas, kuriam rūpi kiekvienas klientas.", "Didžiuojamės tuo, ką darome: {t}.", "Kokybė, patikimumas ir šypsena – mūsų pažadas.", "Sekite mus ir būkime pažįstami!"],
+        ["Kodėl klientai grįžta pas mus?", "Nes čia jaučiasi laukiami.", "Nes {t} – mūsų kasdienybė.", "Ir nes rezultatas visada atitinka lūkesčius.", "Laukiame ir jūsų!"],
     ],
     "akcija": [
         ["Dėmesio – ypatingas pasiūlymas!", "Tik dabar: {t}.", "Pasiūlymas galioja ribotą laiką.",
@@ -81,6 +85,10 @@ TEMPLATES = {
          "Pasiūlymas baigsis greičiau, nei manote.", "Susisiekite su mumis jau dabar!"],
         ["Laukėte progos? Ji atėjo.", "Specialus pasiūlymas: {t}.", "Daugiau naudos už tą pačią kainą.",
          "Galioja tik iki mėnesio pabaigos.", "Užsisakykite žinute arba telefonu!"],
+        ["Stop! Šito nepraleiskite.", "{T} – su specialia nuolaida.", "Puiki proga išbandyti mus pirmą kartą.", "Arba grįžti, jei jau esate mūsų klientas.", "Rezervuokite laiką dar šiandien!"],
+        ["Savaitės pasiūlymas!", "{Kur} ruošiame staigmeną: {t}.", "Kiekis ribotas, todėl skubėkite.", "Daugiau informacijos – žinute.", "Iki greito pasimatymo!"],
+        ["Ieškote dovanos?", "Turime idėją: {t}.", "Tokia dovana tikrai nudžiugins.", "O dabar – ir patrauklesne kaina.", "Užsisakykite, kol galioja pasiūlymas!"],
+        ["Paskutinė galimybė!", "Pasiūlymas „{t}“ baigiasi jau greitai.", "Daugelis jau spėjo pasinaudoti.", "Nelikite be jo ir jūs.", "Rašykite mums dabar!"],
     ],
     "patarimas": [
         ["Vienas patarimas, kuris jums sutaupys laiko.", "Tema: {t}.",
@@ -95,6 +103,10 @@ TEMPLATES = {
         ["Specialisto patarimas per 30 sekundžių.", "{T} – nuo ko pradėti?",
          "Pirmiausia įvertinkite, ko iš tiesų reikia.", "Tada pasirinkite patikimą sprendimą.",
          "O jei reikia pagalbos – mes šalia. Sekite mus!"],
+        ["Šito jums niekas nepasakys.", "Kalbame apie tai: {t}.", "Pirmas žingsnis – paprastas, bet daugelis jį praleidžia.", "Skirkite tam vos penkias minutes per dieną.", "Rezultatas jus nustebins. Išsaugokite!"],
+        ["Mažas triukas, didelis skirtumas.", "{T} – štai ką verta žinoti.", "Nepirkite to, ko nereikia.", "Geriau investuokite į kokybę vieną kartą.", "Daugiau patarimų – sekite mus!"],
+        ["Klientai dažnai klausia, kaip pasiekti geresnį rezultatą.", "Atsakymas susijęs su tuo: {t}.", "Svarbu ne kiekis, o reguliarumas.", "Ir, žinoma, tinkamos priemonės.", "Parašykite, jei turite klausimų!"],
+        ["Prieš pradėdami, pagalvokite apie tai.", "Tema: {t}.", "Dažnai skubame ir padarome klaidų.", "Geriau viską gerai suplanuoti iš anksto.", "Išsaugokite šį video ateičiai!"],
     ],
     "uzkulisiai": [
         ["Norite pamatyti, kaip viskas atrodo iš vidaus?", "{Kur} vyksta daugiau, nei matote.",
@@ -104,6 +116,9 @@ TEMPLATES = {
          "Dirbame su meile ir dėmesiu detalėms.", "Ar norėtumėte užsukti? Parašykite!"],
         ["Ko dažniausiai nepamatote?", "Užkulisiai: {t}.", "Daug darbo lieka už kadro.",
          "Bet būtent jis lemia kokybę.", "Pamėgkite, jei norite daugiau tokių video!"],
+        ["Taip atrodo mūsų darbas iš arti.", "Šiandien: {t}.", "Daug kruopštumo ir dar daugiau kantrybės.", "Bet galutinis rezultatas to vertas.", "Patiko? Paspauskite širdelę!"],
+        ["Ar žinojote, kiek darbo slypi už vieno rezultato?", "{T} – nuo pradžios iki pabaigos.", "Kiekvienas žingsnis svarbus.", "Ir kiekvienas daromas su meile.", "Sekite – rodysime daugiau!"],
+        ["Pakviečiame jus į užkulisius.", "{Kur} kiekviena diena kitokia.", "Šiandien dirbame su tuo: {t}.", "Mėgstame savo darbą ir tai norime parodyti.", "Ką parodyti kitą kartą? Rašykite!"],
     ],
     "istorija": [
         ["Pas mus atėjo klientė su vienu klausimu.", "Jai rūpėjo: {t}.", "Kartu radome geriausią sprendimą.",
@@ -113,6 +128,9 @@ TEMPLATES = {
          "Jūsų istorija gali būti kita – susisiekite!"],
         ["Ką sako mūsų klientai?", "„Pagaliau radau tuos, kuriais galiu pasitikėti.“", "Tema buvo {t}.",
          "Tokie žodžiai motyvuoja dirbti dar geriau.", "Išbandykite ir jūs!"],
+        ["Šią istoriją norisi papasakoti.", "Klientas atėjo su vienu tikslu: {t}.", "Iš pradžių atrodė sudėtinga.", "Bet kartu viską įveikėme.", "Toks rezultatas mus įkvepia. O kokia jūsų istorija?"],
+        ["Kai klientas grįžta su šypsena, žinome, kad pavyko.", "Šį kartą tema buvo {t}.", "Viskas atlikta taip, kaip sutarėme.", "Ačiū už gražius žodžius!", "Laukiame ir jūsų!"],
+        ["Prieš kelias savaites mums parašė klientė.", "Ji norėjo pokyčių: {t}.", "Pasiūlėme sprendimą, kuris tiko būtent jai.", "Šiandien ji – nuolatinė mūsų klientė.", "Norite ir jūs pokyčių? Rašykite!"],
     ],
     "klausimas": [
         ["Dažniausiai mūsų klausiate apie tai.", "Klausimas: {t}?", "Trumpas atsakymas – taip, tai įmanoma.",
@@ -122,6 +140,9 @@ TEMPLATES = {
          "Pirmoji konsultacija padės viską aiškiai suplanuoti.", "Parašykite mums – atsakysime greitai!"],
         ["Mitas ar tiesa?", "Sakoma, kad {t} – sudėtinga.", "Iš tikrųjų viskas paprasčiau, nei atrodo.",
          "Su patyrusiu specialistu – greita ir be streso.", "Sekite mus ir sužinokite daugiau!"],
+        ["Jūs klausiate – mes atsakome.", "{T}: nuo ko pradėti?", "Pirmiausia – pasitarkite su specialistu.", "Tada kartu sudarysime planą.", "Klausimų turite? Rašykite komentaruose!"],
+        ["Ar tikrai reikia to bijoti?", "Daugelis abejoja dėl to: {t}.", "Iš tikrųjų viskas paprasčiau.", "Svarbiausia – rinktis patikimus žmones.", "Sekite mus – atsakysime ir į kitus klausimus!"],
+        ["Klausimas, kurį girdime kasdien.", "Kiek kainuoja {t}?", "Kaina priklauso nuo jūsų poreikių.", "Bet visada pasiūlome kelis variantus.", "Parašykite – pasakysime tiksliai!"],
     ],
 }
 
@@ -195,15 +216,21 @@ def scenes_for(text, sector, queries=None):
     return out
 
 
-def template_variants(sector, goal, topic, seconds=30, n=3, offset=0):
+def template_variants(sector, goal, topic, seconds=30, n=3, offset=0, avoid=()):
+    """Šablonų variantai: kiekvieną kartą atsitiktinai parenkami, ką tik rodyti (avoid) – praleidžiami."""
     sec = SECTORS.get(sector, SECTORS["kita"])
     topic = topic.strip() or sec[2]
     tpls = TEMPLATES.get(goal, TEMPLATES["pristatymas"])
     out = []
-    rnd = random.Random(f"{sector}|{goal}|{topic}|{offset}")
+    rnd = random.Random()
     pool = sec[3][:]
-    for k in range(min(n, len(tpls))):
-        lines = _fill(tpls[(offset + k) % len(tpls)], topic, sec[1])
+    avoid = set(avoid or ())
+    order = list(range(len(tpls)))
+    rnd.shuffle(order)
+    fresh = [i for i in order if _fill(tpls[i][:1], topic, sec[1])[0] not in avoid]
+    order = fresh + [i for i in order if i not in fresh]
+    for k in order[:n]:
+        lines = _fill(tpls[k], topic, sec[1])
         extra = EXTRA.get(goal, [])[:]
         rnd.shuffle(extra)
         while extra and sum(len(x.split()) for x in lines) < seconds * 2.3 * 0.8:
