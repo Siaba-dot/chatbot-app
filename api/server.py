@@ -101,6 +101,7 @@ def _user_info(username):
             "minutes_left": left,
             "ai_clips_left": accounts.left(username, "ai_clips"),
             "voice_chars_left": accounts.left(username, "voice_chars"),
+            "auto_videos_left": accounts.left(username, "auto_videos"),
             "limits": accounts.limits_for(username), "contact": app_settings()["contact"],
             "billing": app_settings()["billing"] and username in accounts.managed_users(),
             "subscribed": bool((accounts.managed_users().get(username) or {}).get("stripe_subscription")),
@@ -527,9 +528,10 @@ def _admin_row(name, cfg):
     return {"username": name, "name": cfg.get("name") or name, "plan": plan,
             "active": cfg.get("active", True) is not False, "source": cfg.get("source", "managed"),
             "minutes": None if plan == "admin" else float(cfg.get("minutes", accounts.DEFAULT_MINUTES)),
-            "ai_clips": lim["ai_clips"], "voice_chars": lim["voice_chars"],
+            "ai_clips": lim["ai_clips"], "voice_chars": lim["voice_chars"], "auto_videos": lim["auto_videos"],
             "used": {"minutes": round(accounts.used(name, "minutes"), 1), "ai_clips": int(accounts.used(name, "ai_clips")),
-                     "voice_chars": int(accounts.used(name, "voice_chars"))},
+                     "voice_chars": int(accounts.used(name, "voice_chars")),
+                     "auto_videos": int(accounts.used(name, "auto_videos"))},
             "created": cfg.get("created"), "email": cfg.get("email"), "self_registered": bool(cfg.get("self_registered")),
             "subscribed": bool(cfg.get("stripe_subscription")),
             "trial_until": cfg.get("trial_until") if accounts.in_trial(cfg) else None}
@@ -551,6 +553,7 @@ class UserBody(BaseModel):
     minutes: float | None = None
     ai_clips: int | None = None
     voice_chars: int | None = None
+    auto_videos: int | None = None
 
 
 def _apply(cfg, body):
@@ -564,7 +567,7 @@ def _apply(cfg, body):
         cfg["plan"] = body.plan
     if body.active is not None:
         cfg["active"] = bool(body.active)
-    for k in ("minutes", "ai_clips", "voice_chars"):
+    for k in ("minutes", "ai_clips", "voice_chars", "auto_videos"):
         v = getattr(body, k)
         if v is not None:
             cfg[k] = max(0, v)
@@ -1273,6 +1276,7 @@ def _run_auto_video(jid, user, pid, body):
         if not added:
             raise ValueError("Tinkamų vaizdų nerasta – pabandykite kitą variantą arba įkelkite savo medžiagą.")
         _stock_used_add(user, picked)
+        accounts.add_usage(user["username"], "auto_videos", 1)
         proj["auto_src"] = {"sector": body.sector, "text": text, "scenes": scenes, "voice": body.voice}
         if not settings.get("music"):
             music = scripts.SECTORS.get(body.sector, scripts.SECTORS["kita"])[4]
@@ -1303,6 +1307,11 @@ def auto_video(pid: str, body: AutoVideoBody, user=Depends(current_user)):
         raise HTTPException(400, "Nėra teksto.")
     if not stock_provider():
         raise HTTPException(400, "Vaizdų paieškos raktas (Pixabay) neįrašytas – kreipkitės į administratorių.")
+    lft = accounts.left(user["username"], "auto_videos")
+    if lft is not None and lft < 1:
+        lim = accounts.limits_for(user["username"])["auto_videos"]
+        raise HTTPException(400, f"Šio mėnesio automatinių video limitas ({lim}) išnaudotas. Galite įkelti ar nufilmuoti "
+                                 "savo medžiagą" + (" arba pereiti į Premium." if user["plan"] == "basic" else "."))
     if body.voice:
         if user["plan"] not in AI_PLANS:
             raise HTTPException(400, "AI įgarsinimas – Premium plane. Galite kurti video be balso – su titrais ir muzika.")

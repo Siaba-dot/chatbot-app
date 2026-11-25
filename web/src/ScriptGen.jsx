@@ -26,7 +26,9 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
     catch { /* privatus langas */ }
   }, [id, goal, topic, secs, vars, ai, offset, voice]);
 
-  useEffect(() => { api("/scripts/options").then(setO).catch(() => {}); }, []);
+  const [left, setLeft] = useState(user.auto_videos_left);
+  const refreshLeft = () => api("/me").then(u => setLeft(u.auto_videos_left)).catch(() => {});
+  useEffect(() => { api("/scripts/options").then(setO).catch(() => {}); refreshLeft(); }, []);  // eslint-disable-line
   useEffect(() => save("sg_open", open ? "1" : "0"), [open]);
   useEffect(() => { if (sector) save("sg_sector", sector); }, [sector]);
 
@@ -59,6 +61,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
       await waitJob(j.id, setJob || (() => {}));
       setJob && setJob(null);
       setToast("Vaizdai sudėti – kuriu peržiūrą 🎬");
+      refreshLeft();
       onAutoDone();
     } catch (e) { setJob && setJob(null); setError(e.message); }
     finally { setBusy(""); }
@@ -145,6 +148,9 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                   <li>Turite savo video? Spauskite <b>„🎙 Į įgarsinimą“</b> arba <b>„📜 Į suflerį“</b> ir įkelkite ar nufilmuokite medžiagą žemiau.</li>
                 </ol>
               </div>
+              {left != null && (
+                <div className="hint" style={{ marginTop: 8 }}>🎞 Šį mėnesį dar galite sukurti <b>{left}</b> automatinių video (įskaitant „Kiti vaizdai“).</div>
+              )}
               <div className="hint" style={{ marginTop: 8 }}>
                 🎬 Automatinis video kiekvienam sakiniui parenka tinkamą vaizdą, uždeda {aiVoice ? "balsą, " : ""}titrus ir muziką.
                 Vaizdus vėliau galite pakeisti: pašalinti, perdėlioti ar pridėti savo nuotraukų ir video.

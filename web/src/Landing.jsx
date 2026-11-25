@@ -86,6 +86,7 @@ export function Plans({ s, user, onBuy, busy }) {
           <li>Karpymas ir dalinimas kaip CapCut</li>
           <li>3 formatai iš karto: Reels / TikTok, 4:5, YouTube</li>
           <li>Nemokami intarpai (Pixabay)</li>
+          <li>Tekstai pagal verslo sritį ir automatinis video (iki {num(((s.limits || {}).basic || {}).auto_videos)} / mėn.)</li>
           <li className="no">AI titrai, AI balsai ir AI kadrai</li>
         </ul>
         {cta("basic")}
@@ -98,6 +99,7 @@ export function Plans({ s, user, onBuy, busy }) {
           <li><b>Titrai automatiškai iš kalbos</b> (iki {num(s.minutes)} min. / mėn.)</li>
           <li><b>Natūralūs lietuviški AI balsai</b> (iki {num(prem.voice_chars)} simbolių / mėn.)</li>
           <li><b>AI sukurti video kadrai</b> (iki {num(prem.ai_clips)} / mėn.)</li>
+          <li><b>Automatinis video su AI balsu</b> (iki {num(prem.auto_videos)} / mėn.)</li>
           <li>AI įgarsinimas atskirai kiekvienam kadrui</li>
           <li>AI parašytas aprašymas su grotažymėmis</li>
           <li>AI tekstai įgarsinimui ir idėjos</li>

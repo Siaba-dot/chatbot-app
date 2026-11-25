@@ -23,7 +23,7 @@ function slug(name, taken) {
 
 function UserForm({ initial, isNew, defaults, taken, onCancel, onSave }) {
   const [f, setF] = useState(() => ({ username: "", name: "", plan: "premium", password: isNew ? genPassword() : "",
-    minutes: "", ai_clips: "", voice_chars: "", active: true, ...initial }));
+    minutes: "", ai_clips: "", voice_chars: "", auto_videos: "", active: true, ...initial }));
   const [manual, setManual] = useState(false);  // prisijungimo vardas įrašytas ranka – nebekeičiam
   const set = (k, v) => setF(x => ({ ...x, [k]: v,
     ...(k === "name" && isNew && !manual ? { username: v.trim() ? slug(v, taken) : "" } : {}) }));
@@ -32,7 +32,7 @@ function UserForm({ initial, isNew, defaults, taken, onCancel, onSave }) {
   return (
     <div className="modal" onClick={onCancel}>
       <form className="card" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}
-            onSubmit={e => { e.preventDefault(); onSave({ ...f, minutes: num(f.minutes), ai_clips: num(f.ai_clips), voice_chars: num(f.voice_chars), password: f.password || null }); }}>
+            onSubmit={e => { e.preventDefault(); onSave({ ...f, minutes: num(f.minutes), ai_clips: num(f.ai_clips), voice_chars: num(f.voice_chars), auto_videos: num(f.auto_videos), password: f.password || null }); }}>
         <h3 className="serif" style={{ marginTop: 0, fontSize: 22 }}>{isNew ? "＋ Naujas klientas" : `✏️ ${f.username}`}</h3>
         <div className="field"><label>Vardas / įmonė</label>
           <input className="input" value={f.name} onChange={e => set("name", e.target.value)} placeholder="Grožio salonas Rūta" autoFocus={isNew} /></div>
@@ -59,6 +59,8 @@ function UserForm({ initial, isNew, defaults, taken, onCancel, onSave }) {
                 <input className="input" type="number" min="0" value={f.ai_clips ?? ""} onChange={e => set("ai_clips", e.target.value)} placeholder={String(d.ai_clips ?? 0)} /></div>
               <div className="field" style={{ flex: 1 }}><label>🗣 Įgarsinimo simb.</label>
                 <input className="input" type="number" min="0" step="1000" value={f.voice_chars ?? ""} onChange={e => set("voice_chars", e.target.value)} placeholder={String(d.voice_chars ?? 0)} /></div>
+              <div className="field" style={{ flex: 1 }}><label>🎞 Auto video</label>
+                <input className="input" type="number" min="0" value={f.auto_videos ?? ""} onChange={e => set("auto_videos", e.target.value)} placeholder={String(d.auto_videos ?? 0)} /></div>
             </div>
           </>
         )}
@@ -228,8 +230,9 @@ export default function Admin({ me }) {
       <div className="row"><h2 style={{ margin: 0 }}>👑 Klientai</h2><span className="spacer" />
         <button className="btn gold" onClick={() => setEdit({ new: true })}>＋ Naujas klientas</button></div>
       <div className="hint" style={{ margin: "4px 0 14px" }}>
-        Ribos – per mėnesį. Numatyta: Premium – {data.defaults.premium.ai_clips} AI kadrų ir {data.defaults.premium.voice_chars} įgarsinimo
-        simbolių, Pagrindinis – AI nėra. Kadrai iš „📚 Mano AI kadrai“ – nemokami.
+        Ribos – per mėnesį. Numatyta: Premium – {data.defaults.premium.ai_clips} AI kadrų, {data.defaults.premium.voice_chars} įgarsinimo
+        simbolių ir {data.defaults.premium.auto_videos} automatinių video; bandymas – {data.defaults.trial.auto_videos}; Pagrindinis – AI nėra,
+        {data.defaults.basic.auto_videos} automatinių video. Kadrai iš „📚 Mano AI kadrai“ – nemokami.
       </div>
       {error && <div className="error">⚠ {error}</div>}
       <Settings onError={setError} />
@@ -256,6 +259,7 @@ export default function Admin({ me }) {
               <span title="Kalbos atpažinimas">🎙 {u.used.minutes}/{lim(u.minutes)} min</span>
               <span title="AI kadrai">🎬 {u.used.ai_clips}/{lim(u.ai_clips)}</span>
               <span title="AI įgarsinimo simboliai">🗣 {u.used.voice_chars}/{lim(u.voice_chars)}</span>
+              <span title="Automatiniai video">🎞 {u.used.auto_videos}/{lim(u.auto_videos)}</span>
             </div>
             {u.source === "managed" ? (
               <div className="row" style={{ gap: 4 }}>
@@ -269,7 +273,7 @@ export default function Admin({ me }) {
       </div>
       {edit && <UserForm isNew={!!edit.new} defaults={data.defaults} taken={new Set(data.users.map(u => u.username))} onCancel={() => setEdit(null)} onSave={save}
                          initial={edit.user ? { username: edit.user.username, name: edit.user.name, plan: edit.user.plan, active: edit.user.active,
-                           minutes: edit.user.minutes ?? "", ai_clips: edit.user.ai_clips ?? "", voice_chars: edit.user.voice_chars ?? "" } : {}} />}
+                           minutes: edit.user.minutes ?? "", ai_clips: edit.user.ai_clips ?? "", voice_chars: edit.user.voice_chars ?? "", auto_videos: edit.user.auto_videos ?? "" } : {}} />}
     </div>
   );
 }
