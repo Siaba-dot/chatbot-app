@@ -232,6 +232,22 @@ export default function Editor({ id, user }) {
     } catch (e) { setJob(null); setError(e.message); }
   }
 
+  async function aiScene(c) {  // ✨ scenos vaizdas -> AI sukurtas kadras (Google Veo)
+    const left = user.ai_clips_left;
+    if (!window.confirm(`AI sukurs šios scenos vaizdą pagal aprašymą (užtrunka 1–3 min., kadras iki 4 s).\n` +
+      `Bus panaudotas 1 AI kadras${left != null ? ` (šį mėnesį liko ${left})` : ""}. Tęsti?`)) return;
+    setError("");
+    try {
+      const j = await api(`/projects/${id}/broll/veo`, { method: "POST", body: {
+        prompt: c.visual || c.scene || c.query || c.name, replace: c.id } });
+      setJob(j);
+      await waitJob(j.id, setJob);
+      setJob(null);
+      setToast("AI kadras sukurtas ✨ – kuriu peržiūrą");
+      afterAuto();
+    } catch (e) { setJob(null); setError(e.message); }
+  }
+
   async function reshuffle() {  // 🔄 kiti vaizdai tam pačiam tekstui
     setError("");
     try {
@@ -481,6 +497,9 @@ export default function Editor({ id, user }) {
                       <span>{c.image ? "Nuotrauka" : c.trim ? `✂ ${fmtTime(c.trim[0])}–${fmtTime(c.trim[1])} (${(c.trim[1] - c.trim[0]).toFixed(1)} s)` : fmtTime(c.duration)} · {c.audio === "speech" ? "🎙 kalba" : c.audio === "silent" ? "🔇 be kalbos" : "be garso"}</span>
                       {c.sound && <span style={{ color: "var(--honey)" }}>{c.sound.kind === "music" ? `🎵 ${c.sound.track}` : c.sound.kind === "file" ? `${c.sound.voice ? "🎙" : "🎵"} ${c.sound.name}` : `🎙 „${c.sound.text.slice(0, 40)}${c.sound.text.length > 40 ? "…" : ""}“`}</span>}
                     </div>
+                    {(c.auto || c.ai_scene) && user.veo && (
+                      <button className="btn small" onClick={() => aiScene(c)} disabled={!!job} title="Sukurti šios scenos vaizdą su AI">✨</button>
+                    )}
                     {!c.image && <button className="btn small" onClick={() => setTrimming(c)} title="Karpyti">✂</button>}
                     <button className={"btn small" + (c.sound ? " gold" : "")} onClick={() => setSounding(c)} title="Muzika ar įgarsinimas šiam kadrui" aria-label="Kadro garsas">🎵</button>
                     <button className="btn small ghost" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Aukštyn">↑</button>
