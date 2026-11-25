@@ -1144,7 +1144,8 @@ def gen_scripts(pid: str, body: ScriptBody, user=Depends(current_user)):
                 return {"variants": v, "ai": True}
         except Exception as e:  # AI nepavyko – grąžinam šablonus
             print("AI scenarijai nepavyko:", e, file=sys.stderr)
-    return {"variants": scripts.template_variants(sector, goal, topic, secs, 3, body.offset), "ai": False}
+    return {"variants": scripts.template_variants(sector, goal, topic, secs, 3, body.offset,
+                                                  [str(a)[:120] for a in body.avoid]), "ai": False}
 
 
 class AutoVideoBody(BaseModel):
@@ -1152,6 +1153,50 @@ class AutoVideoBody(BaseModel):
     text: str
     scenes: list[dict] = []
     voice: str | None = None   # AI įgarsinimas (Premium); None – be balso, tik titrai ir muzika
+
+
+def _stock_used_path(user):
+    return os.path.join(DATA, "stock_used", re.sub(r"[^\w.@-]", "_", user["username"]) + ".json")
+
+
+def _stock_used(user):
+    try:
+        with open(_stock_used_path(user), encoding="utf-8") as f:
+            return [tuple(x) for x in json.load(f)]
+    except (OSError, ValueError):
+        return []
+
+
+def _stock_used_add(user, items):
+    """Įsimenam, kuriuos vaizdus klientas jau gavo – kituose jo video jie nebesikartos (paskutiniai 600)."""
+    hist = [x for x in _stock_used(user) if x not in items] + list(items)
+    os.makedirs(os.path.dirname(_stock_used_path(user)), exist_ok=True)
+    with open(_stock_used_path(user), "w", encoding="utf-8") as f:
+        json.dump([list(x) for x in hist[-600:]], f)
+
+
+def _pick_stock(q, fmt, provider, want, exclude):
+    """Atsitiktinis tinkamas vaizdas iš kelių paieškos puslapių (ne visada pirmas), be jau naudotų."""
+    import random
+    cand = []
+    pages = [1, 2, 3]
+    random.shuffle(pages)
+    for page in pages[:2]:
+        try:
+            cand += [v for v in stock_search(q, fmt, page, 20, provider) if (provider, v["id"]) not in exclude]
+        except HTTPException:
+            pass
+        if len(cand) >= 12:
+            break
+    if not cand:
+        return None
+    seen, uniq = set(), []
+    for v in cand:
+        if v["id"] not in seen:
+            seen.add(v["id"])
+            uniq.append(v)
+    long_enough = [v for v in uniq if (v.get("duration") or 0) >= want] or uniq
+    return random.choice(long_enough[:30])
 
 
 def _run_auto_video(jid, user, pid, body):
@@ -1194,24 +1239,22 @@ def _run_auto_video(jid, user, pid, body):
         proj["clips"] = [c for c in proj["clips"] if not c.get("auto")]
         cdir = os.path.join(d, "clips")
         os.makedirs(cdir, exist_ok=True)
-        used, carry, added = set(), 0.0, 0
+        history = set(_stock_used(user))
+        used, carry, added, picked = set(), 0.0, 0, []
         for i, sc in enumerate(scenes):
             want = need[i] + carry
             _job_update(jid, message=f"Ieškau vaizdo {i + 1}/{len(scenes)}: „{sc['query']}“…",
                         progress=0.15 + 0.8 * i / len(scenes))
-            cand = []
-            for q in (sc["query"], pool[i % len(pool)]):
-                try:
-                    cand = [v for v in stock_search(q, fmt, 1, 12, provider) if v["id"] not in used]
-                except HTTPException:
-                    cand = []
-                if cand:
+            best = None
+            for q, excl in ((sc["query"], history | used), (pool[i % len(pool)], history | used), (sc["query"], used)):
+                best = _pick_stock(q, fmt, provider, want, excl)  # pirmiausia – dar nematyti, kraštutiniu atveju – bet kurie
+                if best:
                     break
-            if not cand:
+            if not best:
                 carry = want
                 continue
-            best = next((v for v in cand if (v.get("duration") or 0) >= want), max(cand, key=lambda v: v.get("duration") or 0))
-            used.add(best["id"])
+            used.add((provider, best["id"]))
+            picked.append((provider, best["id"]))
             src, _ = stock_download(user, pid, provider, best["id"], fmt)
             cid = uuid.uuid4().hex[:10]
             path = os.path.join(cdir, cid + ".mp4")
@@ -1229,6 +1272,8 @@ def _run_auto_video(jid, user, pid, body):
             added += 1
         if not added:
             raise ValueError("Tinkamų vaizdų nerasta – pabandykite kitą variantą arba įkelkite savo medžiagą.")
+        _stock_used_add(user, picked)
+        proj["auto_src"] = {"sector": body.sector, "text": text, "scenes": scenes, "voice": body.voice}
         if not settings.get("music"):
             music = scripts.SECTORS.get(body.sector, scripts.SECTORS["kita"])[4]
             settings["music"] = music if music in reels_studio.music_library() else None
@@ -1239,6 +1284,15 @@ def _run_auto_video(jid, user, pid, body):
         _job_update(jid, status="done", progress=1.0, message=f"Sudėta {added} vaizdų ✅", result={"clips": added})
     except Exception as e:
         _job_update(jid, status="error", message=str(e)[:300])
+
+
+@app.post("/api/projects/{pid}/auto_video/reshuffle")
+def auto_video_reshuffle(pid: str, user=Depends(current_user)):
+    """🔄 Kiti vaizdai tam pačiam tekstui ir balsui (balsas – iš kešo, nemokamai)."""
+    src = _load(user, pid).get("auto_src")
+    if not src:
+        raise HTTPException(400, "Šiame projekte dar nėra automatiškai sudėto video.")
+    return auto_video(pid, AutoVideoBody(**src), user)
 
 
 @app.post("/api/projects/{pid}/auto_video")

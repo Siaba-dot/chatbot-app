@@ -202,6 +202,39 @@ export default function Editor({ id, user }) {
     }
   }
 
+  async function afterAuto() {
+    const p = await api("/projects/" + id);
+    setProj(p); setS(p.settings); setLines(null);
+    run("preview", p.settings);
+  }
+
+  async function autoFromText(text, voice) {  // 🎙 įgarsinimo tekstas -> automatiškai parinkti vaizdai
+    setError("");
+    try {
+      await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: s } });
+      let sector = "kita";
+      try { sector = localStorage.getItem("sg_sector") || "kita"; } catch (e) { /* */ }
+      const j = await api(`/projects/${id}/auto_video`, { method: "POST", body: { sector, text, scenes: [], voice } });
+      setJob(j);
+      await waitJob(j.id, setJob);
+      setJob(null);
+      setToast("Vaizdai sudėti – kuriu peržiūrą 🎬");
+      afterAuto();
+    } catch (e) { setJob(null); setError(e.message); }
+  }
+
+  async function reshuffle() {  // 🔄 kiti vaizdai tam pačiam tekstui
+    setError("");
+    try {
+      const j = await api(`/projects/${id}/auto_video/reshuffle`, { method: "POST" });
+      setJob(j);
+      await waitJob(j.id, setJob);
+      setJob(null);
+      setToast("Parinkti kiti vaizdai – kuriu peržiūrą 🎬");
+      afterAuto();
+    } catch (e) { setJob(null); setError(e.message); }
+  }
+
   async function stopJob() {
     if (!job) return;
     try { setJob(await api(`/jobs/${job.id}/cancel`, { method: "POST" })); } catch (e) { setError(e.message); }
@@ -382,11 +415,7 @@ export default function Editor({ id, user }) {
             <ScriptGen id={id} user={user} opts={opts} s={s} setError={setError} setToast={setToast} setJob={setJob}
               onPrompter={text => { try { localStorage.setItem("script_" + id, text); } catch (e) { /* */ } setRecording(true); }}
               onVoice={(text, voice) => { set({ voiceover: { ...(s.voiceover || {}), on: true, text, ...(voice ? { voice } : {}) } }); setTab("voice"); setToast("Tekstas įkeltas į įgarsinimą 🎙"); }}
-              onAutoDone={async () => {
-                const p = await api("/projects/" + id);
-                setProj(p); setS(p.settings); setLines(null);
-                run("preview", p.settings);
-              }} />
+              onAutoDone={afterAuto} />
             <div className="section">
               <h3>Formatas</h3>
               <Chips items={Object.entries(opts.formats)} value={s.format} onChange={v => set({ format: v })} />
@@ -397,6 +426,12 @@ export default function Editor({ id, user }) {
                 </>
               )}
             </div>
+            {proj.auto_src && proj.clips.some(c => c.auto) && (
+              <div className="row" style={{ margin: "10px 0" }}>
+                <button className="btn small" onClick={reshuffle} disabled={!!job}>🔄 Kiti vaizdai</button>
+                <span className="hint">Tas pats tekstas ir balsas – kiti automatiškai parinkti vaizdai (🎞).</span>
+              </div>
+            )}
             {proj.clips.length > 0 && (
               <div className="clips">
                 {proj.clips.map((c, i) => (
@@ -612,7 +647,8 @@ export default function Editor({ id, user }) {
         )}
 
         {tab === "voice" && (
-          <Voice id={id} s={s} set={set} setS={setS} opts={opts} user={user} setToast={setToast} setError={setError} />
+          <Voice id={id} s={s} set={set} setS={setS} opts={opts} user={user} setToast={setToast} setError={setError}
+                 clipsCount={proj.clips.length} busyJob={!!job} onAuto={autoFromText} />
         )}
 
         {tab === "sound" && (
