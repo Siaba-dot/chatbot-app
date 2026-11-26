@@ -382,7 +382,7 @@ def _pixabay_brief(v):
         thumb = f"https://i.vimeocdn.com/video/{v['picture_id']}_295x166.jpg"
     return {"provider": "pixabay", "id": v["id"], "image": thumb, "duration": v.get("duration"),
             "width": big.get("width"), "height": big.get("height"), "user": v.get("user", ""),
-            "url": v.get("pageURL")}
+            "url": v.get("pageURL"), "likes": v.get("likes") or 0, "downloads": v.get("downloads") or 0}
 
 
 def stock_search(q, fmt="9:16", page=1, per_page=18, provider=None):
@@ -395,7 +395,7 @@ def stock_search(q, fmt="9:16", page=1, per_page=18, provider=None):
         vids = [_pexels_brief(v) for v in j.get("videos", [])]
     else:  # Pixabay neturi orientacijos filtro – tinkamos formos video rodom pirmus
         j = _pixabay({"q": q[:80], "per_page": max(3, min(per_page, 200)), "page": max(1, min(page, 20)),
-                      "safesearch": "true"})
+                      "safesearch": "true", "video_type": "film"})  # be animacijų – tik tikri kadrai
         vids = [_pixabay_brief(v) for v in j.get("hits", [])]
         want = _orientation(fmt)
         shape = lambda v: ("portrait" if (v["height"] or 0) > (v["width"] or 0) * 1.1 else  # noqa: E731
@@ -1217,28 +1217,73 @@ def _stock_used_add(user, items):
         json.dump([list(x) for x in hist[-600:]], f)
 
 
-def _pick_stock(q, fmt, provider, want, exclude):
-    """Atsitiktinis tinkamas vaizdas iš kelių paieškos puslapių (ne visada pirmas), be jau naudotų."""
-    import random
-    cand = []
-    pages = [1, 2, 3]
-    random.shuffle(pages)
-    for page in pages[:2]:
+def _stock_score(v, rank, fmt, want):
+    """Kokybės balas: paieškos vieta (aktualumas), forma, raiška, populiarumas, trukmė."""
+    w, h = v.get("width") or 0, v.get("height") or 0
+    shape = "portrait" if h > w * 1.1 else "landscape" if w > h * 1.1 else "square"
+    sc = -rank * 1.5
+    sc += 6 if shape == _orientation(fmt) else (2 if shape == "square" else 0)
+    sc += 3 if max(w, h) >= 1900 else (1.5 if max(w, h) >= 1270 else -4)
+    sc += min(4.0, (v.get("likes") or 0) / 60) + min(3.0, (v.get("downloads") or 0) / 4000)
+    sc += 2 if (v.get("duration") or 0) >= want else -3
+    return sc
+
+
+def _ai_pick(client, cands, scene, query):
+    """Premium: AI pažiūri kandidatų miniatiūras ir išrenka labiausiai scenai tinkantį ir gražiausią kadrą."""
+    content = [{"type": "text", "text": (
+        "Pick the best stock video thumbnail for this scene of a short, high-quality business Reel. Prefer: clearly "
+        "matches the scene, attractive, professional, sharp, natural light, real people/products (no cartoons, no "
+        "cheap-looking or odd shots, no visible logos/text). Scene: " + (scene or "")[:300] + f" | search: {query}. "
+        f"Reply only JSON: {{\"best\": <index 0-{len(cands) - 1}>, \"ok\": true/false}} (ok=false if none fits).")}]
+    for i, v in enumerate(cands):
+        content.append({"type": "text", "text": f"#{i}"})
+        content.append({"type": "image_url", "image_url": {"url": v["image"], "detail": "low"}})
+    for m in ("gpt-4.1-mini", "gpt-4o-mini"):
         try:
-            cand += [v for v in stock_search(q, fmt, page, 20, provider) if (provider, v["id"]) not in exclude]
+            r = client.chat.completions.create(model=m, temperature=0, response_format={"type": "json_object"},
+                                               messages=[{"role": "user", "content": content}])
+            j = json.loads(r.choices[0].message.content)
+            i = int(j.get("best", -1))
+            return (cands[i] if 0 <= i < len(cands) else None), bool(j.get("ok", True))
+        except Exception as e:
+            print("AI vaizdo parinkimas nepavyko:", e, file=sys.stderr)
+    return None, True
+
+
+def _pick_stock(q, fmt, provider, want, exclude, client=None, scene=""):
+    """Geriausias vaizdas scenai: aktualiausi ir kokybiškiausi kandidatai (ne atsitiktiniai), be jau naudotų.
+    Premium – AI dar pažiūri miniatiūras ir išrenka tinkamiausią. Grąžina None, jei nieko tinkamo."""
+    import random
+    cand, seen = [], set()
+    for page in (1, 2):
+        try:
+            res = stock_search(q, fmt, page, 20, provider)
         except HTTPException:
-            pass
-        if len(cand) >= 12:
+            res = []
+        for v in res:
+            if v["id"] not in seen and (provider, v["id"]) not in exclude:
+                seen.add(v["id"])
+                cand.append(v)
+        if len(cand) >= 15:
             break
     if not cand:
         return None
-    seen, uniq = set(), []
-    for v in cand:
-        if v["id"] not in seen:
-            seen.add(v["id"])
-            uniq.append(v)
-    long_enough = [v for v in uniq if (v.get("duration") or 0) >= want] or uniq
-    return random.choice(long_enough[:30])
+    def shape(v):
+        w, h = v.get("width") or 0, v.get("height") or 0
+        return "portrait" if h > w * 1.1 else "landscape" if w > h * 1.1 else "square"
+    same = [v for v in cand if shape(v) == _orientation(fmt)]
+    if len(same) >= 4:  # užtenka tinkamos formos – kitokios formos (bus apkarpyti) nenaudojam
+        cand = same
+    ranked = sorted(enumerate(cand), key=lambda iv: -_stock_score(iv[1], iv[0], fmt, want))
+    top = [v for _, v in ranked[:8]]
+    if client is not None and len(top) > 1 and all(v.get("image") for v in top):
+        best, ok = _ai_pick(client, top, scene, q)
+        if best is not None and ok:
+            return best
+        if best is not None and not ok:
+            return None if len(cand) > 3 else best  # nieko tinkamo – bandysim kitą paiešką
+    return random.choice(top[:3])  # truputis įvairovės tarp geriausių
 
 
 def _run_auto_video(jid, user, pid, body):
@@ -1283,14 +1328,16 @@ def _run_auto_video(jid, user, pid, body):
         cdir = os.path.join(d, "clips")
         os.makedirs(cdir, exist_ok=True)
         history = set(_stock_used(user))
+        ai_client = openai_client(user)  # Premium – AI peržiūri kandidatus
         used, carry, added, picked = set(), 0.0, 0, []
         for i, sc in enumerate(scenes):
             want = need[i] + carry
             _job_update(jid, message=f"Ieškau vaizdo {i + 1}/{len(scenes)}: „{sc['query']}“…",
                         progress=0.15 + 0.8 * i / len(scenes))
             best = None
-            for q, excl in ((sc["query"], history | used), (pool[i % len(pool)], history | used), (sc["query"], used)):
-                best = _pick_stock(q, fmt, provider, want, excl)  # pirmiausia – dar nematyti, kraštutiniu atveju – bet kurie
+            for q, excl, cl in ((sc["query"], history | used, ai_client), (pool[i % len(pool)], history | used, ai_client),
+                                (sc["query"], used, None)):  # paskutinis bandymas – bet koks tinkamas
+                best = _pick_stock(q, fmt, provider, want, excl, cl, sc["text"])
                 if best:
                     break
             if not best:
@@ -2514,7 +2561,7 @@ def _director_exec(user, pid, name, a, proposals):
         want = (clip["trim"][1] - clip["trim"][0]) if clip.get("trim") else clip["duration"]
         used = {(provider, x) for x in []}
         best = _pick_stock(str(a["query"])[:60], proj["settings"]["format"], provider, want,
-                           set(_stock_used(user)) | used)
+                           set(_stock_used(user)) | used, openai_client(user), clip.get("scene") or "")
         if not best:
             return "error: nothing found – try another query"
         src, _ = stock_download(user, pid, provider, best["id"], proj["settings"]["format"])
