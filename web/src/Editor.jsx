@@ -350,7 +350,7 @@ export default function Editor({ id, user }) {
 
   return (
     <div className="editor">
-      {/* ---------- kairė: telefonas ---------- */}
+      {/* ---------- centre: telefonas (peržiūra) ---------- */}
       <div className="stage">
         <div className={"phone " + PHONE[s.format]}>
           <div className="screen">
@@ -388,8 +388,8 @@ export default function Editor({ id, user }) {
         {!hasClips && <div className="hint" style={{ textAlign: "center", maxWidth: 300 }}>Kol neįkėlėte video, stilius rodomas ant pavyzdinio kadro.</div>}
       </div>
 
-      {/* ---------- dešinė: nustatymai ---------- */}
-      <div>
+      {/* ---------- kairė (plačiame ekrane): projektas, rezultatas, AI režisierius ---------- */}
+      <div className="ed-left">
         <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
           <label className="title-wrap" title="Spustelėkite, kad pervadintumėte">
             <input className="title-input" defaultValue={proj.title} onBlur={e => rename(e.target.value)}
@@ -466,6 +466,10 @@ export default function Editor({ id, user }) {
             onAiScene={(cid, prompt) => { const c = proj.clips.find(x => x.id === cid); if (c) aiScene(c, prompt); }} />
         )}
 
+      </div>
+
+      {/* ---------- dešinė: nustatymai (skirtukai) ---------- */}
+      <div className="ed-right">
         <div className="tabs">
           {TABS.map(([k, label]) => (
             <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => { setTab(k); setError(""); }}>{label}</button>
