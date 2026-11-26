@@ -2426,6 +2426,8 @@ def _director_tools():
            ["clip_id"]), clip_id=st, track={"type": ["string", "null"]}, volume=intg),
         s(("edit_subtitle", "Change the text of one subtitle line (index from the list).", ["index", "text"]),
           index=intg, text=st),
+        s(("no_change", "Use ONLY when the request needs no change (a question) or is impossible. reason – short "
+                        "explanation in Lithuanian.", ["reason"]), reason=st),
         s(("propose_ai_scene", "Suggest replacing a scene with an AI-generated shot (costs the user's AI clip "
                                "limit – the user must confirm, it is NOT done now). prompt – vivid English shot "
                                "description.", ["clip_id", "prompt"]), clip_id=st, prompt=st),
@@ -2566,10 +2568,37 @@ def _director_exec(user, pid, name, a, proposals):
         texts[i] = str(a["text"])[:300]
         update_lines(pid, LinesBody(lines=texts), user)
         return "ok"
+    if name == "no_change":
+        return "ok, nothing changed"
     if name == "propose_ai_scene":
         proposals.append({"clip_id": clip["id"], "prompt": str(a["prompt"])[:400], "name": clip.get("name")})
         return "proposal shown to the user with a confirm button"
     return "error: unknown tool"
+
+
+DIRECTOR_MODELS = ("gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini")  # patikimiausias pirmas – režisierius turi tikrai atlikti
+
+
+def _director_describe(name, a):
+    """Žmogui suprantamas atlikto veiksmo aprašymas (rodomas po atsakymu – matosi, kas tikrai padaryta)."""
+    if name == "update_style":
+        lab = {"look": "titrų stilius", "template": "šablonas", "accent": "akcento spalva", "color": "spalvos",
+               "music": "muzika", "music_volume": "muzikos garsumas", "speed": "greitis", "transition": "perėjimai",
+               "hook": "užrašas pradžioje", "cta": "užrašas pabaigoje", "handle": "paskyros vardas",
+               "subs_pos": "titrų vieta", "subs_size": "titrų dydis", "length": "trukmė", "progress_bar": "juostelė",
+               "subtitles": "titrai", "key_words": "raktiniai žodžiai"}
+        parts = [f"{lab[k]}: „{a[k]}“" if isinstance(a[k], str) else f"{lab[k]}: {a[k]}"
+                 for k in lab if k in a and a[k] is not None]
+        if a.get("effects_add"):
+            parts.append("efektai + " + ", ".join(a["effects_add"]))
+        if a.get("effects_remove"):
+            parts.append("efektai − " + ", ".join(a["effects_remove"]))
+        return "🎨 " + "; ".join(parts) if parts else ""
+    return {"set_voiceover": "🎙 įgarsinimas" + (f": „{str(a.get('text', ''))[:80]}…“" if a.get("text") else " pakeistas"),
+            "replace_scene": f"🎞 scenos vaizdas pakeistas („{a.get('query', '')}“)",
+            "remove_scene": "🗑 scena pašalinta", "move_scene": "↕ scena perkelta", "trim_scene": "✂ scena apkarpyta",
+            "scene_music": "🎵 scenos muzika" + (f": {a.get('track')}" if a.get("track") else " pašalinta"),
+            "edit_subtitle": f"💬 titras pataisytas: „{str(a.get('text', ''))[:60]}“"}.get(name, "")
 
 
 class DirectorBody(BaseModel):
@@ -2606,6 +2635,11 @@ def director(pid: str, body: DirectorBody, user=Depends(current_user)):
         "order. For better visuals prefer replace_scene (free stock); use propose_ai_scene only when the user asks "
         "for AI/generated/exact visuals. To shorten the video, set 'length' and/or shorten the voiceover text and "
         "remove or trim scenes. Never invent clip ids. If something cannot be done, say so and suggest how. "
+        "On-screen texts: 'hook' is the big text at the START, 'cta' is the call-to-action text shown on screen at "
+        "the END (e.g. 'Parašykite mums žinutę!', 'Registruokitės: www…'). When the user asks to add an invitation, "
+        "call to action, website or text at the end – set 'cta' (keep it short, max ~6 words); if the voiceover is "
+        "on, also add the invitation as the last sentence of the voiceover text. You MUST call tools to change "
+        "anything – never claim a change you did not make with a tool. "
         f"Voiceover text must be in {lang} with perfect grammar.\nOPTIONS: "
         + json.dumps(_director_options(), ensure_ascii=False))
     messages = [{"role": "system", "content": system}]
@@ -2615,11 +2649,13 @@ def director(pid: str, body: DirectorBody, user=Depends(current_user)):
                      + "\n\nREQUEST: " + msg})
     tools, actions, proposals, reply = _director_tools(), [], [], ""
     model = None
-    for _ in range(8):
+    descr = []
+    for step in range(8):
         r, err = None, None
-        for m in ([model] if model else video_editor.TRANSLATE_MODELS):
+        for m in ([model] if model else DIRECTOR_MODELS):
             try:
-                r = client.chat.completions.create(model=m, temperature=0.3, messages=messages, tools=tools)
+                r = client.chat.completions.create(model=m, temperature=0.2, messages=messages, tools=tools,
+                                                   tool_choice="required" if step == 0 else "auto")
                 model = m
                 break
             except Exception as e:
@@ -2647,14 +2683,19 @@ def director(pid: str, body: DirectorBody, user=Depends(current_user)):
             except Exception as e:
                 traceback.print_exc()
                 res = "error: " + str(e)[:200]
-            if res.startswith("ok"):
+            if res.startswith("ok") and c.function.name != "no_change":
                 actions.append(c.function.name)
+                d_ = _director_describe(c.function.name, args)
+                if d_:
+                    descr.append(d_)
             messages.append({"role": "tool", "tool_call_id": c.id, "content": res})
     accounts.add_usage(user["username"], "director", 1)
     proj = _load(user, pid)
     reply = reply or ("Atlikta." if actions else "Nieko nepakeičiau – patikslinkite, ką norite pakeisti.")
+    if not actions and re.search(r"(pridėjau|pakeičiau|pakeista|pridėta|atlikta|sutrumpinau|nustačiau)", reply, re.I):
+        reply += "\n\n⚠ Pakeitimų iš tikrųjų nepadariau – pabandykite parašyti konkrečiau."
     proj["director"] = (proj.get("director", []) + [{"role": "user", "text": msg},
-                                                     {"role": "assistant", "text": reply}])[-40:]
+                                                     {"role": "assistant", "text": reply, "done": descr}])[-40:]
     _save(user, proj)
-    return {"reply": reply, "actions": actions, "proposals": proposals, "project": _public(proj),
+    return {"reply": reply, "actions": actions, "done": descr, "proposals": proposals, "project": _public(proj),
             "preview": bool(actions), "left": accounts.left(user["username"], "director")}
