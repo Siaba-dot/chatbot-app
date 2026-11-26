@@ -6,6 +6,7 @@ import Voice from "./Voice.jsx";
 import Trimmer from "./Trimmer.jsx";
 import ClipSound from "./ClipSound.jsx";
 import ScriptGen from "./ScriptGen.jsx";
+import Director from "./Director.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
@@ -232,14 +233,14 @@ export default function Editor({ id, user }) {
     } catch (e) { setJob(null); setError(e.message); }
   }
 
-  async function aiScene(c) {  // ✨ scenos vaizdas -> AI sukurtas kadras (Google Veo)
+  async function aiScene(c, promptOverride) {  // ✨ scenos vaizdas -> AI sukurtas kadras (Google Veo)
     const left = user.ai_clips_left;
     if (!window.confirm(`AI sukurs šios scenos vaizdą pagal aprašymą (užtrunka 1–3 min., kadras iki 4 s).\n` +
       `Bus panaudotas 1 AI kadras${left != null ? ` (šį mėnesį liko ${left})` : ""}. Tęsti?`)) return;
     setError("");
     try {
       const j = await api(`/projects/${id}/broll/veo`, { method: "POST", body: {
-        prompt: c.visual || c.scene || c.query || c.name, replace: c.id } });
+        prompt: promptOverride || c.visual || c.scene || c.query || c.name, replace: c.id } });
       setJob(j);
       await waitJob(j.id, setJob);
       setJob(null);
@@ -459,6 +460,12 @@ export default function Editor({ id, user }) {
           </div>
         )}
 
+        {proj.clips.length > 0 && (
+          <Director id={id} user={user} busyJob={!!job} setError={setError}
+            onChanged={p => { setProj(p); setS(p.settings); setLines(null); setSaved(n => n + 1); run("preview", p.settings); }}
+            onAiScene={(cid, prompt) => { const c = proj.clips.find(x => x.id === cid); if (c) aiScene(c, prompt); }} />
+        )}
+
         <div className="tabs">
           {TABS.map(([k, label]) => (
             <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => { setTab(k); setError(""); }}>{label}</button>
@@ -550,7 +557,8 @@ export default function Editor({ id, user }) {
               <div className="tiles">
                 {templates.map(([name, t]) => (
                   <Tile key={name} src={tileUrl("template", name)} label={name} on={s.template === name}
-                        onClick={() => set({ template: name, accent: t.accent, color: t.color })} />
+                        onClick={() => set({ template: name, accent: t.accent, color: t.color, ...(t.look ? { look: t.look } : {}),
+                          ...(t.effects ? { effects: [...new Set([...(s.effects || []), ...t.effects])] } : {}) })} />
                 ))}
               </div>
             </div>

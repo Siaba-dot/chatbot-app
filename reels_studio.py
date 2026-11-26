@@ -36,6 +36,7 @@ ACCENTS = {
     "Raudona": ("FF3B30", "FFFFFF"),
     "Mėlyna": ("0A84FF", "FFFFFF"),
     "Rožinė": ("FF2D92", "FFFFFF"),
+    "Oranžinė": ("FF8A1F", "0B0B0C"),
 }
 
 
@@ -264,6 +265,8 @@ TEMPLATES = {
     # Verslas
     "Verslo galia": {"kind": "bold", "accent": "Sidabro gradientas", "color": "Šaltos", "cat": "Verslas"},
     "Ekspertas": {"kind": "elegant", "accent": "Šampanas", "color": "Natūralios", "cat": "Verslas"},
+    "Kino anonsas": {"kind": "elegant", "accent": "Oranžinė", "color": "Kino", "cat": "Verslas",
+                     "look": "trailer", "effects": ["Kino juostos", "Kino grūdeliai"]},
     # Grožis
     "Grožio salonas": {"kind": "script", "font": "Dancing Script", "scale": 0.75, "accent": "Rožinė",
                        "color": "Paryžiaus rytas", "cat": "Grožis"},

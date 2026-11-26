@@ -421,6 +421,9 @@ SUBTITLE_LOOKS = {
     "mixed": {"title": "Mišrūs", "font": FONT_NAME, "bold": 0, "size": 0.078, "upper": True, "base": "FFFFFF",
               "box": False, "outline": 1 / 12, "shadow": 0.6, "dim": "00", "pop": True, "ypos": None,
               "mode": "mixed"},
+    "trailer": {"title": "Kino anonsas", "font": FONT_NAME, "bold": 0, "size": 0.074, "upper": False,
+                "base": "FFFFFF", "box": False, "outline": 1 / 14, "shadow": 0.7, "dim": "00", "pop": False,
+                "ypos": None, "mode": "trailer"},
     "karaoke": {"title": "Karaoke", "font": FONT_NAME, "bold": 0, "size": 0.075, "upper": True, "base": "FFFFFF",
                 "box": False, "outline": 1 / 12, "shadow": 0.5, "dim": "00", "pop": True, "ypos": None,
                 "mode": "karaoke"},
@@ -572,11 +575,15 @@ def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, bas
         items = []
         for i, (w, a, b) in enumerate(ph):
             role = _mixed_role(w, i, pi) if mode == "mixed" else "normal"
+            if mode == "trailer":  # pirma frazės pusė – balta stora, antra – pasvirusi serifinė akcento spalva
+                role = "normal" if i < (len(ph) + 1) // 2 else "serif"
             if mode == "mixed" and role == "normal" and len(ph) > 1 and (pi + i) % 3 == 1:
                 role = "script"  # dalis žodžių – ranka, kreivai
             spec = {"big": (FONT_NAME, 1.55, True), "normal": (FONT_NAME, 1.0, True),
                     "small": ("Playfair Display Italic", 0.78, False), "script": ("Dancing Script", 1.35, False)}
-            f, k, upper = spec[role] if mode == "mixed" else (font, 1.0, L["upper"])
+            if mode == "trailer":
+                spec = {"normal": (FONT_NAME, 1.0, False), "serif": ("Playfair Display Italic", 1.18, False)}
+            f, k, upper = spec[role] if mode in ("mixed", "trailer") else (font, 1.0, L["upper"])
             txt = plain(w).upper() if upper else plain(w)
             items.append({"text": txt, "font": f, "size": fsize * k, "role": role, "a": a, "b": b})
         pos = _layout(items, width, height, ypos, max_w)
@@ -587,6 +594,13 @@ def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, bas
             ital = "\\i1" if it["font"] == "Playfair Display Italic" else ""
             base_tags = (f"\\an2\\pos({x},{y})\\fn{fnt}{ital}\\fs{round(it['size'])}\\bord{ol}\\shad{sh}")
             txt = _ass_escape(it["text"])
+            if mode == "trailer":  # žodis švelniai išryškėja, kai ištariamas, ir lieka iki frazės pabaigos
+                serif = it["role"] == "serif"
+                if mask and not serif:
+                    continue
+                col = hl if serif else base
+                ev(a, end, base_tags + f"\\1c&H{col}&\\fad(140,0)", txt)
+                continue
             if mode == "mixed":  # žodis įšoka, kai ištariamas, ir lieka iki frazės pabaigos
                 accent_word = it["role"] in ("big", "script")
                 if mask and not accent_word:
@@ -672,7 +686,15 @@ def build_ass(words, width, height, ypos=0.67, highlight="0AD6FF", look="modern"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     pos = f"\\an5\\pos({width // 2},{round(height * ypos)})"
-    phrases = group_phrases(words)
+    phrases = group_phrases(words, max_words=6) if L.get("mode") == "trailer" else group_phrases(words)
+    if L.get("mode") == "trailer":  # vienas žodis eilutėje atrodo prastai – prijungiam prie ankstesnės frazės
+        merged = []
+        for ph in phrases:
+            if merged and len(ph) == 1 and len(merged[-1]) < 7 and not re.search(r"[.!?…]$", merged[-1][-1][0]):
+                merged[-1] = merged[-1] + ph
+            else:
+                merged.append(ph)
+        phrases = merged
     if L.get("mode"):
         lines += _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, base, highlight, mask)
         return "\n".join(lines) + "\n"
