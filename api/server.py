@@ -2395,3 +2395,266 @@ async def billing_webhook(request: Request):
             if name:
                 _set_plan(name, "basic", stripe_subscription="")
     return {"received": True}
+
+
+# ---------- 💬 AI režisierius: pataisymai paprastais žodžiais ----------
+DIRECTOR_SETTINGS = ("look", "template", "accent", "color", "music", "music_volume", "speed", "transition", "hook",
+                     "cta", "handle", "subs_pos", "subs_size", "length", "progress_bar", "subtitles", "key_words")
+
+
+def _director_tools():
+    s = lambda d, **p: {"type": "function", "function": {"name": d[0], "description": d[1],  # noqa: E731
+                                                          "parameters": {"type": "object", "properties": p,
+                                                                         "required": d[2] if len(d) > 2 else []}}}
+    st, num, intg = {"type": "string"}, {"type": "number"}, {"type": "integer"}
+    return [
+        s(("update_style", "Change the look of the whole video. Only pass fields to change. Values must come from "
+                           "the options list."), look=st, template=st, accent=st, color=st, music=st,
+          music_volume=intg, speed=num, transition=st, hook=st, cta=st, handle=st, subs_pos=st, subs_size=intg,
+          length=st, progress_bar=st, subtitles={"type": "boolean"}, key_words={"type": "boolean"},
+          effects_add={"type": "array", "items": st}, effects_remove={"type": "array", "items": st}),
+        s(("set_voiceover", "Set AI voiceover text and/or voice (whole video). on=false turns it off."),
+          text=st, voice=st, on={"type": "boolean"}),
+        s(("replace_scene", "Replace the visual of one scene with a different free stock video found by an English "
+                            "search query (1-3 concrete visual words).", ["clip_id", "query"]), clip_id=st, query=st),
+        s(("remove_scene", "Remove a scene (clip) from the video.", ["clip_id"]), clip_id=st),
+        s(("move_scene", "Move a scene to a new position (0 = first).", ["clip_id", "position"]),
+          clip_id=st, position=intg),
+        s(("trim_scene", "Keep only part of a scene (seconds within the clip).", ["clip_id", "start", "end"]),
+          clip_id=st, start=num, end=num),
+        s(("scene_music", "Give one scene its own music track from the library, or track=null to remove.",
+           ["clip_id"]), clip_id=st, track={"type": ["string", "null"]}, volume=intg),
+        s(("edit_subtitle", "Change the text of one subtitle line (index from the list).", ["index", "text"]),
+          index=intg, text=st),
+        s(("propose_ai_scene", "Suggest replacing a scene with an AI-generated shot (costs the user's AI clip "
+                               "limit – the user must confirm, it is NOT done now). prompt – vivid English shot "
+                               "description.", ["clip_id", "prompt"]), clip_id=st, prompt=st),
+    ]
+
+
+def _director_state(proj):
+    s_ = proj["settings"]
+    clips = []
+    for i, c in enumerate(proj["clips"]):
+        used = (c["trim"][1] - c["trim"][0]) if c.get("trim") else (None if c.get("image") else c["duration"])
+        clips.append({"clip_id": c["id"], "position": i, "name": c.get("name"), "photo": bool(c.get("image")),
+                      "seconds": round(used, 1) if used else None, "full_seconds": round(c["duration"], 1),
+                      "scene_text": c.get("scene"), "stock_query": c.get("query"),
+                      "own_sound": (c.get("sound") or {}).get("track") or (c.get("sound") or {}).get("kind")})
+    subs = None
+    if proj.get("lines"):
+        texts = proj.get("line_texts") or [t for _, _, t in proj["lines"]]
+        subs = [[i, round(a, 1), t] for i, ((a, _b, _t), t) in enumerate(zip(proj["lines"], texts))]
+    return {"settings": {k: s_.get(k) for k in DIRECTOR_SETTINGS + ("effects",)},
+            "voiceover": s_.get("voiceover"), "scenes": clips, "subtitles": subs}
+
+
+def _director_options():
+    o = engine.options()
+    return {"looks": {k: v["title"] for k, v in video_editor.SUBTITLE_LOOKS.items()},
+            "templates": list(o["templates"]), "accents": list(reels_studio.ACCENTS), "colors": o["colors"],
+            "music": list(o["music"]), "transitions": o["transitions"], "effects": list(reels_studio.EFFECTS),
+            "subs_pos": list(reels_studio.SUBTITLE_POSITIONS), "length": list(reels_studio.LENGTHS),
+            "progress_bar": ["Viršuje", "Apačioje", "Nėra"],
+            "voices": {**engine.GEMINI_VOICES, **engine.VOICES}}
+
+
+def _director_exec(user, pid, name, a, proposals):
+    """Vienas AI režisieriaus veiksmas. Grąžina trumpą rezultatą (tekstas AI'ui)."""
+    proj = _load(user, pid)
+    clip = next((c for c in proj["clips"] if c["id"] == a.get("clip_id")), None)
+    need_clip = name in ("replace_scene", "remove_scene", "move_scene", "trim_scene", "scene_music", "propose_ai_scene")
+    if need_clip and clip is None:
+        return "error: no such clip_id"
+    if name == "update_style":
+        patch = {k: a[k] for k in DIRECTOR_SETTINGS if k in a and a[k] is not None}
+        if "template" in patch and patch["template"] in reels_studio.TEMPLATES:
+            t = reels_studio.TEMPLATES[patch["template"]]
+            patch.setdefault("accent", t["accent"])
+            patch.setdefault("color", t["color"])
+            if t.get("look"):
+                patch.setdefault("look", t["look"])
+            if t.get("effects"):
+                a["effects_add"] = list(a.get("effects_add") or []) + t["effects"]
+        if a.get("effects_add") or a.get("effects_remove"):
+            eff = [e for e in proj["settings"].get("effects", []) if e not in (a.get("effects_remove") or [])]
+            eff += [e for e in (a.get("effects_add") or []) if e in reels_studio.EFFECTS and e not in eff]
+            patch["effects"] = eff
+        if not patch:
+            return "nothing changed"
+        update_settings(pid, SettingsBody(settings=patch), user)
+        new = _load(user, pid)["settings"]
+        bad = [k for k in patch if k != "effects" and new.get(k) != patch[k]]
+        return "ok" + (f"; invalid values ignored for: {bad}" if bad else "")
+    if name == "set_voiceover":
+        vo = dict(proj["settings"].get("voiceover") or {})
+        if a.get("text") is not None:
+            vo["text"] = str(a["text"])[:4000]
+            vo["on"] = True
+        if a.get("voice"):
+            if a["voice"] not in engine.VOICES and a["voice"] not in engine.GEMINI_VOICES:
+                return "error: unknown voice"
+            vo["voice"] = a["voice"]
+        if a.get("on") is not None:
+            vo["on"] = bool(a["on"])
+        if vo.get("on") and user["plan"] not in AI_PLANS:
+            return "error: AI voiceover needs Premium"
+        update_settings(pid, SettingsBody(settings={"voiceover": vo}), user)
+        return "ok"
+    if name == "replace_scene":
+        if clip.get("image"):
+            return "error: this scene is the user's photo – do not replace own material"
+        if not clip.get("auto"):
+            return "error: this is the user's own video – suggest it instead of replacing"
+        provider = stock_provider()
+        if not provider:
+            return "error: stock video key missing"
+        want = (clip["trim"][1] - clip["trim"][0]) if clip.get("trim") else clip["duration"]
+        used = {(provider, x) for x in []}
+        best = _pick_stock(str(a["query"])[:60], proj["settings"]["format"], provider, want,
+                           set(_stock_used(user)) | used)
+        if not best:
+            return "error: nothing found – try another query"
+        src, _ = stock_download(user, pid, provider, best["id"], proj["settings"]["format"])
+        path = os.path.join(_pdir(user, pid), "clips", clip["id"] + "_" + uuid.uuid4().hex[:4] + ".mp4")
+        if engine._ffmpeg(["-i", src, "-an", "-c:v", "copy", path]).returncode != 0:
+            shutil.copy(src, path)
+        new = engine.add_clip(path, f"🎞 {a['query']}")
+        new.update(id=clip["id"], auto=True, scene=clip.get("scene"), visual=clip.get("visual"), query=a["query"])
+        if want < new["duration"] - 0.05:
+            new["trim"] = [0.0, round(want, 3)]
+        if clip.get("sound"):
+            new["sound"] = clip["sound"]
+        if clip["path"].startswith(_pdir(user, pid)) and os.path.exists(clip["path"]):
+            os.unlink(clip["path"])
+        _stock_used_add(user, [(provider, best["id"])])
+        proj["clips"] = [new if c["id"] == clip["id"] else c for c in proj["clips"]]
+        proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+        _save(user, proj)
+        return f"ok, new clip {round(new['duration'], 1)} s"
+    if name == "remove_scene":
+        if len(proj["clips"]) <= 1:
+            return "error: cannot remove the last scene"
+        delete_clip(pid, clip["id"], user)
+        return "ok"
+    if name == "move_scene":
+        order = [c["id"] for c in proj["clips"] if c["id"] != clip["id"]]
+        order.insert(max(0, min(len(order), int(a["position"]))), clip["id"])
+        proj["clips"] = [next(c for c in proj["clips"] if c["id"] == i) for i in order]
+        proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+        _save(user, proj)
+        return "ok"
+    if name == "trim_scene":
+        if clip.get("image"):
+            return "error: photos cannot be trimmed"
+        trim_clip(pid, clip["id"], TrimBody(start=float(a["start"]), end=float(a["end"])), user)
+        return "ok"
+    if name == "scene_music":
+        if a.get("track"):
+            clip_sound(pid, clip["id"], SoundBody(kind="music", track=a["track"], volume=int(a.get("volume") or 60),
+                                                  orig=(clip.get("sound") or {}).get("orig", 100)), user)
+        else:
+            clip_sound(pid, clip["id"], SoundBody(kind="none"), user)
+        return "ok"
+    if name == "edit_subtitle":
+        if not proj.get("lines"):
+            return "error: subtitles are not prepared yet – they will be after the next preview"
+        texts = proj.get("line_texts") or [t for _, _, t in proj["lines"]]
+        i = int(a["index"])
+        if not 0 <= i < len(texts):
+            return "error: bad index"
+        texts[i] = str(a["text"])[:300]
+        update_lines(pid, LinesBody(lines=texts), user)
+        return "ok"
+    if name == "propose_ai_scene":
+        proposals.append({"clip_id": clip["id"], "prompt": str(a["prompt"])[:400], "name": clip.get("name")})
+        return "proposal shown to the user with a confirm button"
+    return "error: unknown tool"
+
+
+class DirectorBody(BaseModel):
+    message: str
+
+
+@app.get("/api/projects/{pid}/director")
+def director_history(pid: str, user=Depends(current_user)):
+    return {"messages": _load(user, pid).get("director", [])[-40:],
+            "left": accounts.left(user["username"], "director")}
+
+
+@app.post("/api/projects/{pid}/director")
+def director(pid: str, body: DirectorBody, user=Depends(current_user)):
+    """💬 AI režisierius: klientas paprastais žodžiais sako, ką pakeisti – AI pats atlieka pakeitimus."""
+    msg = body.message.strip()[:1500]
+    if not msg:
+        raise HTTPException(400, "Parašykite, ką pakeisti.")
+    client = openai_client(user)
+    if client is None:
+        raise HTTPException(400, "AI režisierius – Premium funkcija.")
+    lft = accounts.left(user["username"], "director")
+    if lft is not None and lft < 1:
+        raise HTTPException(400, "Šio mėnesio AI režisieriaus žinučių limitas išnaudotas.")
+    proj = _load(user, pid)
+    if not proj["clips"]:
+        raise HTTPException(400, "Pirmiausia sukurkite video arba įkelkite medžiagą.")
+    history = proj.get("director", [])[-10:]
+    lang = video_editor.LANGUAGES.get(proj["settings"]["subtitle_language"], "Lithuanian")
+    system = (
+        "You are the AI video director inside a Lithuanian Reels editing studio. The user tells you in plain words "
+        "what to change in their short video; you make the changes with the tools, then reply briefly (1-3 short "
+        f"sentences, in Lithuanian, friendly) what you changed. Use only values from OPTIONS. Scenes are clips in "
+        "order. For better visuals prefer replace_scene (free stock); use propose_ai_scene only when the user asks "
+        "for AI/generated/exact visuals. To shorten the video, set 'length' and/or shorten the voiceover text and "
+        "remove or trim scenes. Never invent clip ids. If something cannot be done, say so and suggest how. "
+        f"Voiceover text must be in {lang} with perfect grammar.\nOPTIONS: "
+        + json.dumps(_director_options(), ensure_ascii=False))
+    messages = [{"role": "system", "content": system}]
+    for h in history:
+        messages.append({"role": h["role"], "content": h["text"]})
+    messages.append({"role": "user", "content": "PROJECT: " + json.dumps(_director_state(proj), ensure_ascii=False)
+                     + "\n\nREQUEST: " + msg})
+    tools, actions, proposals, reply = _director_tools(), [], [], ""
+    model = None
+    for _ in range(8):
+        r, err = None, None
+        for m in ([model] if model else video_editor.TRANSLATE_MODELS):
+            try:
+                r = client.chat.completions.create(model=m, temperature=0.3, messages=messages, tools=tools)
+                model = m
+                break
+            except Exception as e:
+                err = e
+        if r is None:
+            raise HTTPException(502, f"AI neatsakė: {err}")
+        m_ = r.choices[0].message
+        calls = getattr(m_, "tool_calls", None) or []
+        if not calls:
+            reply = (m_.content or "").strip()
+            break
+        messages.append({"role": "assistant", "content": m_.content or "",
+                         "tool_calls": [{"id": c.id, "type": "function",
+                                         "function": {"name": c.function.name, "arguments": c.function.arguments}}
+                                        for c in calls]})
+        for c in calls:
+            try:
+                args = json.loads(c.function.arguments or "{}")
+            except ValueError:
+                args = {}
+            try:
+                res = _director_exec(user, pid, c.function.name, args, proposals)
+            except HTTPException as e:
+                res = "error: " + str(e.detail)
+            except Exception as e:
+                traceback.print_exc()
+                res = "error: " + str(e)[:200]
+            if res.startswith("ok"):
+                actions.append(c.function.name)
+            messages.append({"role": "tool", "tool_call_id": c.id, "content": res})
+    accounts.add_usage(user["username"], "director", 1)
+    proj = _load(user, pid)
+    reply = reply or ("Atlikta." if actions else "Nieko nepakeičiau – patikslinkite, ką norite pakeisti.")
+    proj["director"] = (proj.get("director", []) + [{"role": "user", "text": msg},
+                                                     {"role": "assistant", "text": reply}])[-40:]
+    _save(user, proj)
+    return {"reply": reply, "actions": actions, "proposals": proposals, "project": _public(proj),
+            "preview": bool(actions), "left": accounts.left(user["username"], "director")}

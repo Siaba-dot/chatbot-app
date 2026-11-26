@@ -115,9 +115,10 @@ def _password_ok(cfg, password):
 # ---------- AI išlaidų ribos (per mėnesį) ----------
 # ai_clips – AI video kadrai (Google), voice_chars – AI įgarsinimo simboliai. None – be ribos (administratorius).
 # auto_videos – automatiškai iš scenarijaus sudėti video (ir „Kiti vaizdai“)
-DEFAULT_LIMITS = {"basic": {"ai_clips": 0, "voice_chars": 0, "auto_videos": 10},
-                  "premium": {"ai_clips": 10, "voice_chars": 20000, "auto_videos": 60},
-                  "trial": {"ai_clips": 2, "voice_chars": 3000, "auto_videos": 5}}   # 🎁 Premium bandymas (mažesnės ribos)
+# director – 💬 AI režisieriaus žinutės
+DEFAULT_LIMITS = {"basic": {"ai_clips": 0, "voice_chars": 0, "auto_videos": 10, "director": 0},
+                  "premium": {"ai_clips": 10, "voice_chars": 20000, "auto_videos": 60, "director": 300},
+                  "trial": {"ai_clips": 2, "voice_chars": 3000, "auto_videos": 5, "director": 30}}   # 🎁 Premium bandymas (mažesnės ribos)
 
 
 def in_trial(cfg):
@@ -138,7 +139,7 @@ def limits_for(username):
     cfg = _secrets_users().get(username) or {}
     plan = effective_plan(cfg)
     if plan == "admin":
-        return {"ai_clips": None, "voice_chars": None, "auto_videos": None}
+        return {"ai_clips": None, "voice_chars": None, "auto_videos": None, "director": None}
     base = dict(DEFAULT_LIMITS["trial" if in_trial(cfg) else plan])
     for k in base:
         if cfg.get(k) is not None:

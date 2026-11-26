@@ -120,7 +120,8 @@ def options():
     return {
         "formats": FORMATS,
         "fits": {"fill": "Užpildyti kadrą", "blur": "Visas vaizdas + sulietas fonas"},
-        "templates": {k: {"category": v.get("cat"), "accent": v["accent"], "color": v["color"], "kind": v["kind"]}
+        "templates": {k: {"category": v.get("cat"), "accent": v["accent"], "color": v["color"], "kind": v["kind"],
+                          "look": v.get("look"), "effects": v.get("effects")}
                       for k, v in reels_studio.TEMPLATES.items()},
         "template_categories": list(reels_studio.TEMPLATE_CATEGORIES),
         "accents": {k: "#" + v[0] for k, v in reels_studio.ACCENTS.items()},
