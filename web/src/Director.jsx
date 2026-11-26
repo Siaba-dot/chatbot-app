@@ -38,7 +38,7 @@ export default function Director({ id, user, busyJob, onChanged, onAiScene, setE
     setProps([]);
     try {
       const r = await api(`/projects/${id}/director`, { method: "POST", body: { message } });
-      setMsgs(x => [...x, { role: "assistant", text: r.reply }]);
+      setMsgs(x => [...x, { role: "assistant", text: r.reply, done: r.done }]);
       setLeft(r.left);
       setProps(r.proposals || []);
       if (r.preview) onChanged(r.project);
@@ -60,7 +60,11 @@ export default function Director({ id, user, busyJob, onChanged, onAiScene, setE
         <div style={{ marginTop: 10 }}>
           <div className="dir-msgs" ref={box}>
             {!msgs.length && <div className="hint">Pvz.: „Antra scena nuobodi – įdėk ką nors gyvesnio“, „Titrus padaryk kaip kino anonse“, „Balsas tegul būna vyriškas“.</div>}
-            {msgs.map((m, i) => <div key={i} className={"dir-msg " + m.role}>{m.text}</div>)}
+            {msgs.map((m, i) => (
+              <div key={i} className={"dir-msg " + m.role}>{m.text}
+                {m.done && m.done.length > 0 && <div className="dir-done">{m.done.map((d, k) => <div key={k}>✓ {d}</div>)}</div>}
+              </div>
+            ))}
             {busy && <div className="dir-msg assistant">🎬 Dirbu… (gali užtrukti iki minutės)</div>}
           </div>
           {props.map(p => (
