@@ -660,7 +660,9 @@ def source_for_format(clips, settings, workdir, fmt, vo_path=None, progress=None
     src = os.path.join(workdir, f"joined_{fmt.replace(':', 'x')}.mkv")
     # Gulsčias papildomas formatas (YouTube 16:9) iš stačios medžiagos – visas vaizdas per vidurį su sulietu
     # fonu (užpildant būtų nukirsta didžioji viršaus ir apačios dalis – žmonės liktų be galvų)
-    fill = s["fit"] == "fill" and not (fmt == "16:9" and _mostly_portrait(clips))
+    # YouTube (16:9): stačias kadras visada rodomas visas su sulietu fonu, gulsčias – per visą kadrą
+    # (anksčiau sprendžiama pagal visą medžiagą – automatiškai parinkti ilgi gulsti video „nusverdavo“)
+    fill = s["fit"] == "fill" and fmt != "16:9"
     idur = photo_duration(clips, s, vo_path)
     src, _ = video_editor.concat_clips(_clip_paths(clips, s, idur), src, fmt, progress=progress,
                                        image_duration=idur,
