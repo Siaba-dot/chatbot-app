@@ -422,3 +422,5 @@ textarea.input { resize: vertical; min-height: 70px; }
 .dir-prop { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px; margin-top: 8px;
   border: 1px dashed var(--amber); border-radius: 10px; font-size: 13.5px; }
 .director .chips .chip { font-size: 12.5px; }
+/* per visą ekraną – visada visas kadras (be nukirpimo), su juodais kraštais */
+video:fullscreen, video:-webkit-full-screen, .screen video:fullscreen { object-fit: contain !important; background: #000; }
