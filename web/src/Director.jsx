@@ -3,12 +3,14 @@ import { api } from "./api.js";
 
 // 💬 AI režisierius: klientas rašo, ką pakeisti – AI pats atlieka pakeitimus ir sukuria naują peržiūrą.
 const IDEAS = [
+  "Linksmiau, kaip TikTok – ryškūs titrai ir greitesnis tempas",
+  "Elegantiškiau ir ramiau",
+  "Kalėdinis stilius",
   "Padaryk kaip kino anonsą",
   "Sutrumpink iki 15 sekundžių",
-  "Muzika per garsi – ir parink energingesnę",
-  "Titrus padaryk didesnius ir geltonus",
-  "Pirmą sceną pakeisk į kavos pylimą iš arti",
-  "Pabaigoje pakviesk registruotis ir pridėk mano svetainę",
+  "Muziką parink energingesnę",
+  "Pradžioje užrašas „-20 % iki penktadienio“",
+  "Pabaigoje pakviesk rašyti žinutę",
 ];
 
 export default function Director({ id, user, busyJob, onChanged, onAiScene, setError }) {
