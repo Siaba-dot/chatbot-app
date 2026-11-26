@@ -972,7 +972,8 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
         subs_y = reels_studio.SUBTITLE_POSITIONS.get(s["subs_pos"], 0.72)
         edited = os.path.join(tmp, "edited.mp4")
         # pakeitus greitį titrai piešiami apdailoje (galutiniu laiku) – kad sluoksniai nelįstų vienas ant kito
-        late_subs = abs(s["speed"] - 1) > 0.001
+        # titrai visada piešiami apdailoje – po priartėjimo efektų, todėl niekada neišlenda už ekrano kraštų
+        late_subs = True
         analysis = prep["analysis"]
         si = video_editor.probe(src)  # kitas formatas – kadro dydis iš jo medžiagos (analizė – ta pati)
         if (si["width"], si["height"]) != (analysis["info"]["width"], analysis["info"]["height"]):
