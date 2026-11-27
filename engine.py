@@ -66,7 +66,7 @@ DEFAULTS = {
     "category": "Prabanga",
     "all_formats": True,       # kuriant galutinį video – kartu dar 2 formatai (9:16, 16:9, 4:5)
     # 🎙 AI įgarsinimas (OpenAI balsas): tekstas skaitomas vietoj / šalia jūsų balso
-    "voiceover": {"on": False, "text": "", "voice": "coral"},
+    "voiceover": {"on": False, "text": "", "voice": "g:Kore"},  # numatytas – natūralus lietuviškas Google balsas
     "clip_gain": 20,           # originalaus garso garsumas, kai yra įgarsinimas (%)
 }
 

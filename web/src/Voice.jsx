@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, fileUrl } from "./api.js";
 
 // 🎙 AI įgarsinimas: tekstas -> balsas (OpenAI). Titrai daromi iš įgarsinimo.
@@ -26,7 +26,12 @@ function VoiceList({ voices, vo, setVo, sample, playing }) {
 }
 
 export default function Voice({ id, s, set, setS, opts, user, setToast, setError, clipsCount = 0, onAuto, busyJob }) {
-  const vo = s.voiceover || { on: false, text: "", voice: "coral" };
+  const vo = s.voiceover || { on: false, text: "", voice: "g:Kore" };
+  useEffect(() => {  // dar nenaudotame įgarsinime – natūralus lietuviškas Google balsas vietoj OpenAI (su akcentu)
+    if (user.gemini && !vo.on && !String(vo.text || "").trim() && !String(vo.voice || "").startsWith("g:")) {
+      set({ voiceover: { ...vo, voice: Object.keys(opts.gemini_voices || {})[0] || "g:Kore" } });
+    }
+  }, []);  // eslint-disable-line
   const [topic, setTopic] = useState("");
   const [secs, setSecs] = useState(30);
   const [busy, setBusy] = useState(false);

@@ -23,8 +23,11 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
   const [prompt, setPrompt] = useState(mem.prompt || "");
   const [plan, setPlan] = useState(mem.plan || null);
   const aiVoice = user.ai || user.gemini;
-  const [voice, setVoice] = useState(() => mem.voice || (s.voiceover && s.voiceover.voice) ||
-    (user.gemini ? Object.keys(opts.gemini_voices || {})[0] : "coral"));
+  // numatytas – natūralus lietuviškas Google balsas (OpenAI – tik jei pasirinktas sąmoningai arba Google nėra)
+  const firstGoogle = Object.keys(opts.gemini_voices || {})[0];
+  const projVoice = s.voiceover && s.voiceover.voice;
+  const [voice, setVoice] = useState(() => mem.voice ||
+    (user.gemini ? (projVoice && projVoice.startsWith("g:") ? projVoice : firstGoogle) : (user.ai ? "coral" : "none")));
   useEffect(() => {
     try { localStorage.setItem("sg_state_" + id, JSON.stringify({ goal, topic, secs, vars, ai, offset, voice, mode, prompt, plan })); }
     catch { /* privatus langas */ }
