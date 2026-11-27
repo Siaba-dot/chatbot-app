@@ -82,7 +82,7 @@ GEMINI_VOICES = {"g:Kore": "Kore – tvirta, užtikrinta moteris", "g:Aoede": "A
                  "g:Iapetus": "Iapetus – aiškus vyras", "g:Algieba": "Algieba – ramus vyras"}
 GEMINI_TTS_MODELS = ("gemini-3.8-flash-tts", "gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts",
                      "gemini-2.5-pro-preview-tts")
-TTS_VERSION = "2"  # pakeitus įgarsinimo būdą – seni įgarsinimai sukuriami iš naujo
+TTS_VERSION = "3"  # pakeitus įgarsinimo būdą – seni įgarsinimai sukuriami iš naujo (3 – išvalyta pabaiga)
 TTS_INSTRUCTIONS = ("Speak in natural, fluent {lang} with correct pronunciation and stress. Warm, confident, "
                     "energetic social-media tone, clear diction, natural pauses at punctuation.")
 
@@ -538,12 +538,74 @@ def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420, hq=Fal
     return out_path
 
 
+def clean_voice(path):
+    """Įgarsinimo valymas: nukerpamas pabaigos „čirškėjimas“ / triukšmas po paskutinio sakinio, tyla pabaigoje
+    sutrumpinama, uždedamas švelnus užgesimas (be spragtelėjimo) ir nuimami aukšti cypiantys dažniai."""
+    import numpy as np
+    sr = 24000
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
+                       capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        return path
+    x = np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+    hop = int(sr * 0.02)
+    n = len(x) // hop
+    if n < 10:
+        return path
+    rms = np.sqrt(np.mean(x[: n * hop].reshape(n, hop) ** 2, axis=1))
+    thr = max(0.012, float(np.percentile(rms, 90)) * 0.12)
+    voiced = rms > thr
+    segs, i = [], 0  # kalbos atkarpos (tarpai trumpesni nei 0,18 s – sujungiami)
+    while i < n:
+        if voiced[i]:
+            j = i
+            while j < n and (voiced[j] or (j + 9 < n and voiced[j:j + 9].any())):
+                j += 1
+            segs.append([i, j])
+            i = j
+        else:
+            i += 1
+    if not segs:
+        return path
+    end = segs[-1][1]
+
+    def centroid(a, b):  # spektro „aukštumas“ (Hz) – čirškėjimas daug aukštesnis už kalbą
+        seg = x[a * hop: b * hop]
+        if len(seg) < 256:
+            return 0.0
+        spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+        f = np.fft.rfftfreq(len(seg), 1 / sr)
+        return float((spec * f).sum() / (spec.sum() + 1e-9))
+    speech_c = float(np.median([centroid(a, b) for a, b in segs[:-1]] or [0]))
+    speech_e = float(np.median(rms[voiced]))
+    # pabaigos „čirškėjimas“: trumpa (<0,7 s), nuo kalbos atskirta (≥0,2 s) atkarpa, kuri skamba ne kaip kalba
+    # (daug aukštesni dažniai arba gerokai tylesnė) – paskutinis tikras žodis (pvz. „Ačiū!“) paliekamas
+    while len(segs) > 1:
+        a, b = segs[-1]
+        gap = a - segs[-2][1]
+        odd = centroid(a, b) > max(1.6 * speech_c, 1800) or float(rms[a:b].mean()) < 0.35 * speech_e
+        if (b - a) * 0.02 < 0.7 and gap * 0.02 >= 0.2 and odd:
+            segs.pop()
+            end = segs[-1][1]
+        else:
+            break
+    cut = min(len(x) / sr, end * 0.02 + 0.25)
+    fade = 0.18
+    tmp = path + ".clean.mp3"
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", path, "-t", f"{cut:.3f}", "-af",
+                        f"lowpass=f=9500,afade=t=in:d=0.02,afade=t=out:st={max(0.0, cut - fade):.3f}:d={fade}",
+                        "-c:a", "libmp3lame", "-b:a", "160k", tmp], capture_output=True)
+    if r.returncode == 0 and os.path.exists(tmp):
+        os.replace(tmp, path)
+    return path
+
+
 def tts(client, text, voice, out_path, language="lt", gemini_key=None):
     """AI įgarsinimas: tekstas -> MP3. „g:…“ balsai – Google Gemini (natūralus lietuviškas tarimas), kiti – OpenAI."""
     if voice.startswith("g:"):
         if not gemini_key:
             raise RuntimeError("Google balsams reikia Google (Gemini) rakto – „Mano projektai“ → Google raktas.")
-        return tts_gemini(gemini_key, text, voice, out_path, language)
+        return clean_voice(tts_gemini(gemini_key, text, voice, out_path, language))
     lang = video_editor.LANGUAGES.get(language, "Lithuanian")
     try:
         with client.audio.speech.with_streaming_response.create(
@@ -555,7 +617,7 @@ def tts(client, text, voice, out_path, language="lt", gemini_key=None):
                 model="tts-1-hd", voice=voice if voice in ("alloy", "echo", "fable", "onyx", "nova", "shimmer")
                 else "nova", input=text, response_format="mp3") as r:
             r.stream_to_file(out_path)
-    return out_path
+    return clean_voice(out_path)
 
 
 def voice_text(client, topic, language="lt", seconds=30):
