@@ -142,7 +142,8 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
         ) : null}
         {user.ai && (
           <>
-            <div className="row" style={{ margin: "12px 0 8px" }}><b>OpenAI balsai</b>{user.gemini && <span className="hint">(lietuviškai – su akcentu)</span>}</div>
+            <div className="row" style={{ margin: "16px 0 8px" }}><b>OpenAI balsai</b><span className="pill" style={{ color: "var(--muted)" }}>lietuviškai – su akcentu</span></div>
+            <div className="hint" style={{ marginBottom: 8 }}>Tinka anglų ar kitoms kalboms. Lietuviškam tekstui rekomenduojame 🇱🇹 Google balsus.</div>
             <VoiceList voices={opts.voices} vo={vo} setVo={setVo} sample={sample} playing={playing} />
           </>
         )}

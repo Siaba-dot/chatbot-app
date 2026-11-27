@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import VoiceOptions from "./VoiceOptions.jsx";
 import { api, waitJob } from "./api.js";
 
 // ✨ Scenarijus pagal verslo sritį: keli teksto variantai → sufleris, įgarsinimas arba automatinis video.
@@ -124,7 +125,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                     <div className="field" style={{ marginTop: 8 }}>
                       <label>Balsas{plan.voice === "female" ? " (siūlomas moteriškas)" : plan.voice === "male" ? " (siūlomas vyriškas)" : ""}</label>
                       <select className="input" value={voice} onChange={e => setVoice(e.target.value)}>
-                        {voices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        <VoiceOptions opts={opts} google={user.gemini} openai={user.ai} />
                         <option value="none">Be balso – tik titrai ir muzika</option>
                       </select>
                     </div>
@@ -181,7 +182,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                 <div className="field">
                   <label>Balsas automatiniam video</label>
                   <select className="input" value={voice} onChange={e => setVoice(e.target.value)}>
-                    {voices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    <VoiceOptions opts={opts} google={user.gemini} openai={user.ai} />
                     <option value="none">Be balso – tik titrai ir muzika</option>
                   </select>
                 </div>

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import VoiceOptions from "./VoiceOptions.jsx";
 import { api, fileUrl, upload } from "./api.js";
 
 // 🎵 Kadrui skirta muzika arba įgarsinimas – skamba tik per šį kadrą.
@@ -123,7 +124,7 @@ export default function ClipSound({ id, clip, opts, user, globalMusic, onClose, 
             {clip.image && <div className="hint" style={{ marginTop: -6, marginBottom: 8 }}>Nuotrauka bus rodoma tiek, kiek trunka įgarsinimas.</div>}
             <div className="field"><label>Balsas</label>
               <select className="input" value={voice} onChange={e => setVoice(e.target.value)}>
-                {voices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                <VoiceOptions opts={opts} google={canGoogle} openai={canOpenAI} />
               </select></div>
             {slider({ label: "Įgarsinimo garsumas", value: volume, set: setVolume })}
             {saved && saved.file && (
