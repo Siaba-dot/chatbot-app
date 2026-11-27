@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api } from "./api.js";
+import { api, waitJob } from "./api.js";
 
 // 💬 AI režisierius: klientas rašo, ką pakeisti – AI pats atlieka pakeitimus ir sukuria naują peržiūrą.
 const IDEAS = [
@@ -13,7 +13,7 @@ const IDEAS = [
   "Pabaigoje pakviesk rašyti žinutę",
 ];
 
-export default function Director({ id, user, busyJob, onChanged, onAiScene, setError }) {
+export default function Director({ id, user, busyJob, onChanged, onAiScene, setError, setJob }) {
   const [msgs, setMsgs] = useState([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -41,7 +41,17 @@ export default function Director({ id, user, busyJob, onChanged, onAiScene, setE
       setMsgs(x => [...x, { role: "assistant", text: r.reply, done: r.done }]);
       setLeft(r.left);
       setProps(r.proposals || []);
-      if (r.preview) onChanged(r.project);
+      if (r.ai_job) {  // ✨ AI kadrai kuriami fone – palaukiam ir tada peržiūra
+        setJob && setJob(r.ai_job);
+        try {
+          const done = await waitJob(r.ai_job.id, setJob || (() => {}));
+          setMsgs(x => [...x, { role: "assistant", text: "✨ " + (done.message || "AI kadrai sukurti") }]);
+        } catch (e) {
+          setMsgs(x => [...x, { role: "assistant", text: "⚠ " + e.message }]);
+        }
+        setJob && setJob(null);
+        onChanged(await api("/projects/" + id));
+      } else if (r.preview) onChanged(r.project);
     } catch (e) {
       setMsgs(x => [...x, { role: "assistant", text: "⚠ " + e.message }]);
     } finally { setBusy(false); }

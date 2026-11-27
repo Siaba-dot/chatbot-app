@@ -461,7 +461,7 @@ export default function Editor({ id, user }) {
         )}
 
         {proj.clips.length > 0 && (
-          <Director id={id} user={user} busyJob={!!job} setError={setError}
+          <Director id={id} user={user} busyJob={!!job} setError={setError} setJob={setJob}
             onChanged={p => { setProj(p); setS(p.settings); setLines(null); setSaved(n => n + 1); run("preview", p.settings); }}
             onAiScene={(cid, prompt) => { const c = proj.clips.find(x => x.id === cid); if (c) aiScene(c, prompt); }} />
         )}
