@@ -547,7 +547,8 @@ def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, bas
                     continue
                 col = hl if key else base
                 rot = (-3, 2, -2, 3)[(pi + i) % 4]
-                size = round(fsize * (1.18 if key else 1.0))
+                size = fsize * (1.18 if key else 1.0)
+                size = round(size * min(1.0, max_w / max(1.0, text_width(font, size, up(plain(w))))))  # ilgas žodis telpa
                 tags = (f"\\an5\\pos({width // 2},{round(height * ypos)})\\fs{size}\\1c&H{col}&\\bord{ol}"
                         f"\\shad{sh}\\frz{rot}\\fscx45\\fscy45\\t(0,90,\\fscx114\\fscy114)"
                         f"\\t(90,170,\\fscx100\\fscy100)")
