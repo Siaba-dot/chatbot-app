@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import VoiceOptions from "./VoiceOptions.jsx";
 import { api, waitJob } from "./api.js";
 
 // ✨ Scenarijus pagal verslo sritį: keli teksto variantai → sufleris, įgarsinimas arba automatinis video.
@@ -22,8 +23,11 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
   const [prompt, setPrompt] = useState(mem.prompt || "");
   const [plan, setPlan] = useState(mem.plan || null);
   const aiVoice = user.ai || user.gemini;
-  const [voice, setVoice] = useState(() => mem.voice || (s.voiceover && s.voiceover.voice) ||
-    (user.gemini ? Object.keys(opts.gemini_voices || {})[0] : "coral"));
+  // numatytas – natūralus lietuviškas Google balsas (OpenAI – tik jei pasirinktas sąmoningai arba Google nėra)
+  const firstGoogle = Object.keys(opts.gemini_voices || {})[0];
+  const projVoice = s.voiceover && s.voiceover.voice;
+  const [voice, setVoice] = useState(() => mem.voice ||
+    (user.gemini ? (projVoice && projVoice.startsWith("g:") ? projVoice : firstGoogle) : (user.ai ? "coral" : "none")));
   useEffect(() => {
     try { localStorage.setItem("sg_state_" + id, JSON.stringify({ goal, topic, secs, vars, ai, offset, voice, mode, prompt, plan })); }
     catch { /* privatus langas */ }
@@ -124,7 +128,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                     <div className="field" style={{ marginTop: 8 }}>
                       <label>Balsas{plan.voice === "female" ? " (siūlomas moteriškas)" : plan.voice === "male" ? " (siūlomas vyriškas)" : ""}</label>
                       <select className="input" value={voice} onChange={e => setVoice(e.target.value)}>
-                        {voices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        <VoiceOptions opts={opts} google={user.gemini} openai={user.ai} />
                         <option value="none">Be balso – tik titrai ir muzika</option>
                       </select>
                     </div>
@@ -181,7 +185,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                 <div className="field">
                   <label>Balsas automatiniam video</label>
                   <select className="input" value={voice} onChange={e => setVoice(e.target.value)}>
-                    {voices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    <VoiceOptions opts={opts} google={user.gemini} openai={user.ai} />
                     <option value="none">Be balso – tik titrai ir muzika</option>
                   </select>
                 </div>

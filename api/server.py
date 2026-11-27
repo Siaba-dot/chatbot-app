@@ -1067,6 +1067,14 @@ def voice_sample(voice: str, user=Depends(current_user)):
     return FileResponse(path, media_type="audio/mpeg")
 
 
+def _voice_for(voice):
+    """Google balsas, kai nėra Google rakto, pakeičiamas OpenAI balsu (kad video vis tiek būtų sukurtas)."""
+    v = voice or "g:Kore"
+    if v.startswith("g:") and not stock_key("gemini"):
+        return "coral"
+    return v
+
+
 def _voice_quota(user, text):
     """AI įgarsinimo simbolių limitas (tik kai kuriamas naujas įgarsinimas)."""
     lft = accounts.left(user["username"], "voice_chars")
@@ -1080,7 +1088,8 @@ def _voice_quota(user, text):
 def voiceover_preview(pid: str, user=Depends(current_user)):
     """▶ Išklausyti tikrąjį įgarsinimą (tas pats failas bus naudojamas video – antrą kartą nemokama)."""
     proj = _load(user, pid)
-    vo = proj["settings"].get("voiceover") or {}
+    vo = dict(proj["settings"].get("voiceover") or {})
+    vo["voice"] = _voice_for(vo.get("voice"))
     text = str(vo.get("text", "")).strip()
     if not text:
         raise HTTPException(400, "Įrašykite įgarsinimo tekstą.")
@@ -1096,7 +1105,7 @@ def voiceover_preview(pid: str, user=Depends(current_user)):
     if not os.path.exists(path):
         try:
             _voice_quota(user, text)
-            engine.tts(client, text, vo.get("voice", "coral"), path, proj["settings"]["subtitle_language"],
+            engine.tts(client, text, _voice_for(vo.get("voice")), path, proj["settings"]["subtitle_language"],
                        gemini_key=stock_key("gemini"))
             accounts.add_usage(user["username"], "voice_chars", len(text))
         except (RuntimeError, PermissionError) as e:
@@ -1678,7 +1687,7 @@ def clip_sound(pid: str, cid: str, body: SoundBody, user=Depends(current_user)):
         c["sound"] = cur
     elif body.kind == "voice":
         text = (body.text or "").strip()[:1500]
-        voice = body.voice or "coral"
+        voice = _voice_for(body.voice)
         if not text:
             raise HTTPException(400, "Įrašykite, ką balsas turi pasakyti.")
         if user["plan"] not in AI_PLANS:
@@ -1869,7 +1878,8 @@ def _run_job(jid, user, pid, kind, quick, words):
         if client is not None and proj["settings"]["subtitles"] and left is not None and left <= 0:
             client = None  # minutės baigėsi – titrai be AI atpažinimo
         vo_path, vo_key = None, None
-        vo = proj["settings"].get("voiceover") or {}
+        vo = dict(proj["settings"].get("voiceover") or {})
+        vo["voice"] = _voice_for(vo.get("voice"))
         if vo.get("on") and str(vo.get("text", "")).strip():  # 🎙 AI įgarsinimas
             google = str(vo.get("voice", "")).startswith("g:")
             if user["plan"] not in AI_PLANS:
@@ -1887,7 +1897,7 @@ def _run_job(jid, user, pid, kind, quick, words):
                     _voice_quota(user, vo["text"].strip())
                 except PermissionError as e:
                     raise ValueError(str(e))
-                engine.tts(client, vo["text"].strip(), vo.get("voice", "coral"), vo_path,
+                engine.tts(client, vo["text"].strip(), _voice_for(vo.get("voice")), vo_path,
                            proj["settings"]["subtitle_language"], gemini_key=stock_key("gemini"))
                 accounts.add_usage(user["username"], "voice_chars", len(vo["text"].strip()))
         prep = None if kind == "prepare" else _load_prep(user, proj)  # „Atpažinti iš naujo“ – visada iš naujo
