@@ -409,7 +409,7 @@ def _omni_reason(it):
     return "; ".join(found)[:300] or "Google priežasties nenurodė"
 
 
-def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
+def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420, hq=False):
     """AI video kadras per Gemini Omni Flash (Interactions API). Bandomi keli užklausos variantai (Google pavyzdžio
     forma, trukmė 4 s → numatyta), kol vienas pavyksta; nepavykę bandymai Google neapmokestinami."""
     say = status or (lambda m: None)
@@ -424,6 +424,12 @@ def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
         (parts, task, {"type": "video", "aspect_ratio": ar}, True),
         (parts, task, {"type": "video", "aspect_ratio": ar}, False),
     ]
+    if hq:  # geresnė kokybė: 1080p, 8 s (nepavykus – 720p, tada įprasti variantai)
+        variants = [
+            (text, None, {"type": "video", "aspect_ratio": ar, "duration": "8s", "resolution": "1080p"}, True),
+            (parts, task, {"type": "video", "aspect_ratio": ar, "duration": "8s", "resolution": "1080p"}, True),
+            (text, None, {"type": "video", "aspect_ratio": ar, "duration": "8s", "resolution": "720p"}, True),
+        ] + variants
     last = None
     for model in models[:2]:
         for n, (inp, gc, fmt, background) in enumerate(variants, 1):
@@ -467,8 +473,9 @@ def omni_generate(key, prompt, aspect, out_path, status=None, timeout=420):
                        "bandomasis (preview).")
 
 
-def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
-    """AI video kadras (Google Veo) pagal aprašymą. aspect – „9:16“ arba „16:9“. Grąžina kelią."""
+def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420, hq=False):
+    """AI video kadras (Google Veo) pagal aprašymą. aspect – „9:16“ arba „16:9“. Grąžina kelią.
+    hq – geresnė kokybė: pilnas (ne „fast“/„lite“) modelis, 1080p, 8 s (brangiau)."""
     import time as _t
     import urllib.request
     say = status or (lambda m: None)
@@ -478,12 +485,17 @@ def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
     op, last = None, None
     models = veo_models(key)
     if not models:  # Google dabar video kuria per Gemini Omni
-        return omni_generate(key, prompt, aspect, out_path, status, timeout)
+        return omni_generate(key, prompt, aspect, out_path, status, timeout, hq=hq)
+    if hq:  # kokybiškiausi modeliai pirmi
+        tier = lambda n: 0 if not re.search(r"fast|lite", n) else 1 if "fast" in n else 2  # noqa: E731
+        models = sorted(models, key=tier)
     for model in models:
-        for secs in (VEO_SECONDS, 5, None):  # 4 s (pigiausia); senesni modeliai – nuo 5 s
+        for secs in ((8, 6, None) if hq else (VEO_SECONDS, 5, None)):  # pigiausia – 4 s; senesni modeliai – nuo 5 s
             b = json.loads(json.dumps(body))
             if secs:
                 b["parameters"]["durationSeconds"] = secs
+            if hq and secs:
+                b["parameters"]["resolution"] = "1080p"
             try:
                 op = _gapi(key, f"/models/{model}:predictLongRunning", b)
                 break
@@ -492,12 +504,12 @@ def veo_generate(key, prompt, aspect, out_path, status=None, timeout=420):
                 if str(e).startswith(("401", "403")):
                     raise RuntimeError("Google raktas neleidžia kurti video (Veo) – gali reikėti įjungti mokėjimus "
                                        "Google AI Studio (Veo nemokamai nepasiekiamas).")
-                if not (str(e).startswith("400") and "duration" in str(e).lower()):
+                if not (str(e).startswith("400") and re.search(r"duration|resolution", str(e), re.I)):
                     break  # ne trukmės klaida – bandom kitą modelį
         if op:
             break
     if (not op or not op.get("name")) and VEO_DIAG.get("omni"):
-        return omni_generate(key, prompt, aspect, out_path, status, timeout)
+        return omni_generate(key, prompt, aspect, out_path, status, timeout, hq=hq)
     if not op or not op.get("name"):
         seen = "; ".join(VEO_DIAG["seen"][:12]) or (
             "modelių sąrašo gauti nepavyko: " + VEO_DIAG["error"] if VEO_DIAG["error"] else "video modelių nėra")

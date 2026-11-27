@@ -78,8 +78,8 @@ def mocks(monkeypatch, media):
     monkeypatch.setattr(srv, "stock_download", stock_download)
     monkeypatch.setattr(engine, "tts", lambda client, text, voice, out, language="lt", gemini_key=None:
                         shutil.copy(media["audio"], out))
-    monkeypatch.setattr(engine, "veo_generate", lambda key, prompt, aspect, out, status=None:
-                        shutil.copy(media["portrait"], out))
+    monkeypatch.setattr(engine, "veo_generate", lambda key, prompt, aspect, out, status=None, **kw:
+                        state.setdefault("veo", []).append((prompt, kw)) or shutil.copy(media["portrait"], out))
     monkeypatch.setattr(srv, "_veo_prompt_en", lambda client, prompt: prompt)
     monkeypatch.setattr(srv, "openai_client", lambda user: state["ai_client"]
                         if user["plan"] in srv.AI_PLANS else None)

@@ -787,6 +787,9 @@ def _veo_prompt_en(client, prompt):
         return prompt
 
 
+VEO_HQ = True  # AI kadrai – geresnės kokybės Google modeliu (1080p, iki 8 s)
+
+
 def _run_veo(jid, user, pid, body):
     try:
         key = stock_key("gemini")
@@ -798,7 +801,7 @@ def _run_veo(jid, user, pid, body):
         vid = uuid.uuid4().hex[:8]
         path = os.path.join(d, f"veo_{vid}.mp4")
         _job_update(jid, progress=0.05)
-        engine.veo_generate(key, prompt, "16:9" if fmt == "16:9" else "9:16", path,
+        engine.veo_generate(key, prompt, "16:9" if fmt == "16:9" else "9:16", path, hq=VEO_HQ,
                             status=lambda m: _job_update(jid, message=m, progress=0.15))
         _job_update(jid, message="Dedu kadrą į projektą…", progress=0.9)  # sustabdžius – čia nutrūksta
         thumb = path + ".thumb.jpg"
@@ -1235,7 +1238,10 @@ def _ai_pick(client, cands, scene, query):
         "Pick the best stock video thumbnail for this scene of a short, high-quality business Reel. Prefer: clearly "
         "matches the scene, attractive, professional, sharp, natural light, real people/products (no cartoons, no "
         "cheap-looking or odd shots, no visible logos/text). Scene: " + (scene or "")[:300] + f" | search: {query}. "
-        f"Reply only JSON: {{\"best\": <index 0-{len(cands) - 1}>, \"ok\": true/false}} (ok=false if none fits).")}]
+        "Rate how good the BEST one is for a premium-looking Reel on a 1-10 scale (10 = beautiful, sharp, perfectly "
+        "fitting; 7 = acceptable; below 6 = amateur, off-topic or ugly). "
+        f"Reply only JSON: {{\"best\": <index 0-{len(cands) - 1}>, \"ok\": true/false, \"score\": <1-10>}} "
+        "(ok=false if none fits).")}]
     for i, v in enumerate(cands):
         content.append({"type": "text", "text": f"#{i}"})
         content.append({"type": "image_url", "image_url": {"url": v["image"], "detail": "low"}})
@@ -1245,13 +1251,17 @@ def _ai_pick(client, cands, scene, query):
                                                messages=[{"role": "user", "content": content}])
             j = json.loads(r.choices[0].message.content)
             i = int(j.get("best", -1))
-            return (cands[i] if 0 <= i < len(cands) else None), bool(j.get("ok", True))
+            try:
+                score = float(j.get("score", 7))
+            except (TypeError, ValueError):
+                score = 7.0
+            return (cands[i] if 0 <= i < len(cands) else None), bool(j.get("ok", True)), score
         except Exception as e:
             print("AI vaizdo parinkimas nepavyko:", e, file=sys.stderr)
-    return None, True
+    return None, True, 0.0
 
 
-def _pick_stock(q, fmt, provider, want, exclude, client=None, scene=""):
+def _pick_stock(q, fmt, provider, want, exclude, client=None, scene="", min_score=None):
     """Geriausias vaizdas scenai: aktualiausi ir kokybiškiausi kandidatai (ne atsitiktiniai), be jau naudotų.
     Premium – AI dar pažiūri miniatiūras ir išrenka tinkamiausią. Grąžina None, jei nieko tinkamo."""
     import random
@@ -1278,11 +1288,15 @@ def _pick_stock(q, fmt, provider, want, exclude, client=None, scene=""):
     ranked = sorted(enumerate(cand), key=lambda iv: -_stock_score(iv[1], iv[0], fmt, want))
     top = [v for _, v in ranked[:8]]
     if client is not None and len(top) > 1 and all(v.get("image") for v in top):
-        best, ok = _ai_pick(client, top, scene, q)
+        best, ok, score = _ai_pick(client, top, scene, q)
+        if min_score is not None:  # griežtas režimas (AI režisierius) – tik tikrai kokybiški kadrai
+            return best if (best is not None and ok and score >= min_score) else None
         if best is not None and ok:
             return best
         if best is not None and not ok:
             return None if len(cand) > 3 else best  # nieko tinkamo – bandysim kitą paiešką
+    if min_score is not None:
+        return None  # be AI įvertinimo kokybės garantuoti negalima
     return random.choice(top[:3])  # truputis įvairovės tarp geriausių
 
 
@@ -2475,9 +2489,10 @@ def _director_tools():
           index=intg, text=st),
         s(("no_change", "Use ONLY when the request needs no change (a question) or is impossible. reason – short "
                         "explanation in Lithuanian.", ["reason"]), reason=st),
-        s(("propose_ai_scene", "Suggest replacing a scene with an AI-generated shot (costs the user's AI clip "
-                               "limit – the user must confirm, it is NOT done now). prompt – vivid English shot "
-                               "description.", ["clip_id", "prompt"]), clip_id=st, prompt=st),
+        s(("ai_scene", "Create a NEW AI-generated shot (Google, high quality) for a scene. Use when the user asks for "
+                       "AI/generated/exact visuals, or when replace_scene reports no high-quality stock video. "
+                       "prompt – one vivid English shot description (subject, action, setting, light, camera).",
+           ["clip_id", "prompt"]), clip_id=st, prompt=st),
     ]
 
 
@@ -2508,11 +2523,49 @@ def _director_options():
             "voices": {**engine.GEMINI_VOICES, **engine.VOICES}}
 
 
+DIRECTOR_AI_MAX = 3  # daugiausia AI kadrų vienai AI režisieriaus žinutei
+
+
+def _director_queue_ai(user, clip, prompt, queue):
+    """AI kadras scenai – įrašomas į eilę (sukuriamas fone po atsakymo), jei leidžia limitai ir raktas."""
+    if any(q["clip_id"] == clip["id"] for q in queue):
+        return "ok, AI shot already queued for this scene"
+    if not stock_key("gemini"):
+        return "error: no high-quality stock video found and AI shots are not available (no Google key)"
+    lft = accounts.left(user["username"], "ai_clips")
+    if lft is not None and lft - len(queue) < 1:
+        return "error: no high-quality stock video found and the monthly AI shot limit is used up"
+    if len(queue) >= DIRECTOR_AI_MAX:
+        return f"error: at most {DIRECTOR_AI_MAX} AI shots per message – ask the user to continue in the next message"
+    queue.append({"clip_id": clip["id"], "prompt": prompt, "name": clip.get("name")})
+    return "ok, a high-quality AI shot will be generated for this scene (1-3 min, uses 1 AI shot)"
+
+
+def _run_director_ai(jid, user, pid, queue):
+    """AI kadrai po AI režisieriaus atsakymo – vienas po kito (kiekvienas skaičiuojamas į AI kadrų limitą)."""
+    done = 0
+    for i, q in enumerate(queue):
+        _job_update(jid, message=f"Kuriamas AI kadras {i + 1}/{len(queue)}: „{q['name']}“…",
+                    progress=round(i / len(queue), 2))
+        sub = uuid.uuid4().hex[:12]
+        with _jobs_lock:
+            _jobs[sub] = {"id": sub, "user": user["username"], "project": pid, "kind": "veo_part", "status": "running",
+                          "progress": 0.0, "message": "", "created": time.time(), "result": None}
+        _run_veo(sub, user, pid, VeoBody(prompt=q["prompt"], replace=q["clip_id"]))
+        if _jobs[sub]["status"] != "done":
+            msg = _jobs[sub].get("message") or "nepavyko"
+            _job_update(jid, status="error" if not done else "done", progress=1.0,
+                        message=(f"Sukurta {done} AI kadr. Kitas nepavyko: {msg}" if done else msg))
+            return
+        done += 1
+    _job_update(jid, status="done", progress=1.0, message=f"Sukurta AI kadrų: {done} ✅")
+
+
 def _director_exec(user, pid, name, a, proposals):
     """Vienas AI režisieriaus veiksmas. Grąžina trumpą rezultatą (tekstas AI'ui)."""
     proj = _load(user, pid)
     clip = next((c for c in proj["clips"] if c["id"] == a.get("clip_id")), None)
-    need_clip = name in ("replace_scene", "remove_scene", "move_scene", "trim_scene", "scene_music", "propose_ai_scene")
+    need_clip = name in ("replace_scene", "remove_scene", "move_scene", "trim_scene", "scene_music", "ai_scene")
     if need_clip and clip is None:
         return "error: no such clip_id"
     if name == "update_style":
@@ -2559,11 +2612,10 @@ def _director_exec(user, pid, name, a, proposals):
         if not provider:
             return "error: stock video key missing"
         want = (clip["trim"][1] - clip["trim"][0]) if clip.get("trim") else clip["duration"]
-        used = {(provider, x) for x in []}
         best = _pick_stock(str(a["query"])[:60], proj["settings"]["format"], provider, want,
-                           set(_stock_used(user)) | used, openai_client(user), clip.get("scene") or "")
-        if not best:
-            return "error: nothing found – try another query"
+                           set(_stock_used(user)), openai_client(user), clip.get("scene") or "", min_score=8)
+        if not best:  # kokybiško nemokamo kadro nėra – AI sukurs naują
+            return _director_queue_ai(user, clip, clip.get("visual") or a["query"], proposals)
         src, _ = stock_download(user, pid, provider, best["id"], proj["settings"]["format"])
         path = os.path.join(_pdir(user, pid), "clips", clip["id"] + "_" + uuid.uuid4().hex[:4] + ".mp4")
         if engine._ffmpeg(["-i", src, "-an", "-c:v", "copy", path]).returncode != 0:
@@ -2617,9 +2669,10 @@ def _director_exec(user, pid, name, a, proposals):
         return "ok"
     if name == "no_change":
         return "ok, nothing changed"
-    if name == "propose_ai_scene":
-        proposals.append({"clip_id": clip["id"], "prompt": str(a["prompt"])[:400], "name": clip.get("name")})
-        return "proposal shown to the user with a confirm button"
+    if name == "ai_scene":
+        if not clip.get("auto") and not clip.get("ai_scene"):
+            return "error: this is the user's own video/photo – do not replace own material"
+        return _director_queue_ai(user, clip, str(a["prompt"])[:400], proposals)
     return "error: unknown tool"
 
 
@@ -2679,8 +2732,8 @@ def director(pid: str, body: DirectorBody, user=Depends(current_user)):
         "You are the AI video director inside a Lithuanian Reels editing studio. The user tells you in plain words "
         "what to change in their short video; you make the changes with the tools, then reply briefly (1-3 short "
         f"sentences, in Lithuanian, friendly) what you changed. Use only values from OPTIONS. Scenes are clips in "
-        "order. For better visuals prefer replace_scene (free stock); use propose_ai_scene only when the user asks "
-        "for AI/generated/exact visuals. To shorten the video, set 'length' and/or shorten the voiceover text and "
+        "order. For better visuals use replace_scene (it accepts only high-quality free stock and, if none exists, "
+        "automatically creates an AI shot); use ai_scene directly when the user asks for AI/generated/exact visuals. To shorten the video, set 'length' and/or shorten the voiceover text and "
         "remove or trim scenes. Never invent clip ids. If something cannot be done, say so and suggest how. "
         "On-screen texts: 'hook' is the big text at the START, 'cta' is the call-to-action text shown on screen at "
         "the END (e.g. 'Parašykite mums žinutę!', 'Registruokitės: www…'). When the user asks to add an invitation, "
@@ -2744,5 +2797,15 @@ def director(pid: str, body: DirectorBody, user=Depends(current_user)):
     proj["director"] = (proj.get("director", []) + [{"role": "user", "text": msg},
                                                      {"role": "assistant", "text": reply, "done": descr}])[-40:]
     _save(user, proj)
-    return {"reply": reply, "actions": actions, "done": descr, "proposals": proposals, "project": _public(proj),
+    ai_job = None
+    if proposals:  # AI kadrai – fone, vienas po kito
+        with _jobs_lock:
+            jid = uuid.uuid4().hex[:12]
+            _jobs[jid] = {"id": jid, "user": user["username"], "project": pid, "kind": "veo", "status": "running",
+                          "progress": 0.0, "message": "Ruošiu AI kadrus…", "created": time.time(), "result": None}
+        threading.Thread(target=_run_director_ai, args=(jid, user, pid, list(proposals)), daemon=True).start()
+        ai_job = _jobs[jid]
+        descr.append(f"✨ kuriama AI kadrų: {len(proposals)} (1–3 min. kiekvienas)")
+    return {"reply": reply, "actions": actions, "done": descr, "proposals": [], "ai_job": ai_job,
+            "project": _public(proj),
             "preview": bool(actions), "left": accounts.left(user["username"], "director")}
