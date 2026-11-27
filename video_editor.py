@@ -618,28 +618,38 @@ def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, bas
             ital = "\\i1" if it["font"] == "Playfair Display Italic" else ""
             base_tags = (f"\\an2\\pos({x},{y})\\fn{fnt}{ital}\\fs{round(it['size'])}\\bord{ol}\\shad{sh}")
             txt = _ass_escape(it["text"])
-            if mode == "wave":  # žodžiai atsiranda po vieną (iš suliejimo) ir visą frazę švelniai banguoja
+            if mode == "wave":  # žodžiai atsiranda po vieną (iš suliejimo); per kiekvieno žodžio raides bėga banga
                 if mask and it["role"] != "big":
                     continue
                 col = hl if (it["role"] == "big" and L.get("key_color")) else base
-                amp = max(3, round(it["size"] * 0.07))
-                period, steps = 1.1, 4
-                seg = period / steps
-                t0, k_ = a, 0
-                first = True
+                fs = round(it["size"])
+                amp = max(2, round(it["size"] * 0.075))
+                period, seg = 1.0, 0.16
+                letters = list(it["text"])
+                total = text_width(it["font"], it["size"], it["text"])
+                x_left, acc = x - total / 2, 0.0
+                cx = []
+                for ch in letters:  # kiekvienos raidės centras (pagal tikrą šrifto plotį)
+                    cw = text_width(it["font"], it["size"], ch)
+                    cx.append(round(x_left + acc + cw / 2))
+                    acc += cw
+                t0, first = a, True
                 while t0 < end - 0.02:
                     t1 = min(end, t0 + seg)
-                    ph0 = 2 * math.pi * ((t0 - start) / period) + i * 0.9
-                    ph1 = 2 * math.pi * ((t1 - start) / period) + i * 0.9
-                    y0, y1 = round(y + amp * math.sin(ph0)), round(y + amp * math.sin(ph1))
-                    if first:  # įsiveržimas: iš apačios, suliejęs ir permatomas
-                        y0 = y0 + round(it["size"] * 0.25)
-                    tags = (f"\\an2\\move({x},{y0},{x},{y1})\\fn{fnt}\\fs{round(it['size'])}\\bord{ol}\\shad{sh}"
-                            f"\\1c&H{col}&\\4a&H60&")
-                    if first:
-                        tags += "\\blur7\\alpha&H90&\\t(0,140,\\blur0\\alpha&H00&)"
-                    ev(t0, t1, tags, txt)
-                    first, t0, k_ = False, t1, k_ + 1
+                    for j, ch in enumerate(letters):
+                        if not ch.strip():
+                            continue
+                        ph0 = 2 * math.pi * (t0 - start) / period - j * 0.75
+                        ph1 = 2 * math.pi * (t1 - start) / period - j * 0.75
+                        y0, y1 = round(y + amp * math.sin(ph0)), round(y + amp * math.sin(ph1))
+                        if first:
+                            y0 += round(it["size"] * 0.22)
+                        tags = (f"\\an2\\move({cx[j]},{y0},{cx[j]},{y1})\\fn{fnt}\\fs{fs}\\bord{ol}\\shad{sh}"
+                                f"\\1c&H{col}&\\4a&H60&")
+                        if first:
+                            tags += "\\blur7\\alpha&H90&\\t(0,140,\\blur0\\alpha&H00&)"
+                        ev(t0, t1, tags, _ass_escape(ch))
+                    first, t0 = False, t1
                 continue
             if mode == "trailer":  # žodis švelniai išryškėja, kai ištariamas, ir lieka iki frazės pabaigos
                 serif = it["role"] == "serif"
