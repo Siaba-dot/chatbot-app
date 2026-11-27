@@ -4,6 +4,7 @@ Paleisti:  python -m pytest -q
 Išorinės paslaugos (OpenAI, Google, Pixabay, Stripe, Brevo) niekada nekviečiamos – jos imituojamos.
 """
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ import engine  # noqa: E402
 import server as srv  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-PASSWORD = "testas123"
+PASSWORD = secrets.token_urlsafe(12)  # kiekvienam paleidimui atsitiktinis (ne tikras slaptažodis)
 
 
 def ff(*args):

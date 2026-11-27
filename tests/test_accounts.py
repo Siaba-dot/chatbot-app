@@ -10,7 +10,7 @@ from conftest import PASSWORD
 
 
 def register(client, email, **kw):
-    body = dict({"name": "Kirpykla", "email": email, "password": "slaptazodis1", "consent": True}, **kw)
+    body = dict({"name": "Kirpykla", "email": email, "password": PASSWORD, "consent": True}, **kw)
     return client.post("/api/register", json=body)
 
 
@@ -45,7 +45,7 @@ def test_trial_expires_to_basic(client):
 
 def test_login_wrong_password(client, make_user):
     name, _ = make_user("basic")
-    assert client.post("/api/login", json={"username": name, "password": "blogas"}).status_code in (400, 401)
+    assert client.post("/api/login", json={"username": name, "password": PASSWORD + "x"}).status_code in (400, 401)
     assert client.post("/api/login", json={"username": name, "password": PASSWORD}).status_code == 200
 
 
