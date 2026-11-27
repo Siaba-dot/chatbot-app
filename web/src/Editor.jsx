@@ -10,7 +10,7 @@ import Director from "./Director.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
-  ["broll", "🎞 Intarpai"], ["voice", "🎙 Įgarsinimas"], ["anims", "✨ Animacijos"], ["sound", "🎵 Garsas"],
+  ["broll", "🎞 Intarpai"], ["voice", "🎙 Įgarsinimas"], ["anims", "✨ Animacijos ir grafika"], ["sound", "🎵 Garsas"],
   ["pace", "⏱ Tempas"],
 ];
 const PHONE = { "9:16": "", "16:9": "f169", "1:1": "f11", "4:5": "f45" };

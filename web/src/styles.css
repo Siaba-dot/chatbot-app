@@ -442,3 +442,9 @@ video:fullscreen, video:-webkit-full-screen, .screen video:fullscreen { object-f
 @media (max-width: 900px) {
   .editor { grid-template-areas: "stage" "left" "right"; }
 }
+
+/* skirtukai nesutelpa – keliasi į kitą eilutę (visi matomi, be slinkimo) */
+@media (min-width: 901px) {
+  .tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 0; }
+  .tab { padding: 9px 10px 8px; }
+}
