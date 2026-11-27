@@ -427,6 +427,8 @@ SUBTITLE_LOOKS = {
     "oneword": {"title": "Po vieną žodį", "font": "Anton", "bold": 0, "size": 0.15, "upper": True, "base": "FFFFFF",
                 "box": False, "outline": 1 / 16, "shadow": 0.9, "dim": "00", "pop": False, "ypos": None,
                 "mode": "oneword"},
+    "wave": {"title": "Banguojantys", "font": "Anton", "bold": 0, "size": 0.092, "upper": True, "base": "F2F2F2",
+             "box": False, "outline": 1 / 22, "shadow": 1.4, "dim": "00", "pop": False, "ypos": None, "mode": "wave"},
     "karaoke": {"title": "Karaoke", "font": FONT_NAME, "bold": 0, "size": 0.075, "upper": True, "base": "FFFFFF",
                 "box": False, "outline": 1 / 12, "shadow": 0.5, "dim": "00", "pop": True, "ypos": None,
                 "mode": "karaoke"},
@@ -595,13 +597,17 @@ def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, bas
             role = _mixed_role(w, i, pi) if mode == "mixed" else "normal"
             if mode == "trailer":  # pirma frazės pusė – balta stora, antra – pasvirusi serifinė akcento spalva
                 role = "normal" if i < (len(ph) + 1) // 2 else "serif"
+            if mode == "wave":  # svarbiausias žodis – didesnis
+                role = "big" if is_key(w) else "normal"
             if mode == "mixed" and role == "normal" and len(ph) > 1 and (pi + i) % 3 == 1:
                 role = "script"  # dalis žodžių – ranka, kreivai
             spec = {"big": (FONT_NAME, 1.55, True), "normal": (FONT_NAME, 1.0, True),
                     "small": ("Playfair Display Italic", 0.78, False), "script": ("Dancing Script", 1.35, False)}
             if mode == "trailer":
                 spec = {"normal": (FONT_NAME, 1.0, False), "serif": ("Playfair Display Italic", 1.18, False)}
-            f, k, upper = spec[role] if mode in ("mixed", "trailer") else (font, 1.0, L["upper"])
+            if mode == "wave":
+                spec = {"normal": ("Anton", 1.0, True), "big": ("Anton", 1.32, True)}
+            f, k, upper = spec[role] if mode in ("mixed", "trailer", "wave") else (font, 1.0, L["upper"])
             txt = plain(w).upper() if upper else plain(w)
             items.append({"text": txt, "font": f, "size": fsize * k, "role": role, "a": a, "b": b})
         pos = _layout(items, width, height, ypos, max_w)
@@ -612,6 +618,29 @@ def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, bas
             ital = "\\i1" if it["font"] == "Playfair Display Italic" else ""
             base_tags = (f"\\an2\\pos({x},{y})\\fn{fnt}{ital}\\fs{round(it['size'])}\\bord{ol}\\shad{sh}")
             txt = _ass_escape(it["text"])
+            if mode == "wave":  # žodžiai atsiranda po vieną (iš suliejimo) ir visą frazę švelniai banguoja
+                if mask and it["role"] != "big":
+                    continue
+                col = hl if (it["role"] == "big" and L.get("key_color")) else base
+                amp = max(3, round(it["size"] * 0.07))
+                period, steps = 1.1, 4
+                seg = period / steps
+                t0, k_ = a, 0
+                first = True
+                while t0 < end - 0.02:
+                    t1 = min(end, t0 + seg)
+                    ph0 = 2 * math.pi * ((t0 - start) / period) + i * 0.9
+                    ph1 = 2 * math.pi * ((t1 - start) / period) + i * 0.9
+                    y0, y1 = round(y + amp * math.sin(ph0)), round(y + amp * math.sin(ph1))
+                    if first:  # įsiveržimas: iš apačios, suliejęs ir permatomas
+                        y0 = y0 + round(it["size"] * 0.25)
+                    tags = (f"\\an2\\move({x},{y0},{x},{y1})\\fn{fnt}\\fs{round(it['size'])}\\bord{ol}\\shad{sh}"
+                            f"\\1c&H{col}&\\4a&H60&")
+                    if first:
+                        tags += "\\blur7\\alpha&H90&\\t(0,140,\\blur0\\alpha&H00&)"
+                    ev(t0, t1, tags, txt)
+                    first, t0, k_ = False, t1, k_ + 1
+                continue
             if mode == "trailer":  # žodis švelniai išryškėja, kai ištariamas, ir lieka iki frazės pabaigos
                 serif = it["role"] == "serif"
                 if mask and not serif:
