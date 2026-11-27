@@ -424,6 +424,9 @@ SUBTITLE_LOOKS = {
     "trailer": {"title": "Kino anonsas", "font": FONT_NAME, "bold": 0, "size": 0.074, "upper": False,
                 "base": "FFFFFF", "box": False, "outline": 1 / 14, "shadow": 0.7, "dim": "00", "pop": False,
                 "ypos": None, "mode": "trailer"},
+    "oneword": {"title": "Po vieną žodį", "font": "Anton", "bold": 0, "size": 0.15, "upper": True, "base": "FFFFFF",
+                "box": False, "outline": 1 / 16, "shadow": 0.9, "dim": "00", "pop": False, "ypos": None,
+                "mode": "oneword"},
     "karaoke": {"title": "Karaoke", "font": FONT_NAME, "bold": 0, "size": 0.075, "upper": True, "base": "FFFFFF",
                 "box": False, "outline": 1 / 12, "shadow": 0.5, "dim": "00", "pop": True, "ypos": None,
                 "mode": "karaoke"},
@@ -547,6 +550,21 @@ def _dynamic_events(L, phrases, width, height, ypos, fsize, outline, shadow, bas
                         f"\\shad{sh}\\frz{rot}\\fscx45\\fscy45\\t(0,90,\\fscx114\\fscy114)"
                         f"\\t(90,170,\\fscx100\\fscy100)")
                 ev(a if i else start, b2, tags, _ass_escape(up(plain(w))))
+            continue
+        if mode == "oneword":  # po vieną žodį: balta, siaura, didelė; įsiveržia su judesio suliejimu (glitch)
+            if mask:
+                continue
+            for i, (w, a, b) in enumerate(ph):
+                b2 = ph[i + 1][1] if i + 1 < len(ph) else end
+                jitter = (-14, 10, -8, 12)[(pi + i) % 4]
+                word = up(plain(w))
+                k = min(1.0, max_w / max(1.0, text_width(font, fsize, word)))  # ilgas žodis – mažinamas, kad tilptų
+                f_ = lambda x: round(x * k)  # noqa: E731
+                tags = (f"\\an5\\pos({width // 2 + jitter},{round(height * ypos)})\\1c&H{base}&\\bord{ol}\\shad{sh}"
+                        f"\\blur9\\fscx{f_(150)}\\fscy{f_(92)}\\alpha&H70&"
+                        f"\\t(0,70,\\blur3\\fscx{f_(108)}\\fscy{f_(100)}\\alpha&H10&)"
+                        f"\\t(70,130,\\blur0\\fscx{f_(100)}\\fscy{f_(100)}\\alpha&H00&)")
+                ev(a if i else start, max(b2, a + 0.14), tags, _ass_escape(word))
             continue
         if mode == "karaoke":  # žodžiai užsipildo akcento spalva, kai ištariami
             parts, t = [], start
