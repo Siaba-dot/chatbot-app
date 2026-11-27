@@ -1223,6 +1223,10 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             dp, box = fxpack.device_png(os.path.join(tmp, "device.png"), W, H)
             graph += fxpack.pip_chains(vout, f"[pipo{gi_}]", it["t"], W, H, fps, _filter_path(dp), box, f"pp{gi_}")
             vout = f"[pipo{gi_}]"
+        for gi_, it in enumerate([x for x in gfx if x["kind"] == "reel"][:3]):  # 🎞️ prasisukanti kino juosta
+            rp = fxpack.reel_png(os.path.join(tmp, f"reel{gi_}.png"), W, H)
+            graph += fxpack.reel_chains(vout, f"[rlo{gi_}]", it["t"], W, H, fps, _filter_path(rp), f"rl{gi_}")
+            vout = f"[rlo{gi_}]"
         for gi_, it in enumerate([x for x in gfx if x["kind"] in fxpack.OVERLAY_KINDS][:4]):  # efektai su kadrais
             if not thumbs:
                 break

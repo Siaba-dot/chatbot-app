@@ -21,11 +21,11 @@ KINDS = {
     "filmstrip": "🎞️ Kino juosta", "fan": "🃏 Kortelių vėduoklė", "polaroids": "📸 Polaroidų lietus",
     "grid": "🖼️ Galerijos tinklelis", "pip": "🔲 Kadras kadre", "chat": "💬 Žinutės telefone",
     "review": "⭐ Atsiliepimo kortelė", "chart": "📈 Augantis grafikas", "notif": "🔔 Pranešimas",
-    "counter": "🔢 Skaitiklis",
+    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta",
 }
 OVERLAY_KINDS = ("filmstrip", "fan", "polaroids", "grid")
 ASS_KINDS = ("chat", "review", "chart", "notif", "counter")
-LEN = {"filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
+LEN = {"reel": 1.0, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
        "chart": 2.8, "notif": 2.8, "counter": 2.2}
 SEMI = "Montserrat SemiBold"
 
@@ -204,6 +204,51 @@ def pip_chains(inp, out, t, W, H, fps, device_path, box, name="pp"):
         f"movie='{device_path}',loop=loop=-1:size=1:start=0,fps={fps},trim=duration={d + 0.5:.3f},format=rgba[{name}dv]",
         f"[{name}x][{name}dv]overlay=0:0:shortest=1,format=yuva420p,fade=t=in:st=0:d=0.3:alpha=1,"
         f"fade=t=out:st={d - 0.3:.3f}:d=0.3:alpha=1,setpts=PTS+{a:.3f}/TB[{name}o]",
+        f"[{name}m][{name}o]overlay=eof_action=pass:format=auto{out}",
+    ]
+
+
+def reel_geometry(W, H):
+    """Prasisukančios kino juostos matmenys: šoninės juostos plotis, kadro aukštis, tarpas, kopijų skaičius."""
+    bw = round(W * 0.09) // 2 * 2
+    fw = W - 2 * bw
+    fh = round(fw * H / W) // 2 * 2
+    gap = round(H * 0.035) // 2 * 2
+    return bw, fw, fh, gap, 4
+
+
+def reel_png(out_path, W, H):
+    """Kino juostos „skylutės“ šoninėse juostose (permatomas paveikslėlis per visą juostos aukštį)."""
+    from PIL import Image, ImageDraw
+    bw, fw, fh, gap, n = reel_geometry(W, H)
+    th = n * (fh + gap)
+    img = Image.new("RGBA", (W, th), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    hw, hh = round(bw * 0.42), round(bw * 0.3)
+    step = round(hh * 2.1)
+    for x0 in ((bw - hw) // 2, W - bw + (bw - hw) // 2):
+        for y in range(step // 2, th, step):
+            d.rounded_rectangle((x0, y, x0 + hw, y + hh), max(2, hh // 4), fill=(235, 230, 220, 255))
+    for k in range(n):  # plonas rėmelis aplink kiekvieną kadrą
+        y = k * (fh + gap) + gap // 2
+        d.rectangle((bw - 2, y - 2, bw + fw + 1, y + fh + 1), outline=(40, 40, 40, 255), width=2)
+    img.save(out_path)
+    return out_path
+
+
+def reel_chains(inp, out, t, W, H, fps, png_path, name="rl"):
+    """🎞️ Prasisukanti kino juosta: vaizdas tampa kino juosta, kuri greitai prasisuka (su judesio suliejimu)."""
+    bw, fw, fh, gap, n = reel_geometry(W, H)
+    a, d = t, LEN["reel"]
+    span = 2 * (fh + gap)
+    return [
+        f"{inp}split[{name}m][{name}c]",
+        f"[{name}c]trim=start={a:.3f}:end={a + d:.3f},setpts=PTS-STARTPTS,scale={fw}:{fh},setsar=1,"
+        f"pad={fw}:{fh + gap}:0:{gap // 2}:black,split={n}" + "".join(f"[{name}{i}]" for i in range(n)),
+        "".join(f"[{name}{i}]" for i in range(n)) + f"vstack=inputs={n},pad={W}:ih:{bw}:0:black[{name}st]",
+        f"movie='{png_path}',loop=loop=-1:size=1:start=0,fps={fps},trim=duration={d + 0.3:.3f},format=rgba[{name}h]",
+        f"[{name}st][{name}h]overlay=0:0:shortest=1,crop={W}:{H}:0:'{span}*(0.5-0.5*cos(PI*min(t/{d:.3f}\\,1)))',"
+        f"gblur=sigma=0.5:sigmaV=9,format=yuva420p,setpts=PTS+{a:.3f}/TB[{name}o]",
         f"[{name}m][{name}o]overlay=eof_action=pass:format=auto{out}",
     ]
 
@@ -431,7 +476,7 @@ def auto_plan(words, allowed, busy=(), limit=4, gap=4.0):
             cand["t"] = round(a, 2)
             plan.append(cand)
             used.add(cand["kind"])
-    frame_kinds = [k for k in ("filmstrip", "fan", "polaroids", "grid", "pip") if k in allowed]
+    frame_kinds = [k for k in ("reel", "filmstrip", "fan", "polaroids", "grid", "pip") if k in allowed]
     for idx in sents[1:]:  # likusios vietos – efektai su kadrais, vis kitokie
         if len(plan) >= limit or not frame_kinds:
             break
