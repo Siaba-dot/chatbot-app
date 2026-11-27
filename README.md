@@ -171,3 +171,16 @@ show = true    # false – lentelės nerodyti
 ```
 
 Šriftai – SIL Open Font License (licencijos `fonts/licenses/`).
+
+## Testai
+
+Automatiniai testai tikrina paskyras (registracija, bandymas, limitai, Stripe), projektus ir kadrus, garsus,
+automatinį video, AI režisierių (su imituotu AI), visus titrų stilius (ar telpa ekrane) ir video kūrimą.
+Išorinės paslaugos (OpenAI, Google, Pixabay, Stripe, Brevo) imituojamos – raktų nereikia.
+
+```
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+GitHub'e testai paleidžiami automatiškai kiekvienam PR (`.github/workflows/tests.yml`).
