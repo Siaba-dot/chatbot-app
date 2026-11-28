@@ -75,7 +75,7 @@ def test_render_job_all_formats(client, make_user, media):
     assert client.get(f"/api/projects/{pid}/files/visi_formatai.zip", headers=h).status_code == 200
 
 
-@pytest.mark.parametrize("kind", ["phone3d", "frame3d"])
+@pytest.mark.parametrize("kind", ["phone3d", "frame3d", "laptop3d"])
 def test_spin_effects_in_video(media, kind):
     """📱 / 🖼 3D efektai: vaizdas sumažėja į telefoną / rėmą (aplink tamsus fonas) ir video sukuriamas be klaidų."""
     import fxpack

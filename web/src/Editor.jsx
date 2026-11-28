@@ -84,6 +84,9 @@ const CAN_SHARE = (() => {
   } catch (e) { return false; }
 })();
 
+// 🧊 3D efektai rodomi atskirame bloke
+const FX3D = ["phone3d", "laptop3d", "frame3d"];
+
 export default function Editor({ id, user }) {
   const [proj, setProj] = useState(null);
   const [opts, setOpts] = useState(null);
@@ -732,10 +735,22 @@ export default function Editor({ id, user }) {
               <Switch on={s.anims.outro} onChange={v => setAnim("outro", v)} title="🙏 Pabaiga" desc="Padėka ir paskyra po video." />
             </div>
             <div className="section">
+              <h3>🧊 3D efektai</h3>
+              <div className="hint">Vaizdas virsta telefonu, kompiuteriu ar paveikslu, kuris sukasi erdvėje. Titrai lieka viršuje.</div>
+              <div className="chips">
+                {Object.entries(opts.gfx).filter(([k]) => FX3D.includes(k)).map(([k, label]) => (
+                  <button key={k} type="button" className={"chip" + (s.gfx_kinds.includes(k) ? " on" : "")}
+                          onClick={() => set({ gfx_kinds: s.gfx_kinds.includes(k) ? s.gfx_kinds.filter(x => x !== k) : [...s.gfx_kinds, k] })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="section">
               <h3>🎁 Grafikos efektai</h3>
               <div className="hint">Parenkami pagal tai, ką sakote: skaičiai – grafikas, klausimas – žinutės ir pan.</div>
               <div className="chips">
-                {Object.entries(opts.gfx).map(([k, label]) => (
+                {Object.entries(opts.gfx).filter(([k]) => !FX3D.includes(k)).map(([k, label]) => (
                   <button key={k} type="button" className={"chip" + (s.gfx_kinds.includes(k) ? " on" : "")}
                           onClick={() => set({ gfx_kinds: s.gfx_kinds.includes(k) ? s.gfx_kinds.filter(x => x !== k) : [...s.gfx_kinds, k] })}>
                     {label}
