@@ -26,7 +26,7 @@ KINDS = {
 }
 OVERLAY_KINDS = ("filmstrip", "fan", "polaroids", "grid")
 ASS_KINDS = ("chat", "review", "chart", "notif", "counter")
-LEN = {"reel": 1.0, "phone3d": 2.2, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
+LEN = {"reel": 1.0, "phone3d": 2.6, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
        "chart": 2.8, "notif": 2.8, "counter": 2.2}
 SEMI = "Montserrat SemiBold"
 
@@ -543,11 +543,20 @@ def _proj(pts, ang, cx, cy, dist):
     return out
 
 
-def _spin_track(u):
-    """Animacija (0..1): mastelis ir pasukimo kampas (rad). Išsitraukia → pasisuka į abi puses → grįžta."""
+def _spin_track(u, kind="frame3d"):
+    """Animacija (0..1): mastelis, pasukimo kampas (rad) ir kiek grįžta tikras video (0..1).
+    📱 telefonas: sumažėja → apsisuka 360° apie savo ašį → mažėdamas dingsta, po juo vėl matosi video.
+    🖼 rėmas: išsitraukia → pasisuka į abi puses → grįžta per visą ekraną."""
     import math
     e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
     small = 0.6
+    if kind == "phone3d":
+        if u < 0.2:
+            sc = 1 - (1 - small) * e(u / 0.2)
+        else:
+            sc = small * (1 - e((u - 0.55) / 0.35)) if u > 0.55 else small
+        ang = 2 * math.pi * e((u - 0.15) / 0.6)
+        return sc, ang, e((u - 0.8) / 0.2)
     if u < 0.2:
         sc = 1 - (1 - small) * e(u / 0.2)
     elif u > 0.8:
@@ -556,7 +565,41 @@ def _spin_track(u):
         sc = small * (1 + 0.015 * math.sin((u - 0.2) * 9))
     k = max(0.0, min(1.0, (u - 0.14) / 0.72))
     ang = math.radians(48) * math.sin(2 * math.pi * k) * (1 - 0.35 * k) * (1 if 0 < k < 1 else 0)
-    return sc, ang
+    return sc, ang, 0.0
+
+
+def _phone_back(fw, fh, W):
+    """Telefono nugarėlė (matoma apsisukus): matinis grafitas, kamerų blokas su trimis objektyvais."""
+    from PIL import Image, ImageDraw, ImageFilter
+    import numpy as np
+    r = round(W * 0.13)
+    gy = np.linspace(0, 1, fh)[:, None] * np.ones((1, fw))
+    gx = np.linspace(0, 1, fw)[None, :] * np.ones((fh, 1))
+    lum = 52 + 22 * (1 - gy) - 14 * gx
+    img = Image.fromarray(np.dstack([lum * 0.95, lum * 0.97, lum, np.full_like(lum, 255)]).astype("uint8"), "RGBA")
+    mask = Image.new("L", (fw, fh), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, fw - 1, fh - 1), r, fill=255)
+    img.putalpha(mask)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((2, 2, fw - 3, fh - 3), r - 2, outline=(150, 152, 160, 255), width=3)
+    # kamerų blokas (žiūrint iš nugaros – kairėje viršuje; paveiksle veidrodiškai – dešinėje)
+    bs = round(fw * 0.4)
+    x1, y1 = fw - round(fw * 0.05), round(fw * 0.05)
+    x0, y0 = x1 - bs, y1
+    sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle((x0, y0 + 6, x0 + bs, y0 + bs + 6), round(bs * 0.24), fill=(0, 0, 0, 120))
+    img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(6)))
+    d.rounded_rectangle((x0, y0, x0 + bs, y0 + bs), round(bs * 0.24), fill=(70, 72, 78, 255),
+                        outline=(120, 122, 130, 255), width=2)
+    lr = bs * 0.2
+    for lx, ly in ((0.3, 0.28), (0.3, 0.72), (0.72, 0.5)):
+        cx_, cy_ = x0 + bs * (1 - lx), y0 + bs * ly
+        d.ellipse((cx_ - lr, cy_ - lr, cx_ + lr, cy_ + lr), fill=(28, 28, 32, 255), outline=(150, 152, 160, 255), width=3)
+        d.ellipse((cx_ - lr * 0.55, cy_ - lr * 0.55, cx_ + lr * 0.55, cy_ + lr * 0.55), fill=(10, 12, 22, 255))
+        d.ellipse((cx_ - lr * 0.3, cy_ - lr * 0.4, cx_ - lr * 0.05, cy_ - lr * 0.15), fill=(90, 110, 160, 255))
+    fl = bs * 0.07  # blykstė
+    d.ellipse((x0 + bs * 0.28 - fl, y0 + bs * 0.5 - fl, x0 + bs * 0.28 + fl, y0 + bs * 0.5 + fl), fill=(235, 225, 200, 255))
+    return img
 
 
 def _phone_front(screen, W, H, kind, fade=1.0):
@@ -616,8 +659,12 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
     for i in range(n):
         fr = Image.frombytes("RGB", (W, H), frames[min(i, len(frames) - 1)])
         u = i / max(1, n - 1)
-        sc, ang = _spin_track(u)
-        if sc > 0.995 and abs(ang) < 0.005:  # pilnas ekranas – tiesiog kadras (sklandi pradžia ir pabaiga)
+        sc, ang, back_fade = _spin_track(u, kind)
+        if sc < 0.02 or back_fade > 0.995:  # telefonas dingo – tik tamsus fonas, pereinantis į video
+            mix = Image.blend(bg, fr, back_fade)
+            proc.stdin.write(mix.tobytes())
+            continue
+        if sc > 0.995 and abs(math.sin(ang)) < 0.005 and math.cos(ang) > 0:  # pilnas ekranas – tiesiog kadras (sklandi pradžia ir pabaiga)
             proc.stdin.write(fr.tobytes())
             continue
         front, b = _phone_front(fr.convert("RGBA"), W, H, kind, min(1.0, (1 - sc) / 0.15))
@@ -627,16 +674,20 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
         hw, hh = fw / 2 * k, fh / 2 * k
         thick = fw * k * (0.075 if kind == "phone3d" else 0.06)  # korpuso storis (mastelis kartu su telefonu)
         cx, cy, dist = W / 2, H / 2 - H * 0.02 * (1 - sc) / 0.4, H * 2.4
-        corners = [(-hw, -hh, 0), (hw, -hh, 0), (hw, hh, 0), (-hw, hh, 0)]
+        back = kind == "phone3d" and math.cos(ang) < 0  # apsisukęs – matoma nugarėlė (ji per korpuso storį toliau)
+        zf = -thick if back else 0
+        corners = [(-hw, -hh, zf), (hw, -hh, zf), (hw, hh, zf), (-hw, hh, zf)]
         dst = _proj(corners, ang, cx, cy, dist)
+        if back:
+            front = _phone_back(fw, fh, W)
         cv = bg.copy().convert("RGBA")
         if sc < 0.995:  # šešėlis po telefonu
             sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
             sw = hw * abs(math.cos(ang)) * 1.05
             ImageDraw.Draw(sh).ellipse((cx - sw, cy + hh * 0.92, cx + sw, cy + hh * 1.08), fill=(0, 0, 0, 150))
             cv.alpha_composite(sh.filter(ImageFilter.GaussianBlur(W * 0.03)))
-        if abs(ang) > 0.01:  # matomas šonas (korpuso storis) su mygtukais, šešėliuotas juostomis
-            side = 1 if ang < 0 else -1
+        if abs(math.sin(ang)) > 0.01:  # matomas šonas (korpuso storis) su mygtukais, šešėliuotas juostomis
+            side = 1 if math.sin(ang) < 0 else -1
             x = side * hw
             sd = ImageDraw.Draw(cv)
             ys = 0.94 if kind == "phone3d" else 1.0
@@ -667,7 +718,10 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
             glare.putalpha(Image.fromarray(np.minimum(np.asarray(gl), np.asarray(a))))
             warped.alpha_composite(glare)
         cv.alpha_composite(warped)
-        proc.stdin.write(cv.convert("RGB").tobytes())
+        out = cv.convert("RGB")
+        if back_fade > 0.005:  # telefonui tolstant vėl išryškėja tikras video
+            out = Image.blend(out, fr, back_fade)
+        proc.stdin.write(out.tobytes())
     proc.stdin.close()
     proc.wait()
     if proc.returncode != 0:
