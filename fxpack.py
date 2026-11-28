@@ -791,6 +791,21 @@ def _snd_shatter(rng, sr):
     return y * 0.38
 
 
+def _snd_close(rng, sr):
+    """Užsidarantis nešiojamo kompiuterio dangtis: duslus „tukt“ + trumpas magneto spragtelėjimas."""
+    import numpy as np
+    n = int(0.35 * sr)
+    tt = np.arange(n) / sr
+    thud = np.sin(2 * np.pi * 95 * tt) * np.exp(-tt / 0.05) * 0.7 + np.sin(2 * np.pi * 210 * tt) * np.exp(-tt / 0.03) * 0.4
+    knock = np.sin(2 * np.pi * 820 * tt) * np.exp(-tt / 0.012) * 0.25
+    air = rng.normal(0, 1, n) * np.exp(-tt / 0.02) * 0.08
+    clk = np.zeros(n)
+    a = int(0.012 * sr)
+    m = int(0.006 * sr)
+    clk[a:a + m] = np.diff(rng.normal(0, 1, m), prepend=0) * 0.35
+    return (thud + knock + air + clk) * 0.55
+
+
 def sfx_wav(events, out_path, sr=44100):
     """Garso efektai pagal laiką: events = [(laikas s, "clink" | "crack" | "shatter")] -> WAV."""
     import wave
@@ -799,7 +814,8 @@ def sfx_wav(events, out_path, sr=44100):
     y = np.zeros(int(total * sr), np.float32)
     rng = np.random.default_rng(9)
     for t0, kind in events:
-        snd = {"clink": _snd_clink, "crack": _snd_crack, "shatter": _snd_shatter}[kind](rng, sr)
+        snd = {"clink": _snd_clink, "crack": _snd_crack, "shatter": _snd_shatter,
+               "close": _snd_close}[kind](rng, sr)
         a = int(t0 * sr)
         y[a:a + len(snd)] += snd[: len(y) - a]
     pcm = (np.clip(y, -1, 1) * 32767).astype("<i2")
@@ -821,6 +837,8 @@ def sfx_events(items, speed=1.0):
         elif it["kind"] == "shatter3d":
             ev += [(t + d * (SHATTER_AT - 0.2 + 0.19 * k / 6), "crack") for k in range(7)]
             ev.append((t + d * SHATTER_AT, "shatter"))
+        elif it["kind"] == "laptop3d":  # dangtis užsidaro
+            ev.append((t + d * LAPTOP_CLOSE_AT, "close"))
     return ev
 
 
@@ -873,14 +891,16 @@ def _rot_z(p, a):
     return x * c - y * s, x * s + y * c, z
 
 
+LAPTOP_CLOSE_AT = 0.565  # efekto dalis, kai dangtis užsidaro
+
+
 def _laptop_track(u):
-    """(mastelis, ekrano formos perėjimas 0..1, žiūrėjimas iš viršaus, pasukimas, dangtis, nuskridimas 0..1, video grįžimas)."""
+    """(mastelis, ekrano perėjimas 0..1, žiūrėjimas iš viršaus, dangtis, nuskridimas 0..1, video grįžimas)."""
     import math
     e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
-    z = e(u / 0.22)
-    fly = max(0.0, min(1.0, (u - 0.6) / 0.3))
-    return (1 - 0.45 * z, z, math.radians(24) * z, math.radians(22) * z + math.radians(50) * e(fly * 1.2),
-            math.radians(92) * e((u - 0.3) / 0.28), fly ** 2.2, e((u - 0.84) / 0.16))
+    z = e(u / 0.24)
+    return (1 - 0.36 * z, z, math.radians(27) * z, math.radians(91) * e((u - 0.3) / 0.27),
+            max(0.0, min(1.0, (u - 0.6) / 0.3)), e((u - 0.86) / 0.14))
 
 
 def _brushed(w, h, base, rnd_seed=3):
@@ -950,131 +970,159 @@ def _warp(img, quad, W, H):
 
 
 def render_laptop(src, t, out_path, W, H, fps=30, dur=None):
-    """💻 Kadras atitolsta ir tampa nešiojamo kompiuterio ekranu, dangtis užsidaro, kompiuteris nuskrenda tolyn
-    ir išnyksta – vėl matosi video. Grąžina video (be garso) lango trukmei."""
+    """💻 Kadras atitolsta ir tampa nešiojamo kompiuterio (ant stalo) ekranu, dangtis užsidaro, kompiuteris pakyla
+    ir nuskrenda tolyn virš stalo – vėl matosi video. Piešiama didesne raiška ir sumažinama (lygūs kraštai)."""
     import math
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
     d = dur or LEN["laptop3d"]
     n = round(d * fps)
+    W0, H0 = W, H
+    ss = 1.5 if W0 < 1000 else 1.25  # supersampling
+    W, H = round(W0 * ss) // 2 * 2, round(H0 * ss) // 2 * 2
     raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
-                          f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps}",
+                          f"scale={W0}:{H0}:force_original_aspect_ratio=increase,crop={W0}:{H0},fps={fps}",
                           "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
-    fsz = W * H * 3
+    fsz = W0 * H0 * 3
     frames = [raw[i:i + fsz] for i in range(0, len(raw) - fsz + 1, fsz)][:n]
     if not frames:
         raise RuntimeError("Nepavyko paimti kadrų efektui")
-    gy = np.linspace(0, 1, H)[:, None]
-    gx = np.abs(np.linspace(-1, 1, W))[None, :]
-    lum = (46 - 26 * gy - 14 * gx ** 2).clip(8, 60)
-    bg = Image.fromarray(np.dstack([lum * 0.9, lum * 0.92, lum]).astype("uint8"))
-    proc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+    e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
+    yy, xx = np.mgrid[0:H, 0:W]
+    vign = (1 - 0.42 * (((xx - W * 0.4) / (W * 0.9)) ** 2 + ((yy - H * 0.4) / (H * 0.85)) ** 2)).clip(0.5, 1)
+    bgc = Image.fromarray((np.dstack([vign * 104, vign * 108, vign * 114])).astype("uint8")).convert("RGBA")
+    tile = _stone(520, 520)
+    table = Image.new("RGBA", (520 * 6, 520 * 10))  # smulki faktūra, pakartota per visą stalą
+    for ty_ in range(10):
+        for tx_ in range(6):
+            table.paste(tile.transpose(Image.FLIP_LEFT_RIGHT) if (tx_ + ty_) % 2 else tile, (tx_ * 520, ty_ * 520))
+    proc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W0}x{H0}",
                              "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
                              "-pix_fmt", "yuv420p", out_path], stdin=subprocess.PIPE)
-    sw_end = W * 0.86  # atitolus ekranas gulsčias (16:10)
+    sw_end = W * 0.84  # atitolus ekranas gulsčias (16:10)
     sh_end = sw_end * 10 / 16
     tw = int(W * 0.9)
     base_img = _laptop_base(tw, int(tw * 0.68))
+    bm = Image.new("L", base_img.size, 0)
+    ImageDraw.Draw(bm).rounded_rectangle((0, 0, base_img.width - 1, base_img.height - 1), round(tw * 0.03), fill=255)
+    base_img.putalpha(bm)
     back_img = _laptop_lid_back(tw, int(tw * 0.66))
-    L = np.array([-0.45, -0.75, 0.5])
+    L = np.array([-0.4, -0.8, 0.45])
     L = L / np.linalg.norm(L)
-    alu = (182, 184, 190)
+    alu = (186, 188, 194)
     prev = None
     for i in range(n):
-        fr = Image.frombytes("RGB", (W, H), frames[min(i, len(frames) - 1)])
+        fr0 = Image.frombytes("RGB", (W0, H0), frames[min(i, len(frames) - 1)])
         u = i / max(1, n - 1)
-        sc, morph, tilt, yaw, lid, fly, back_fade = _laptop_track(u)
-        if back_fade > 0.995:
-            proc.stdin.write(Image.blend(bg, fr, back_fade).tobytes())
+        sc, morph, tilt, lid, fly, back_fade = _laptop_track(u)
+        if back_fade > 0.995 or morph < 0.002:
+            proc.stdin.write(fr0.tobytes())
             continue
-        if morph < 0.002:
-            proc.stdin.write(fr.tobytes())
-            continue
-        sw = round(W + (sw_end - W) * morph)  # ekrano forma: nuo viso kadro iki gulsčio ekrano
+        fr = fr0.resize((W, H), Image.BICUBIC)
+        sw = round(W + (sw_end - W) * morph)  # ekranas: nuo viso kadro iki gulsčio ekrano
         sh = round(H + (sh_end - H) * morph)
-        b = round(W * 0.022 * morph) + 1
-        chin = round(W * 0.035 * morph)
+        b = round(W * 0.02 * morph) + 1
+        chin = round(W * 0.03 * morph)
         lw, lh = sw + 2 * b, sh + 2 * b + chin
-        r_ = max(sw / W, sh / H)
-        scr = fr.resize((max(sw, round(W * r_)), max(sh, round(H * r_))))
-        scr = scr.crop(((scr.width - sw) // 2, (scr.height - sh) // 2, (scr.width - sw) // 2 + sw,
-                        (scr.height - sh) // 2 + sh))
-        front = Image.new("RGBA", (lw, lh), (12, 12, 14, 255))
-        front.paste(scr, (b, b))
+        # ekrane – visas stačias video, šonuose jo sulieta kopija (kaip tikrame kompiuterio ekrane)
+        cov = max(sw / W, sh / H)
+        bgk = fr.resize((max(sw, round(W * cov)), max(sh, round(H * cov))))
+        bgk = bgk.crop(((bgk.width - sw) // 2, (bgk.height - sh) // 2, (bgk.width - sw) // 2 + sw,
+                        (bgk.height - sh) // 2 + sh)).filter(ImageFilter.GaussianBlur(max(1, sw * 0.03)))
+        bgk = Image.blend(bgk, Image.new("RGB", bgk.size, (0, 0, 0)), 0.35 * morph)
+        con = min(sw / W, sh / H)
+        fit = fr.resize((max(1, round(W * con)), max(1, round(H * con))))
+        bgk.paste(fit, ((sw - fit.width) // 2, (sh - fit.height) // 2))
+        front = Image.new("RGBA", (lw, lh), (10, 10, 12, 255))
+        front.paste(bgk, (b, b))
         fd = ImageDraw.Draw(front)
-        fd.rectangle((0, 0, lw - 1, lh - 1), outline=(150, 152, 158, 255), width=max(1, round(b * 0.18)))
-        fd.ellipse((lw / 2 - b * 0.18, b * 0.4, lw / 2 + b * 0.18, b * 0.76), fill=(40, 44, 60, 255))
-        lt, bt = lw * 0.012, lw * 0.03  # dangčio ir korpuso storis
+        fd.ellipse((lw / 2 - b * 0.16, b * 0.38, lw / 2 + b * 0.16, b * 0.7), fill=(36, 40, 56, 255))
+        fm = Image.new("L", front.size, 0)
+        ImageDraw.Draw(fm).rounded_rectangle((0, 0, lw - 1, lh - 1), max(1, round(lw * 0.025 * morph)), fill=255)
+        front.putalpha(fm)
+        lt, bt = lw * 0.011, lw * 0.028  # dangčio ir korpuso storis
         bw, bd = lw * 1.02, lh * 0.98
+        rr = lw * 0.025 * morph  # suapvalinimas – šonai trumpesni per kampus
         hinge_y = sh / 2 + b + chin
         dist = H * 1.9
-        tz = -dist * 7 * fly
-        ty = -H * 0.07 * morph - H * 0.18 * fly
-        roll = math.radians(-8) * fly
-        piv_z = bd * sc / 2
+        away = (fly ** 2.2) * lh * 14  # nuskrenda tolyn virš stalo
+        lift = lh * 0.45 * e(fly * 1.6)
+        yaw = math.radians(16) * morph + math.radians(28) * e(fly)
+        piv_z = bd / 2
 
-        def tr(p, on_lid=False, normal=False):
+        def tr(p, on_lid=False, normal=False, still=False):
             x, y, z = p
             if on_lid:
                 x, y, z = _rot_x((x, y, z), -lid)
+            if not still:  # kompiuterio judesys (pasisukimas, pakilimas, nuskridimas); stalas nejuda
+                if normal:
+                    x, y, z = _rot_y((x, y, z), yaw)
+                else:
+                    x, y, z = _rot_y((x, y, z - piv_z), yaw)
+                    z += piv_z - away
+                    y -= lift
             if normal:
-                v = _rot_y((x, y, z), yaw)
-                v = _rot_z(v, roll)
-                return np.array(_rot_x(v, -tilt))
-            x, y, z = x * sc, y * sc, z * sc
-            x, y, z = _rot_y((x, y, z - piv_z), yaw)
-            x, y, z = _rot_z((x, y, z), roll)
-            x, y, z = _rot_x((x, y, z + piv_z), -tilt)
-            return np.array((x, y + hinge_y * sc + ty, z + tz))
+                return np.array(_rot_x((x, y, z), -tilt))
+            x, y, z = (x + lw * 0.1 * morph) * sc, y * sc, z * sc  # kompiuteris kadro centre
+            x, y, z = _rot_x((x, y, z), -tilt)
+            return np.array((x, y + hinge_y * sc - H * 0.06 * morph, z))
 
         def proj(v):
-            f = dist / (dist - v[2])
+            f = dist / max(1.0, dist - v[2])
             return W / 2 + v[0] * f, H / 2 + v[1] * f
 
+        cv = bgc.copy()
+        # stalas (nejuda) ir kompiuterio šešėlis ant jo
+        tq = [proj(tr(p, still=True)) for p in ((-lw * 4.5, bt, -lh * 22), (lw * 4.5, bt, -lh * 22), (lw * 4.5, bt, lh * 6),
+                                                 (-lw * 4.5, bt, lh * 6))]
+        w_ = _warp(table, tq, W, H)
+        if w_:  # lengvas suliejimas – be raibulių tolumoje (ir kaip kameros gylio ryškumas)
+            cv.alpha_composite(w_[0].filter(ImageFilter.GaussianBlur(1.4 * ss)), (w_[1], w_[2]))
+        cv = Image.fromarray((np.asarray(cv.convert("RGB"), np.float32) * vign[..., None] * 1.06).clip(0, 255)
+                             .astype("uint8")).convert("RGBA")
         x0, x1 = -bw / 2, bw / 2
         zb, zf = -bt * 0.4, bd
+        if morph > 0.05:
+            def foot(p):
+                x, y, z = _rot_y((p[0], p[1], p[2] - piv_z), yaw)
+                return proj(tr((x, bt, z + piv_z - away), still=True))
+            gap = lift / lh
+            sq = [foot((x0, 0, zb)), foot((x1, 0, zb)), foot((x1, 0, zf)), foot((x0, 0, zf))]
+            shl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(shl).polygon(sq, fill=(0, 0, 0, int(165 * morph * (1 - min(1, gap * 1.4)) * (1 - fly))))
+            cv.alpha_composite(shl.filter(ImageFilter.GaussianBlur(max(2, W * (0.012 + 0.05 * gap) * sc))))
         lx0, lx1 = -lw / 2, lw / 2
-        # (kampai, normalė, ar dangtis, tekstūra arba spalva, blizgesys)
         faces = [
-            ([(x0, 0, zb), (x1, 0, zb), (x1, 0, zf), (x0, 0, zf)], (0, -1, 0), False, base_img, 0.5),
-            ([(x0, 0, zf), (x1, 0, zf), (x1, bt, zf), (x0, bt, zf)], (0, 0, 1), False, alu, 0.6),
-            ([(x0, 0, zb), (x0, 0, zf), (x0, bt, zf), (x0, bt, zb)], (-1, 0, 0), False, alu, 0.6),
-            ([(x1, 0, zf), (x1, 0, zb), (x1, bt, zb), (x1, bt, zf)], (1, 0, 0), False, alu, 0.6),
-            ([(x1, 0, zb), (x0, 0, zb), (x0, bt, zb), (x1, bt, zb)], (0, 0, -1), False, alu, 0.4),
+            ([(x0, 0, zb), (x1, 0, zb), (x1, 0, zf), (x0, 0, zf)], (0, -1, 0), False, base_img, 0.45),
+            ([(x0 + rr, 0, zf), (x1 - rr, 0, zf), (x1 - rr, bt, zf), (x0 + rr, bt, zf)], (0, 0, 1), False, alu, 0.5),
+            ([(x0, 0, zb + rr), (x0, 0, zf - rr), (x0, bt, zf - rr), (x0, bt, zb + rr)], (-1, 0, 0), False, alu, 0.5),
+            ([(x1, 0, zf - rr), (x1, 0, zb + rr), (x1, bt, zb + rr), (x1, bt, zf - rr)], (1, 0, 0), False, alu, 0.5),
+            ([(x1 - rr, 0, zb), (x0 + rr, 0, zb), (x0 + rr, bt, zb), (x1 - rr, bt, zb)], (0, 0, -1), False, alu, 0.3),
             ([(lx0, -lh, 0), (lx1, -lh, 0), (lx1, 0, 0), (lx0, 0, 0)], (0, 0, 1), True, front, 0.0),
-            ([(lx1, -lh, -lt), (lx0, -lh, -lt), (lx0, 0, -lt), (lx1, 0, -lt)], (0, 0, -1), True, back_img, 0.7),
-            ([(lx0, -lh, -lt), (lx1, -lh, -lt), (lx1, -lh, 0), (lx0, -lh, 0)], (0, -1, 0), True, alu, 0.6),
-            ([(lx0, -lh, -lt), (lx0, -lh, 0), (lx0, 0, 0), (lx0, 0, -lt)], (-1, 0, 0), True, alu, 0.6),
-            ([(lx1, -lh, 0), (lx1, -lh, -lt), (lx1, 0, -lt), (lx1, 0, 0)], (1, 0, 0), True, alu, 0.6),
+            ([(lx1, -lh, -lt), (lx0, -lh, -lt), (lx0, 0, -lt), (lx1, 0, -lt)], (0, 0, -1), True, back_img, 0.55),
+            ([(lx0 + rr, -lh, -lt), (lx1 - rr, -lh, -lt), (lx1 - rr, -lh, 0), (lx0 + rr, -lh, 0)], (0, -1, 0), True, alu, 0.5),
+            ([(lx0, -lh + rr, -lt), (lx0, -lh + rr, 0), (lx0, -rr, 0), (lx0, -rr, -lt)], (-1, 0, 0), True, alu, 0.5),
+            ([(lx1, -lh + rr, 0), (lx1, -lh + rr, -lt), (lx1, -rr, -lt), (lx1, -rr, 0)], (1, 0, 0), True, alu, 0.5),
         ]
         drawn = []
-        for pts, nrm, on_lid, tex, gloss in faces:
+        for pts, nrm_, on_lid, tex, gloss in faces:
             vs = [tr(p, on_lid) for p in pts]
             c = sum(vs) / 4
-            nv = tr(nrm, on_lid, normal=True)
+            nv = tr(nrm_, on_lid, normal=True)
             view = np.array((0, 0, dist)) - c
             if float(nv @ view) <= 0:
                 continue
             vd = view / np.linalg.norm(view)
             diff = max(0.0, float(nv @ L))
             hv = (L + vd) / np.linalg.norm(L + vd)
-            spec = max(0.0, float(nv @ hv)) ** 24 * gloss
+            spec = max(0.0, float(nv @ hv)) ** 30 * gloss
             depth = c[2] + (lt * sc * 3 if on_lid else 0)
             drawn.append((depth, [proj(v) for v in vs], tex, diff, spec))
         drawn.sort(key=lambda x: x[0])
-        cv = bg.copy().convert("RGBA")
-        if morph > 0.05:  # šešėlis ant „grindų“ po kompiuteriu
-            q = [proj(tr(p)) for p in ((x0, bt, zb), (x1, bt, zb), (x1, bt, zf), (x0, bt, zf))]
-            xs, ys_ = [p[0] for p in q], [p[1] for p in q]
-            hgt = max(ys_) - min(ys_)
-            sh_ = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            ImageDraw.Draw(sh_).polygon([(q[0][0], q[0][1] + hgt * 0.06), (q[1][0], q[1][1] + hgt * 0.06),
-                                         (q[2][0] + 6, q[2][1] + hgt * 0.12), (q[3][0] - 6, q[3][1] + hgt * 0.12)],
-                                        fill=(0, 0, 0, int(170 * morph * (1 - fly))))
-            cv.alpha_composite(sh_.filter(ImageFilter.GaussianBlur(max(2, W * 0.025 * sc * (1 - fly)))))
         for _, q, tex, diff, spec in drawn:
             is_screen = tex is front
-            shade = (0.92 + 0.12 * diff) if is_screen else (0.42 + 0.7 * diff)
+            shade = (0.96 + 0.06 * diff) * (0.55 + 0.45 * (1 - lid / math.radians(91))) if is_screen \
+                else (0.5 + 0.6 * diff)
             if isinstance(tex, Image.Image):
                 w_ = _warp(tex, q, W, H)
                 if not w_:
@@ -1082,33 +1130,27 @@ def render_laptop(src, t, out_path, W, H, fps=30, dur=None):
                 patch, px, py = w_
                 a = np.asarray(patch, dtype=np.float32)
                 a[..., :3] = (a[..., :3] * shade + 255 * spec).clip(0, 255)
-                patch = Image.fromarray(a.astype("uint8"), "RGBA")
-                cv.alpha_composite(patch, (px, py))
-            else:
-                col = tuple(int(min(255, c * shade + 255 * spec)) for c in tex) + (255,)
-                ImageDraw.Draw(cv).polygon(q, fill=col)
-            if is_screen and morph > 0.05:  # stiklo atspindys ekrane
-                w_ = _warp(Image.new("RGBA", (64, 40), (0, 0, 0, 0)), q, W, H)
-                if w_:
-                    patch, px, py = w_
+                cv.alpha_composite(Image.fromarray(a.astype("uint8"), "RGBA"), (px, py))
+                if is_screen and morph > 0.05:  # stiklo atspindys
                     gl = Image.new("L", patch.size, 0)
                     pw, ph = patch.size
-                    off = pw * (0.2 + 0.9 * lid / math.radians(92))
-                    ImageDraw.Draw(gl).polygon([(off - pw * 0.35, 0), (off - pw * 0.12, 0), (off + pw * 0.15, ph),
-                                                (off - pw * 0.08, ph)], fill=int(40 * morph))
-                    m = Image.new("L", patch.size, 0)
-                    ImageDraw.Draw(m).polygon([(x - px, y - py) for x, y in q], fill=255)
+                    off = pw * (0.25 + 0.8 * lid / math.radians(91))
+                    ImageDraw.Draw(gl).polygon([(off - pw * 0.32, 0), (off - pw * 0.12, 0), (off + pw * 0.12, ph),
+                                                (off - pw * 0.08, ph)], fill=int(32 * morph))
                     gl = Image.fromarray(np.minimum(np.asarray(gl.filter(ImageFilter.GaussianBlur(pw * 0.05))),
-                                                    np.asarray(m)))
+                                                    np.asarray(patch.getchannel("A"))))
                     glare = Image.new("RGBA", patch.size, (255, 255, 255, 0))
                     glare.putalpha(gl)
                     cv.alpha_composite(glare, (px, py))
-        out = cv.convert("RGB")
+            else:
+                col = tuple(int(min(255, c * shade + 255 * spec)) for c in tex) + (255,)
+                ImageDraw.Draw(cv).polygon(q, fill=col)
+        out = cv.convert("RGB").resize((W0, H0), Image.LANCZOS)
         if fly > 0.02 and prev is not None:  # judesio suliejimas skrendant
-            out = Image.blend(out, prev, 0.45)
+            out = Image.blend(out, prev, 0.15)
         prev = out
         if back_fade > 0.005:
-            out = Image.blend(out, fr, back_fade)
+            out = Image.blend(out, fr0, back_fade)
         proc.stdin.write(out.tobytes())
     proc.stdin.close()
     proc.wait()
