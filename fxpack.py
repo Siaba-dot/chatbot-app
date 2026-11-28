@@ -516,10 +516,14 @@ def ai_plan(client, words, allowed, ai_json, busy=(), limit=4):
 
 
 # ======================= 📱 3D telefonas / 🖼 paveikslo rėmas (kadrai piešiami PIL – realistiška perspektyva) ========
-SPIN_KINDS = ("phone3d", "frame3d", "laptop3d", "gold3d", "shatter3d")
+import accents  # noqa: E402 – ✨ 3D akcentai
+
+KINDS.update(accents.KINDS)
+LEN.update(accents.LEN)
+SPIN_KINDS = ("phone3d", "frame3d", "laptop3d", "gold3d", "shatter3d") + tuple(accents.KINDS)
 # 🎯 efektai, kuriuos galima pasirinkti konkrečioje laiko juostos vietoje (vaizdiniai – tekstas nereikalingas)
-TIMELINE_KINDS = ("gold3d", "shatter3d", "phone3d", "laptop3d", "frame3d", "reel", "filmstrip", "fan", "polaroids",
-                  "grid", "pip")
+TIMELINE_KINDS = tuple(accents.KINDS) + ("gold3d", "shatter3d", "phone3d", "laptop3d", "frame3d", "reel",
+                                          "filmstrip", "fan", "polaroids", "grid", "pip")
 
 
 def _persp_coeffs(src, dst):
@@ -809,6 +813,32 @@ def _snd_close(rng, sr):
     return (thud + knock + air + clk) * 0.55
 
 
+def _snd_whoosh(rng, sr):
+    """Švelnus „švyst“ – oro srautas su kylančiu tonu."""
+    import numpy as np
+    n = int(0.45 * sr)
+    tt = np.arange(n) / sr
+    env = np.sin(np.pi * np.clip(tt / 0.45, 0, 1)) ** 2
+    x = np.cumsum(rng.normal(0, 1, n))
+    x = x - np.convolve(x, np.ones(40) / 40, mode="same")  # be žemų dažnių
+    return x / (np.abs(x).max() + 1e-6) * env * 0.22
+
+
+def _snd_pop(rng, sr):
+    import numpy as np
+    n = int(0.16 * sr)
+    tt = np.arange(n) / sr
+    f = 900 * np.exp(-tt * 18) + 250
+    return np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-tt / 0.05) * 0.35
+
+
+def _snd_tap(rng, sr):
+    import numpy as np
+    n = int(0.08 * sr)
+    tt = np.arange(n) / sr
+    return (np.sin(2 * np.pi * 520 * tt) * 0.5 + rng.normal(0, 0.2, n)) * np.exp(-tt / 0.015) * 0.3
+
+
 def sfx_wav(events, out_path, sr=44100):
     """Garso efektai pagal laiką: events = [(laikas s, "clink" | "crack" | "shatter")] -> WAV."""
     import wave
@@ -818,7 +848,7 @@ def sfx_wav(events, out_path, sr=44100):
     rng = np.random.default_rng(9)
     for t0, kind in events:
         snd = {"clink": _snd_clink, "crack": _snd_crack, "shatter": _snd_shatter,
-               "close": _snd_close}[kind](rng, sr)
+               "close": _snd_close, "whoosh": _snd_whoosh, "pop": _snd_pop, "tap": _snd_tap}[kind](rng, sr)
         a = int(t0 * sr)
         y[a:a + len(snd)] += snd[: len(y) - a]
     pcm = (np.clip(y, -1, 1) * 32767).astype("<i2")
@@ -834,8 +864,10 @@ def sfx_events(items, speed=1.0):
     """3D efektų garsai (absoliutus laikas sumontuotame video): auksinių raidžių kritimas, stiklo dūžis."""
     ev = []
     for it in items:
-        t, d = it["t"] * speed, LEN[it["kind"]] * speed
-        if it["kind"] == "gold3d":
+        t, d = it["t"] * speed, float(it.get("dur") or LEN[it["kind"]]) * speed
+        if it["kind"] in accents.KINDS:
+            ev += accents.sfx(it, t, d)
+        elif it["kind"] == "gold3d":
             ev += [(t + x, "clink") for x in gold_land_times(it.get("text", ""), d)]
         elif it["kind"] == "shatter3d":
             ev += [(t + d * (SHATTER_AT - 0.2 + 0.19 * k / 6), "crack") for k in range(7)]
@@ -851,7 +883,10 @@ def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
     for i, it in enumerate(items):
         t = it["t"] * speed
         clip = os.path.join(tmp, f"spin{i}.mp4")
-        render_spin(path, t, it["kind"], clip, W, H, fps, LEN[it["kind"]] * speed, it.get("text", ""))
+        if it["kind"] in accents.KINDS:  # ✨ 3D akcentas su savo vieta, dydžiu, spalva ir trukme
+            accents.render(path, t, it, clip, W, H, fps, float(it.get("dur") or LEN[it["kind"]]) * speed)
+        else:
+            render_spin(path, t, it["kind"], clip, W, H, fps, LEN[it["kind"]] * speed, it.get("text", ""))
         rendered.append((t, clip))
     if not rendered:
         return path

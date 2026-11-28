@@ -1974,10 +1974,15 @@ def _run_job(jid, user, pid, kind, quick, words):
                 try:
                     src_f = engine.source_for_format(proj["clips"], proj["settings"], d, f, vo_path,
                                                      lambda p: _job_update(jid, progress=round(lo + p * share * 0.3, 3)))
-                    st_f = dict(proj["settings"], format=f)
+                    st_f = dict(proj["settings"], format=f, fx_items=engine.remap_xy(
+                        proj["settings"].get("fx_items"), main, f, proj["settings"].get("fit", "fill")))
+                    plan_f = json.loads(json.dumps(plan)) if plan else None
+                    if plan_f and plan_f.get("anims") and plan_f["anims"].get("gfx"):
+                        plan_f["anims"]["gfx"] = engine.remap_xy(plan_f["anims"]["gfx"], main, f,
+                                                                 proj["settings"].get("fit", "fill"))
                     engine.build(dict(prep, src=src_f, format=f), st_f, os.path.join(d, f"reels_{tag}.mp4"), d,
                                  client, words=words, broll=broll, logo=logo if os.path.exists(logo) else None,
-                                 plan=plan,
+                                 plan=plan_f,
                                  progress=lambda p: _job_update(jid, progress=round(lo + share * (0.3 + p * 0.7), 3)))
                     w_, h_ = engine.FORMAT_SIZES.get(f, (1080, 1920))
                     entry = {"fmt": f, "file": f"reels_{tag}.mp4"}
@@ -2905,9 +2910,10 @@ def auto_edit_revert(pid: str, user=Depends(current_user)):
 class FxPreviewBody(BaseModel):
     kind: str
     t: float
+    item: dict = {}   # 3D akcento parametrai (vieta, dydis, spalva, trukmė, tekstas, kryptis)
 
 
-def _run_fx_preview(jid, user, pid, kind, t, _words):
+def _run_fx_preview(jid, user, pid, kind, t, item):
     """👁 Trumpa efekto peržiūra: peržiūros video atkarpa nuo pasirinktos vietos su vienu efektu."""
     try:
         import fxpack
@@ -2917,22 +2923,30 @@ def _run_fx_preview(jid, user, pid, kind, t, _words):
             raise ValueError("Pirmiausia sukurkite peržiūrą – efektas rodomas ant jos")
         proj = _load(user, pid)
         dur = video_editor.probe(src)["duration"]
-        length = fxpack.LEN.get(kind, 2.5) + 0.5
+        it = engine.clean_fx_item(dict(item or {}, kind=kind, t=t))
+        length = float(it.get("dur") or fxpack.LEN.get(kind, 2.5)) + 0.5
         t0 = max(0.0, min(float(t), dur - 1.0))
         seg = os.path.join(d, f"fxseg_{jid}.mp4")
         subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", f"{t0:.3f}", "-i", src, "-t", f"{length:.3f}",
                         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac", seg], check=True)
         words = [tuple(w) for w in ((proj.get("plan_cache") or {}).get("plan") or {}).get("words") or []]
         speed = float(proj["settings"].get("speed") or 1.0)
-        g = engine.timeline_item({"kind": kind, "t": t0}, words, speed)
+        g = engine.timeline_item(dict(it, t=t0), words, speed)
         g["t"] = 0.05
         _job_update(jid, message="Kuriu efekto peržiūrą…", progress=0.3)
-        out = os.path.join(d, f"fxprev_{kind}.mp4")
+        out = os.path.join(d, f"fxprev_{kind}_{jid[:6]}.mp4")
+        for old_ in os.listdir(d):  # ankstesnės peržiūros nebereikalingos
+            if old_.startswith("fxprev_"):
+                try:
+                    os.unlink(os.path.join(d, old_))
+                except OSError:
+                    pass
         reels_studio.finish(seg, out, anims={"gfx": [g]}, color="Natūralios", effects=(), progress_bar="Ne",
                             preview=True, accent=proj["settings"].get("accent") or "Auksas")
         os.unlink(seg)
         _job_update(jid, status="done", progress=1.0, message="Paruošta",
-                    result={"file": os.path.basename(out), "kind": kind, "t": round(t0, 2), "text": g.get("text")})
+                    result={"file": os.path.basename(out), "kind": kind, "t": round(t0, 2), "text": g.get("text"),
+                            "item": dict(it, t=round(t0, 2))})
     except Exception as e:
         traceback.print_exc()
         _job_update(jid, status="error", message=str(e)[:300])
@@ -2948,5 +2962,48 @@ def fx_preview(pid: str, body: FxPreviewBody, user=Depends(current_user)):
     with _jobs_lock:
         _jobs[jid] = {"id": jid, "user": user["username"], "project": pid, "kind": "fxprev", "status": "running",
                       "progress": 0.0, "message": "Ruošiu efekto peržiūrą…", "created": time.time(), "result": None}
-    _pool.submit(_run_fx_preview, jid, user, pid, body.kind, body.t, None)
+    _pool.submit(_run_fx_preview, jid, user, pid, body.kind, body.t, body.item)
+    return _jobs[jid]
+
+
+
+# ---------- ✨ 3D akcentai: pasiūlymai pagal klipo turinį ----------
+def _run_accent_suggest(jid, user, pid, kind, quick, words):
+    try:
+        import accents
+        from PIL import Image as _Image
+        proj = _load(user, pid)
+        prep = _load_prep(user, proj)
+        if prep is None:
+            raise ValueError("Pirmiausia sukurkite peržiūrą – akcentai parenkami pagal sumontuotą video")
+        keep = prep["analysis"].get("keep")
+        info = video_editor.probe(prep["src"])
+        W_, H_ = info["width"], info["height"]
+        k = 540 / max(W_, H_)
+        w_, h_ = int(W_ * k) // 2 * 2, int(H_ * k) // 2 * 2
+
+        def grab(t):
+            ts = engine._to_src(t, keep) if not prep.get("vo") else t
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, ts):.3f}", "-i", prep["src"], "-frames:v",
+                                  "1", "-vf", f"scale={w_}:{h_}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                                 capture_output=True).stdout
+            if len(raw) < w_ * h_ * 3:
+                return _Image.new("RGB", (w_, h_))
+            return _Image.frombytes("RGB", (w_, h_), raw[: w_ * h_ * 3])
+        _job_update(jid, message="Žiūriu kadrus, veidus ir kalbą…", progress=0.2)
+        sugs = accents.suggest(prep, proj["settings"], pid, grab)
+        _job_update(jid, status="done", progress=1.0, message="Paruošta", result={"suggestions": sugs})
+    except Exception as e:
+        traceback.print_exc()
+        _job_update(jid, status="error", message=str(e)[:300])
+
+
+@app.post("/api/projects/{pid}/accents/suggest")
+def accents_suggest(pid: str, user=Depends(current_user)):
+    jid = uuid.uuid4().hex[:12]
+    _load(user, pid)
+    with _jobs_lock:
+        _jobs[jid] = {"id": jid, "user": user["username"], "project": pid, "kind": "accents", "status": "running",
+                      "progress": 0.0, "message": "Ieškau vietų 3D akcentams…", "created": time.time(), "result": None}
+    _pool.submit(_run_accent_suggest, jid, user, pid, "accents", False, None)
     return _jobs[jid]

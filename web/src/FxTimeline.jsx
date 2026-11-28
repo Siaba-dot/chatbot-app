@@ -1,14 +1,17 @@
 import React, { useState } from "react";
 import { api, fileUrl, waitJob } from "./api.js";
+import { AccentEditor } from "./Accents3D.jsx";
 
 // 🎯 Efektai laiko juostoje: vartotojas pasirenka efektą ir vietą peržiūroje, pamato trumpą peržiūrą ir tik tada
 // pritaiko. Kiekvieną efektą galima pašalinti atskirai.
-export default function FxTimeline({ id, opts, s, set, hasPreview, getTime, seek, setError }) {
+export default function FxTimeline({ id, opts, s, set, hasPreview, getTime, seek, setError, previewSrc }) {
   const kinds = (opts.timeline_fx || []).filter(k => opts.gfx && opts.gfx[k]);
   const [kind, setKind] = useState(kinds[0] || "");
   const [t, setT] = useState(0);
   const [busy, setBusy] = useState(null);     // vykstantis peržiūros darbas
   const [prev, setPrev] = useState(null);     // {file, kind, t, text, v}
+  const [editing, setEditing] = useState(null);  // keičiamo 3D akcento id
+  const acc = opts.accents;
   const items = s.fx_items || [];
   const name = k => (opts.gfx && opts.gfx[k]) || k;
 
@@ -41,7 +44,7 @@ export default function FxTimeline({ id, opts, s, set, hasPreview, getTime, seek
 
   return (
     <div className="section card">
-      <h3 style={{ marginTop: 0 }}>🎯 Efektai laiko juostoje</h3>
+      <h3 style={{ marginTop: 0 }}>🎯 Efektai ir akcentai laiko juostoje</h3>
       <div className="hint" style={{ marginBottom: 8 }}>
         Sustabdykite peržiūrą norimoje vietoje, pasirinkite efektą ir pažiūrėkite, kaip jis atrodys – tik tada pritaikykite.
         {items.length > 0 && " Kai efektai sudėti čia, automatinis grafikos parinkimas nenaudojamas."}
@@ -81,10 +84,20 @@ export default function FxTimeline({ id, opts, s, set, hasPreview, getTime, seek
         <div style={{ marginTop: 10 }}>
           <b>Pritaikyti efektai</b>
           {items.map(it => (
-            <div key={it.id} className="row" style={{ gap: 6, marginTop: 6, alignItems: "center" }}>
-              <span style={{ flex: 1 }}>{name(it.kind)} · {it.t} s</span>
-              {hasPreview && <button type="button" className="btn small ghost" onClick={() => seek(it.t)}>▶ Rodyti vietą</button>}
-              <button type="button" className="btn small ghost danger" onClick={() => remove(it)}>✕ Pašalinti</button>
+            <div key={it.id}>
+              <div className="row" style={{ gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ flex: 1 }}>{name(it.kind)} · {it.t} s{it.dur ? ` · ${it.dur} s` : ""}{it.text ? ` · „${it.text}“` : ""}</span>
+                {hasPreview && <button type="button" className="btn small ghost" onClick={() => seek(it.t)}>▶ Rodyti vietą</button>}
+                {acc && acc.kinds[it.kind] && hasPreview && (
+                  <button type="button" className="btn small ghost" onClick={() => setEditing(editing === it.id ? null : it.id)}>✎ Keisti</button>
+                )}
+                <button type="button" className="btn small ghost danger" onClick={() => remove(it)}>✕ Pašalinti</button>
+              </div>
+              {editing === it.id && (
+                <AccentEditor id={id} item={it} acc={acc} previewSrc={previewSrc} setError={setError}
+                  onCancel={() => setEditing(null)}
+                  onSave={nx => { set({ fx_items: items.map(x => (x.id === it.id ? { ...nx, id: it.id } : x)).sort((a, b) => a.t - b.t) }); setEditing(null); }} />
+              )}
             </div>
           ))}
           <div className="hint" style={{ marginTop: 6 }}>Pakeitę efektus, sukurkite peržiūrą iš naujo – galutinis video bus toks pat kaip peržiūra.</div>
