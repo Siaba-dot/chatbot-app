@@ -75,7 +75,7 @@ def test_render_job_all_formats(client, make_user, media):
     assert client.get(f"/api/projects/{pid}/files/visi_formatai.zip", headers=h).status_code == 200
 
 
-@pytest.mark.parametrize("kind", ["phone3d", "frame3d", "laptop3d"])
+@pytest.mark.parametrize("kind", ["phone3d", "frame3d", "laptop3d", "gold3d"])
 def test_spin_effects_in_video(media, kind):
     """📱 / 🖼 3D efektai: vaizdas sumažėja į telefoną / rėmą (aplink tamsus fonas) ir video sukuriamas be klaidų."""
     import fxpack
@@ -86,9 +86,24 @@ def test_spin_effects_in_video(media, kind):
     mid = os.path.join(d, "m.png")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "1.0", "-i", out, "-frames:v", "1", mid], check=True)
     img = np.asarray(Image.open(mid).convert("L"), dtype=np.int16)
-    assert img[:, :20].mean() < 70, "aplink telefoną / rėmą turi matytis tamsus fonas"
+    orig = os.path.join(d, "o.png")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "1.2", "-i", media["portrait"], "-vf",
+                    "scale=360:640:force_original_aspect_ratio=increase,crop=360:640", "-frames:v", "1", orig], check=True)
+    src = np.asarray(Image.open(orig).convert("L"), dtype=np.int16)
+    assert np.abs(img[:, :20] - src[:, :20]).mean() > 15, "aplink telefoną / rėmą turi matytis fonas, ne pats video"
     clips = [engine.add_clip(media["portrait"]), engine.add_clip(media["image"])]
     st = {"subtitle_text": "Štai mūsų naujas salonas. Ateikite!", "gfx_kinds": [kind]}
     prep = engine.prepare(clips, st, d)
     fin = engine.build(prep, st, os.path.join(d, "o.mp4"), d, quick=True)
     assert fin["duration"] > 3
+
+
+def test_gold_letters_follow_first_word():
+    """✨ Auksinės raidės visada su pirmu ištartu žodžiu ir rodo būtent jį."""
+    st = dict(engine.DEFAULTS) if hasattr(engine, "DEFAULTS") else {}
+    st.update({"anims": {k: False for k in ("stickers", "marks", "cards", "phone", "fx", "intro", "outro")},
+               "gfx_kinds": ["gold3d", "reel"], "handle": ""})
+    spec = engine.anim_spec(WORDS, st)
+    gold = [g for g in spec["gfx"] if g["kind"] == "gold3d"]
+    assert gold and gold[0]["t"] == WORDS[0][1] and gold[0]["text"] == "Bendradarbiavimas"
+    assert all(g["t"] - gold[0]["t"] >= 2.8 for g in spec["gfx"] if g is not gold[0])

@@ -21,12 +21,12 @@ KINDS = {
     "filmstrip": "🎞️ Kino juosta", "fan": "🃏 Kortelių vėduoklė", "polaroids": "📸 Polaroidų lietus",
     "grid": "🖼️ Galerijos tinklelis", "pip": "🔲 Kadras kadre", "chat": "💬 Žinutės telefone",
     "review": "⭐ Atsiliepimo kortelė", "chart": "📈 Augantis grafikas", "notif": "🔔 Pranešimas",
-    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas", "laptop3d": "💻 Užsidarantis kompiuteris",
+    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas", "laptop3d": "💻 Užsidarantis kompiuteris", "gold3d": "✨ Auksinės raidės",
     "frame3d": "🖼 Besisukantis paveikslo rėmas",
 }
 OVERLAY_KINDS = ("filmstrip", "fan", "polaroids", "grid")
 ASS_KINDS = ("chat", "review", "chart", "notif", "counter")
-LEN = {"reel": 1.0, "phone3d": 2.6, "laptop3d": 3.2, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
+LEN = {"reel": 1.0, "phone3d": 2.6, "laptop3d": 3.2, "gold3d": 2.8, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
        "chart": 2.8, "notif": 2.8, "counter": 2.2}
 SEMI = "Montserrat SemiBold"
 
@@ -516,7 +516,7 @@ def ai_plan(client, words, allowed, ai_json, busy=(), limit=4):
 
 
 # ======================= 📱 3D telefonas / 🖼 paveikslo rėmas (kadrai piešiami PIL – realistiška perspektyva) ========
-SPIN_KINDS = ("phone3d", "frame3d", "laptop3d")
+SPIN_KINDS = ("phone3d", "frame3d", "laptop3d", "gold3d")
 
 
 def _persp_coeffs(src, dst):
@@ -633,7 +633,7 @@ def _phone_front(screen, W, H, kind, fade=1.0):
     return img, b
 
 
-def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
+def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None, text=""):
     """📱 Kadras „įlenda“ į realistišką telefoną (arba 🖼 paveikslo rėmą), kuris pasisuka 3D erdvėje ir grįžta.
     Grąžina video (be garso) lango trukmei – uždedamas ant pagrindinio video nuo t."""
     import math
@@ -641,6 +641,8 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
     from PIL import Image, ImageDraw, ImageFilter
     if kind == "laptop3d":
         return render_laptop(src, t, out_path, W, H, fps, dur)
+    if kind == "gold3d":
+        return render_gold(src, t, text, out_path, W, H, fps, dur)
     d = dur or LEN[kind]
     n = round(d * fps)
     raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
@@ -731,13 +733,52 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
     return out_path
 
 
+def gold_stagger(nl):
+    return min(0.06, 0.18 / max(1, nl - 1))
+
+
+def gold_land_times(text, dur):
+    """Kada (s nuo efekto pradžios) kiekviena auksinė raidė nusileidžia ir atsistoja ant stalo."""
+    word = re.sub(r"[^\w\-]", "", (text or "").replace(video_editor.KEY_MARK, "")).upper()[:12] or "WOW"
+    nl = len(word)
+    return [(0.2 + i * gold_stagger(nl) + 0.17 * 0.9) * dur for i in range(nl)]
+
+
+def clink_wav(times, out_path, sr=44100, volume=0.22):
+    """Trumpi metaliniai dzingtelėjimai (raidė krinta ant stalo): aukšti netolygūs tonai + duslus bumtelėjimas."""
+    import wave
+    import numpy as np
+    total = (max(times) if times else 0) + 0.6
+    y = np.zeros(int(total * sr), np.float32)
+    rng = np.random.default_rng(9)
+    for i, t0 in enumerate(times):
+        n = int(0.45 * sr)
+        tt = np.arange(n) / sr
+        pitch = 1 + 0.04 * rng.normal()
+        ping = sum(a * np.sin(2 * np.pi * f * pitch * tt) * np.exp(-tt / d)
+                   for f, a, d in ((2350, 0.5, 0.09), (3720, 0.35, 0.06), (5310, 0.25, 0.04), (7930, 0.15, 0.025)))
+        thud = 0.6 * np.sin(2 * np.pi * 150 * tt) * np.exp(-tt / 0.035)
+        click = np.zeros(n)
+        click[:120] = rng.normal(0, 0.5, 120) * np.linspace(1, 0, 120)
+        snd = (ping + thud + click) * volume * (0.85 + 0.3 * rng.random())
+        a = int(t0 * sr)
+        y[a:a + n] += snd[: len(y) - a]
+    pcm = (np.clip(y, -1, 1) * 32767).astype("<i2")
+    with wave.open(out_path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
+    return out_path
+
+
 def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
     """Įdeda 3D efektus į video (prieš spalvas, titrus ir kt. – jie piešiami ant viršaus kaip įprasta)."""
     rendered = []
     for i, it in enumerate(items):
         t = it["t"] * speed
         clip = os.path.join(tmp, f"spin{i}.mp4")
-        render_spin(path, t, it["kind"], clip, W, H, fps, LEN[it["kind"]] * speed)
+        render_spin(path, t, it["kind"], clip, W, H, fps, LEN[it["kind"]] * speed, it.get("text", ""))
         rendered.append((t, clip))
     if not rendered:
         return path
@@ -747,8 +788,23 @@ def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
         cmd += ["-i", clip]
         chain.append(f"[{k}:v]setpts=PTS-STARTPTS+{t:.3f}/TB[s{k}];[{last}][s{k}]overlay=eof_action=pass[o{k}]")
         last = f"o{k}"
-    cmd += ["-filter_complex", ";".join(chain), "-map", f"[{last}]", "-map", "0:a?", "-c:v", "libx264", "-preset",
-            "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-c:a", "copy", out_path]
+    # ✨ auksinių raidių kritimo garsas – tik jis, jokių kitų garsų
+    lands = [it["t"] * speed + x for it in items if it["kind"] == "gold3d"
+             for x in gold_land_times(it.get("text", ""), LEN["gold3d"] * speed)]
+    has_a = bool(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                                 "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip())
+    amap, acodec = ["-map", "0:a?"], ["-c:a", "copy"]
+    if lands:
+        k = len(rendered) + 1
+        cmd += ["-i", clink_wav(lands, os.path.join(tmp, "clinks.wav"))]
+        if has_a:
+            chain.append(f"[0:a][{k}:a]amix=inputs=2:normalize=0:duration=first[aout]")
+            amap = ["-map", "[aout]"]
+        else:
+            amap = ["-map", f"{k}:a"]
+        acodec = ["-c:a", "aac", "-b:a", "192k"]
+    cmd += ["-filter_complex", ";".join(chain), "-map", f"[{last}]", *amap, "-c:v", "libx264", "-preset",
+            "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", *acodec, out_path]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("Nepavyko įdėti 3D efekto: " + r.stderr[-300:])
@@ -1015,6 +1071,262 @@ def render_laptop(src, t, out_path, W, H, fps=30, dur=None):
         prev = out
         if back_fade > 0.005:
             out = Image.blend(out, fr, back_fade)
+        proc.stdin.write(out.tobytes())
+    proc.stdin.close()
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError("Nepavyko sukurti 3D efekto")
+    return out_path
+
+
+# ======================= ✨ auksinės raidės: iš telefono ekrano ant stalo išslysta pirmas žodis =======================
+def _wood(w, h, seed=11):
+    """Tamsaus riešuto stalviršis (procedūrinė medienos rievių tekstūra)."""
+    import numpy as np
+    from PIL import Image
+    rng = np.random.default_rng(seed)
+    y = np.linspace(0, 1, h)[:, None]
+    x = np.linspace(0, 1, w)[None, :]
+    warp = np.sin(y * 5 + rng.random() * 6) * 0.008 + np.sin(y * 23) * 0.002
+    grain = np.sin((x + warp) * 140 + np.sin(y * 4) * 3) * 0.5 + 0.5
+    fine = rng.normal(0, 1, (1, w)).repeat(h, 0) * 0.35 + rng.normal(0, 1, (h, w)) * 0.25
+    lum = 0.55 + 0.25 * grain + 0.05 * fine
+    rgb = np.dstack([92 * lum, 60 * lum, 38 * lum]).clip(0, 255)
+    return Image.fromarray(np.dstack([rgb, np.full((h, w), 255)]).astype("uint8"), "RGBA")
+
+
+def _stone(w, h, seed=21):
+    """Šviesiai pilkas grūdėtas (odos / akmens) stalviršis su reljefu, apšviestu iš viršaus."""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    rng = np.random.default_rng(seed)
+    n = Image.fromarray((rng.random((h, w)) * 255).astype("uint8")).filter(ImageFilter.GaussianBlur(1.6))
+    a = np.asarray(n, np.float32)
+    gy, gx = np.gradient(a)
+    lum = 116 + (-gy * 1.4 - gx * 0.6) * 3.2 + rng.normal(0, 1.5, (h, w))
+    rgb = np.dstack([lum * 0.96, lum * 0.99, lum * 1.04]).clip(0, 255)
+    return Image.fromarray(np.dstack([rgb, np.full((h, w), 255)]).astype("uint8"), "RGBA")
+
+
+def _gold_text(text, height, full=None):
+    """Šlifuoto aukso raidės: (veidas su briaunų šviesa, šonas, kaukė). full – viso žodžio aukščio riboms."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    font = ImageFont.truetype(os.path.join(video_editor.FONT_DIR, "Montserrat_900Black.ttf"), height)
+    l, t, r, b = font.getbbox(text)
+    if full:
+        _, t, _, b = font.getbbox(full)
+    pad = round(height * 0.12)
+    w, h = r - l + 2 * pad, b - t + 2 * pad
+    m = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(m).text((pad - l, pad - t), text, font=font, fill=255)
+    M = np.asarray(m, dtype=np.float32) / 255
+    yy = np.linspace(0, 1, h)[:, None] * np.ones((1, w))
+    stops = [(0, (232, 194, 120)), (0.5, (208, 164, 90)), (1, (178, 134, 64))]  # matinis satininis auksas
+    rgb = np.zeros((h, w, 3), np.float32)
+    for (a0, c0), (a1, c1) in zip(stops, stops[1:]):
+        k = ((yy - a0) / (a1 - a0)).clip(0, 1)[..., None]
+        sel = ((yy >= a0) & (yy <= a1))[..., None]
+        rgb = np.where(sel, np.array(c0) * (1 - k) + np.array(c1) * k, rgb)
+    rng = np.random.default_rng(4)
+    rgb += (rng.normal(0, 1, (1, w)).repeat(h, 0) * 5 + rng.normal(0, 1, (h, w)) * 3)[..., None]  # šlifavimas
+    bl = np.asarray(m.filter(ImageFilter.GaussianBlur(height * 0.03)), dtype=np.float32) / 255
+    gy_, gx_ = np.gradient(bl)
+    bevel = (-(gx_ * 0.6 + gy_ * 1.0) * height * 0.9)[..., None]  # briaunos: šviesa iš viršaus kairės
+    rgb = (rgb + bevel * 70).clip(0, 255)
+    face = Image.fromarray(np.dstack([rgb, M * 255]).astype("uint8"), "RGBA")
+    side = Image.fromarray(np.dstack([np.full((h, w), 196), np.full((h, w), 154), np.full((h, w), 82), M * 255])
+                           .astype("uint8"), "RGBA")
+    return face, side, m
+
+
+def _gold_letters(text, height):
+    """Kiekviena raidė atskirai (tas pats aukštis ir gradientas), su vieta žodyje: [(veidas, šonas, kaukė, x px)], plotis."""
+    from PIL import ImageFont
+    font = ImageFont.truetype(os.path.join(video_editor.FONT_DIR, "Montserrat_900Black.ttf"), height)
+    out, x = [], 0.0
+    for i, ch in enumerate(text):
+        x = font.getlength(text[:i])
+        if ch.strip():
+            face, side, m = _gold_text(ch, height, full=text)
+            out.append((face, side, m, x + font.getbbox(ch)[0] - round(height * 0.12)))
+    return out, font.getlength(text)
+
+
+def render_gold(src, t, text, out_path, W, H, fps=30, dur=None):
+    """✨ Kadras atitolsta – tai telefonas ant stalo; iš ekrano krašto išslysta stambios šlifuoto aukso 3D raidės
+    (pirmas ištartas žodis), atsistoja, trumpam atsispindi telefono stikle, tada vėl grįžta video."""
+    import math
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    d = dur or LEN["gold3d"]
+    n = round(d * fps)
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
+                          f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps}",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    fsz = W * H * 3
+    frames = [raw[i:i + fsz] for i in range(0, len(raw) - fsz + 1, fsz)][:n]
+    if not frames:
+        raise RuntimeError("Nepavyko paimti kadrų efektui")
+    word = re.sub(r"[^\w\-]", "", (text or "").replace(video_editor.KEY_MARK, "")).upper()[:12] or "WOW"
+    face, side, mask = _gold_text(word, 260)
+    letters, word_w = _gold_letters(word, 260)
+    table = _stone(2000, 2600)
+    e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
+    yy, xx = np.mgrid[0:H, 0:W]
+    vign = (1 - 0.4 * (((xx - W * 0.4) / (W * 0.9)) ** 2 + ((yy - H * 0.35) / (H * 0.8)) ** 2)).clip(0.55, 1)
+    bgc = Image.fromarray((np.dstack([vign * 108, vign * 112, vign * 118])).astype("uint8"))
+    proc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+                             "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                             "-pix_fmt", "yuv420p", out_path], stdin=subprocess.PIPE)
+    L = np.array([-0.35, -0.8, 0.5])
+    L = L / np.linalg.norm(L)
+    dist = H * 2.0
+    for i in range(n):
+        fr = Image.frombytes("RGB", (W, H), frames[min(i, len(frames) - 1)])
+        u = i / max(1, n - 1)
+        z = e(u / 0.26)
+        back = e((u - 0.84) / 0.16)
+        if z < 0.002:
+            proc.stdin.write(fr.tobytes())
+            continue
+        if back > 0.995:
+            proc.stdin.write(fr.tobytes())
+            continue
+        sc = (1 - 0.3 * z) * (1 + 0.12 * max(0.0, u - 0.15))  # kamera visą laiką lėtai artėja
+        tilt = math.radians(42) * z
+        ty = -H * 0.24 * z
+        front, b = _phone_front(fr.convert("RGBA"), W, H, "phone3d", min(1.0, z / 0.15))
+        fw, fh = front.size
+        pt = fw * 0.07
+
+        def tr(p):
+            x, y, zz = p[0] * sc, p[1] * sc, p[2] * sc
+            x, y, zz = _rot_x((x, y, zz), tilt)
+            return np.array((x, y + ty, zz))
+
+        def proj(v):
+            f = dist / (dist - v[2])
+            return W / 2 + v[0] * f, H / 2 + v[1] * f
+
+        def nrm(v):
+            return np.array(_rot_x(v, tilt))
+
+        def visible(pts, nv):
+            c = sum(pts) / len(pts)
+            return float(nv @ (np.array((0, 0, dist)) - c)) > 0
+
+        cv = bgc.copy().convert("RGBA")
+        # stalviršis (su prožektoriaus šviesa)
+        tq = [proj(tr(p)) for p in ((-fw * 2.6, -fh * 2.4, -pt), (fw * 2.6, -fh * 2.4, -pt),
+                                     (fw * 2.6, fh * 2.6, -pt), (-fw * 2.6, fh * 2.6, -pt))]
+        w_ = _warp(table, tq, W, H)
+        if w_:
+            cv.alpha_composite(w_[0], (w_[1], w_[2]))
+        cv = Image.fromarray((np.asarray(cv.convert("RGB"), np.float32) * vign[..., None] * 1.05).clip(0, 255)
+                             .astype("uint8")).convert("RGBA")
+        # telefono šešėlis ant stalo
+        sq = [proj(tr(p)) for p in ((-fw / 2 + 8, -fh / 2 + 18, -pt), (fw / 2 + 8, -fh / 2 + 18, -pt),
+                                     (fw / 2 + 16, fh / 2 + 30, -pt), (-fw / 2 + 16, fh / 2 + 30, -pt))]
+        sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).polygon(sq, fill=(0, 0, 0, int(120 * z)))
+        cv.alpha_composite(sh.filter(ImageFilter.GaussianBlur(max(2, W * 0.02))))
+        # telefono šonai
+        pt_ = pt
+        r = fw * 0.1
+        for pts, nv in (([(-fw / 2 + r, fh / 2, 0), (fw / 2 - r, fh / 2, 0), (fw / 2 - r, fh / 2, -pt),
+                          (-fw / 2 + r, fh / 2, -pt)], (0, 1, 0)),
+                        ([(fw / 2, -fh / 2 + r, 0), (fw / 2, fh / 2 - r, 0), (fw / 2, fh / 2 - r, -pt),
+                          (fw / 2, -fh / 2 + r, -pt)], (1, 0, 0)),
+                        ([(-fw / 2, -fh / 2 + r, 0), (-fw / 2, fh / 2 - r, 0), (-fw / 2, fh / 2 - r, -pt),
+                          (-fw / 2, -fh / 2 + r, -pt)], (-1, 0, 0))):
+            vs = [tr(p) for p in pts]
+            nv_ = nrm(nv)
+            if visible(vs, nv_):
+                sh_ = 0.4 + 0.7 * max(0.0, float(nv_ @ L))
+                ImageDraw.Draw(cv).polygon([proj(v) for v in vs], fill=tuple(int(c * sh_) for c in (176, 170, 160)) + (255,))
+        scr_q = [proj(tr(p)) for p in ((-fw / 2, -fh / 2, 0), (fw / 2, -fh / 2, 0), (fw / 2, fh / 2, 0),
+                                       (-fw / 2, fh / 2, 0))]
+        w_ = _warp(front, scr_q, W, H)
+        if w_:
+            cv.alpha_composite(w_[0], (w_[1], w_[2]))
+        # raidės: po vieną greitai viena paskui kitą išslysta iš ekrano apačios ant stalo ir atsistoja
+        tw2 = fw * 0.36  # raidės – apie du trečdalius telefono pločio
+        th = min(tw2 * 2 * face.height / face.width, fh * 0.24)
+        ppx = th / face.height  # pasaulio vienetai vienam raidės paveikslo taškui
+        x_start = -word_w * ppx / 2
+        nl = len(letters)
+        stagger = gold_stagger(nl)  # visas žodis susidėlioja ~per 0,5 s
+        items = []
+        for li, (lf, ls, lm, lx) in enumerate(letters):
+            uu = (u - 0.2 - li * stagger) / 0.17  # vienos raidės laikas 0..1
+            if uu <= 0:
+                continue
+            k_out = e(uu / 0.75)
+            yb = fh / 2 - th * 0.35 + th * 1.9 * k_out
+            zb = -pt * e((yb - fh / 2) / (th * 0.2) + 0.5)
+            if uu < 1:
+                a = math.radians(90) * min(1.0, e((uu - 0.3) / 0.7) * 1.1)
+            else:
+                a = math.radians(90) * (1 + 0.1 * math.cos((uu - 1) * 7) * math.exp(-(uu - 1) * 2.5))
+            vis = e(uu / 0.25)
+            x0 = x_start + lx * ppx
+            lw_ = lf.width * ppx
+            cx_ = x0 + lw_ / 2
+            cx_ *= 0.3 + 0.7 * k_out  # startuoja ekrano ribose, išslysdama prasiskleidžia į savo vietą
+            items.append((yb, lf, ls, lm, cx_ - lw_ / 2, cx_ + lw_ / 2, yb, zb, a, vis))
+        items.sort(key=lambda it: it[0])
+        for _, lf, ls, lm, xl, xr, yb, zb, a, vis in items:
+            top_off = np.array((0, -math.cos(a), math.sin(a))) * th
+            n_l = np.array((0, math.sin(a), math.cos(a)))
+            base_l, base_r = np.array((xl, yb, zb)), np.array((xr, yb, zb))
+            quad = [base_l + top_off, base_r + top_off, base_r, base_l]
+            sl = th * 0.55 * math.sin(a)  # šešėlis už raidės
+            if sl > 2:
+                shq = [proj(tr(p)) for p in ((xl, yb - sl, -pt), (xr, yb - sl, -pt), (xr + 6, yb, -pt), (xl + 6, yb, -pt))]
+                w_ = _warp(Image.merge("RGBA", [Image.new("L", lm.size, 0)] * 3 + [lm.point(lambda v: v * 0.6 * vis)]),
+                           shq, W, H)
+                if w_:
+                    cv.alpha_composite(w_[0].filter(ImageFilter.GaussianBlur(4)), (w_[1], w_[2]))
+            refl = 0.45 * vis * (1 - e((u - 0.6) / 0.2))  # atspindys telefono stikle – tik ekrano ribose, trumpam
+            if refl > 0.01:
+                mq = [proj(tr(np.array((p[0], p[1], -p[2])))) for p in quad]
+                w_ = _warp(lf, mq, W, H)
+                if w_:
+                    patch, px, py = w_
+                    m = Image.new("L", patch.size, 0)
+                    ImageDraw.Draw(m).polygon([(x - px, y - py) for x, y in scr_q], fill=int(255 * refl))
+                    patch.putalpha(Image.fromarray(np.minimum(np.asarray(patch.getchannel("A")), np.asarray(m))))
+                    cv.alpha_composite(patch, (px, py))
+            ext = th * 0.2  # storis – sluoksniai nuo galo
+            diff = max(0.0, float(nrm(n_l) @ L))
+            for j in range(8, 0, -1):
+                off = -n_l * ext * j / 8
+                w_ = _warp(ls, [proj(tr(p + off)) for p in quad], W, H)
+                if w_:
+                    p_ = np.asarray(w_[0], np.float32)
+                    p_[..., :3] *= 0.75 + 0.35 * (1 - j / 8)
+                    p_[..., 3] *= vis
+                    cv.alpha_composite(Image.fromarray(p_.clip(0, 255).astype("uint8"), "RGBA"), (w_[1], w_[2]))
+            f2 = lf.copy()  # blizgesio juosta, perbėganti per visą žodį
+            band = Image.new("L", f2.size, 0)
+            bx = (-0.3 + 1.6 * e((u - 0.55) / 0.3)) * (xr - x_start * -1 - x_start) / ppx - (xl - x_start) / ppx
+            ImageDraw.Draw(band).polygon([(bx, 0), (bx + th * 0.5 / ppx * 0.3, 0), (bx - th * 0.2 / ppx * 0.3, f2.height),
+                                          (bx - th * 0.7 / ppx * 0.3, f2.height)], fill=60)
+            band = Image.fromarray(np.minimum(np.asarray(band.filter(ImageFilter.GaussianBlur(f2.height * 0.05))),
+                                              np.asarray(lm)))
+            white = Image.new("RGBA", f2.size, (255, 248, 225, 0))
+            white.putalpha(band)
+            f2.alpha_composite(white)
+            w_ = _warp(f2, [proj(tr(p)) for p in quad], W, H)
+            if w_:
+                p_ = np.asarray(w_[0], np.float32)
+                p_[..., :3] *= 0.8 + 0.4 * diff
+                p_[..., 3] *= vis
+                cv.alpha_composite(Image.fromarray(p_.clip(0, 255).astype("uint8"), "RGBA"), (w_[1], w_[2]))
+        out = cv.convert("RGB")
+        if back > 0.005:
+            out = Image.blend(out, fr, back)
         proc.stdin.write(out.tobytes())
     proc.stdin.close()
     proc.wait()

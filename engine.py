@@ -1014,6 +1014,12 @@ def anim_spec(words, s, client=None):
             gfx = _safe(fxpack.ai_plan, client, words, s["gfx_kinds"], reels_studio._ai_json, busy) or []
         if not gfx:
             gfx = fxpack.auto_plan(words, s["gfx_kinds"], busy)
+    gfx = [g for g in gfx if g.get("kind") != "gold3d"]
+    if "gold3d" in s["gfx_kinds"] and words:  # ✨ auksinės raidės – visada su pirmu ištartu žodžiu
+        t0 = words[0][1]
+        gap = fxpack.LEN["gold3d"] + 1.0
+        gfx = [{"kind": "gold3d", "t": round(t0, 2), "text": video_editor.plain(words[0][0])}] + \
+              [g for g in gfx if g["t"] - t0 >= gap]
     if gfx and plan.get("fx"):
         plan = dict(plan, fx=[(t, k) for t, k in plan["fx"] if all(abs(t - g["t"]) >= 2.8 for g in gfx)])
     return {"gfx": gfx, "plan": {k: plan.get(k, []) if an[k] else [] for k in
