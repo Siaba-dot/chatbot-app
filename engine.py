@@ -22,6 +22,7 @@ import animations
 import fxpack
 import reels_studio
 import video_editor
+from automontage import JCUT
 
 FORMATS = {"9:16": "9:16 · Reels, TikTok, Shorts", "16:9": "16:9 · YouTube", "1:1": "1:1 · Kvadratas",
            "4:5": "4:5 · Instagram įrašas"}
@@ -51,10 +52,12 @@ DEFAULTS = {
     "denoise": True,
     "key_words": True,
     "punch": True,
+    "jcut": False,             # J perėjimas: kito kadro garsas prasideda truputį anksčiau už vaizdą
     "bubbles": False,
     "anims": {"stickers": False, "marks": False, "cards": False, "phone": False, "fx": False,
               "intro": False, "outro": False},
     "gfx_kinds": [],
+    "fx_items": [],            # 🎯 efektai laiko juostoje: [{"id", "kind", "t" – sekundė peržiūroje}]
     "music": None,             # pavadinimas iš music_library() arba None
     "music_volume": 25,
     "ducking": True,
@@ -103,6 +106,14 @@ def settings_with_defaults(settings):
     s["color"] = s["color"] if s["color"] in reels_studio.COLOR_FILTERS else tpl["color"]
     s["effects"] = [e for e in s["effects"] if e in reels_studio.EFFECTS]
     s["gfx_kinds"] = [k for k in s["gfx_kinds"] if k in fxpack.KINDS]
+    items = []
+    for it in s["fx_items"] if isinstance(s["fx_items"], list) else []:
+        try:
+            if it.get("kind") in fxpack.TIMELINE_KINDS and float(it.get("t", -1)) >= 0:
+                items.append({"id": str(it.get("id") or len(items)), "kind": it["kind"], "t": round(float(it["t"]), 2)})
+        except (TypeError, ValueError, AttributeError):
+            continue
+    s["fx_items"] = sorted(items, key=lambda x: x["t"])[:12]
     if s["look"] not in video_editor.SUBTITLE_LOOKS:
         s["look"] = "modern"
     if s["format"] not in FORMATS:
@@ -139,6 +150,7 @@ def options():
         "broll_modes": BROLL_MODES,
         "stickers": animations.STICKERS, "marks": animations.MARKS, "fx": animations.FX,
         "gfx": {k: v if isinstance(v, str) else v.get("title", k) for k, v in fxpack.KINDS.items()},
+        "timeline_fx": list(fxpack.TIMELINE_KINDS),
         "defaults": DEFAULTS,
     }
 
@@ -766,7 +778,7 @@ def source_for_format(clips, settings, workdir, fmt, vo_path=None, progress=None
     src, _ = video_editor.concat_clips(_clip_paths(clips, s, idur), src, fmt, progress=progress,
                                        image_duration=idur,
                                        segments=[_segments(c) for c in clips], transition=s["transition"],
-                                       fill=fill)
+                                       fill=fill, jcut=JCUT if s["jcut"] else 0.0)
     return src
 
 
@@ -786,7 +798,7 @@ def prepare(clips, settings, workdir, client=None, status=None, progress=None, v
     src, spans = video_editor.concat_clips(_clip_paths(clips, s, image_duration), src, s["format"],
                                            progress=lambda p: prog(p * 0.5), image_duration=image_duration,
                                            segments=[_segments(c) for c in clips], transition=s["transition"],
-                                           fill=s["fit"] == "fill")
+                                           fill=s["fit"] == "fill", jcut=JCUT if s["jcut"] else 0.0)
     protect = [sp for sp, c in zip(spans, clips) if c["audio"] != "speech" or clip_sound_file(c, s)]
     say("Ieškau pauzių ir atpažįstu kalbą…")
     analysis = video_editor.analyze(src, remove_silence=s["remove_silence"] and not vo_path,
@@ -1020,10 +1032,21 @@ def bubbles(words, s, client=None):
     return reels_studio.auto_bubbles(words)
 
 
+def timeline_item(it, words, speed=1.0):
+    """Laiko juostos efektas (peržiūros laikas) -> grafikos planas (montažo laikas). Auksinėms raidėms –
+    žodis, ištariamas tuo metu."""
+    t = it["t"] * speed
+    g = {"kind": it["kind"], "t": round(t, 2)}
+    if it["kind"] == "gold3d":
+        w = next((w for w in words or [] if w[1] >= t - 0.3), None) or (words[-1] if words else None)
+        g["text"] = video_editor.plain(w[0]) if w else ""
+    return g
+
+
 def anim_spec(words, s, client=None, cuts=()):
     """Animacijų planas (kaip studijoje): AI arba taisyklės. None – viskas išjungta."""
     an = s["anims"]
-    if not (any(an.values()) or s["gfx_kinds"]):
+    if not (any(an.values()) or s["gfx_kinds"] or s.get("fx_items")):
         return None
     words = list(words or [])
     plan = {}
@@ -1058,6 +1081,8 @@ def anim_spec(words, s, client=None, cuts=()):
         free = [c for c in cand if all(abs(c - b) >= L + 0.5 for b in busy_t)]
         if free:
             gfx = sorted(gfx + [{"kind": "shatter3d", "t": round(free[0], 2)}], key=lambda g: g["t"])
+    if s.get("fx_items"):  # 🎯 efektai sudėti laiko juostoje – tiksliai ten, kur pasirinko vartotojas
+        gfx = [timeline_item(it, words, s.get("speed", 1.0)) for it in s["fx_items"]]
     if gfx and plan.get("fx"):
         plan = dict(plan, fx=[(t, k) for t, k in plan["fx"] if all(abs(t - g["t"]) >= 2.8 for g in gfx)])
     return {"gfx": gfx, "plan": {k: plan.get(k, []) if an[k] else [] for k in
@@ -1067,21 +1092,30 @@ def anim_spec(words, s, client=None, cuts=()):
 
 # ---------- montažas ----------
 def build(prep, settings, out_path, workdir, client=None, words=None, quick=False, progress=None,
-          logo=None, end_card=None, music_file=None, broll=None):
+          logo=None, end_card=None, music_file=None, broll=None, plan=None):
     """Montažas + Reels apdaila. words – pataisyti titrai (None – atpažinti). quick – greita peržiūra.
+    plan – ankstesnio kūrimo planas (fin["plan"]): titrų žodžiai, debesėliai, animacijos – kad galutinis video
+    sutaptų su peržiūra.
     broll – intarpai [{"path", "t", "d"}] (laikai – kaip titrų)."""
     s = settings_with_defaults(settings)
     prog = progress or (lambda p: None)
     tmp = tempfile.mkdtemp(dir=workdir)
     vo = prep.get("vo") if prep.get("vo") and os.path.exists(prep["vo"]) else None
     try:
-        words = prep["analysis"]["words"] if words is None else words
-        words = (marked(words, client) if s["key_words"]
-                 else [(video_editor.plain(w), a, b) for w, a, b in words])
-        if vo:  # įgarsinimo titrai – galutinio video laiku; montaže jie pagreitinami kartu su vaizdu
-            words = [(w, a * s["speed"], b * s["speed"]) for w, a, b in words]
-        bubble_list, anims = bubbles(words, s, client), anim_spec(
-            words, s, client, [sp[1] for sp in (prep.get("spans") or []) if sp][:-1])
+        if plan:  # tas pats planas kaip peržiūroje (AI sprendimai nekartojami) – galutinis video sutampa
+            words = [tuple(w) for w in plan["words"]]
+            bubble_list = [tuple(b) for b in plan.get("bubbles") or []] or None
+            anims = plan.get("anims")
+        else:
+            words = prep["analysis"]["words"] if words is None else words
+            words = (marked(words, client) if s["key_words"]
+                     else [(video_editor.plain(w), a, b) for w, a, b in words])
+            if vo:  # įgarsinimo titrai – galutinio video laiku; montaže jie pagreitinami kartu su vaizdu
+                words = [(w, a * s["speed"], b * s["speed"]) for w, a, b in words]
+            bubble_list, anims = bubbles(words, s, client), anim_spec(
+                words, s, client, [sp[1] for sp in (prep.get("spans") or []) if sp][:-1])
+        used_plan = {"words": [list(w) for w in words], "bubbles": [list(b) for b in bubble_list or []],
+                     "anims": anims}
         src = prep["src"]
         if broll:
             prog(0.02)
@@ -1100,7 +1134,7 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
         video_editor.render_edit(
             src, edited, analysis, [] if late_subs else words, fmt=prep.get("format", s["format"]),
             fades=not vo,
-            denoise=s["denoise"] and not quick, loudnorm=not quick, subtitle_style="modern", highlight=highlight,
+            denoise=s["denoise"], loudnorm=True, subtitle_style="modern", highlight=highlight,  # garsas kaip galutiniame
             subtitle_look=s["look"], ypos=subs_y, subtitle_size=s["subs_size"] / 100,
             progress=lambda p: prog(p * 0.6), max_side=640 if quick else 1920,
             preset="ultrafast" if quick else "veryfast", crf=30 if quick else 20)
@@ -1117,6 +1151,7 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
             moment_at=(s["moment_at"] if s["moment_at"] is not None else 3.0)
             if "Gintaro akimirka" in s["effects"] else None)
         prog(1.0)
+        fin["plan"] = used_plan
         return fin
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

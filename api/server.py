@@ -1522,6 +1522,8 @@ def _public(proj):
     p["broll"] = [{k: v for k, v in b.items() if k not in ("path",)} for b in proj.get("broll", [])]
     p.setdefault("prepared", False)
     p.setdefault("words", None)
+    p.pop("plan_cache", None)  # vidinis kūrimo planas (kad galutinis video sutaptų su peržiūra)
+    p["has_original"] = bool(p.pop("original", None))  # 🪄 yra pradinė versija (prieš automatinį montažą)
     return p
 
 
@@ -1939,11 +1941,21 @@ def _run_job(jid, user, pid, kind, quick, words):
         extra = [] if quick or not proj["settings"].get("all_formats", True) else \
             engine.extra_formats(proj["settings"]["format"])
         share = (1 - base) / (1 + len(extra))  # pagrindinis + kiti formatai
+        # tas pats planas (titrų žodžiai, animacijos, efektai) kaip peržiūroje, jei niekas nepasikeitė –
+        # galutinis video tada sutampa su tuo, ką vartotojas matė ir girdėjo
+        sig = hashlib.sha1(json.dumps([proj["settings"], words, [(c["id"], c.get("trim"), c.get("sound"))
+                                                                   for c in proj["clips"]],
+                                       prep["src"], os.path.getmtime(prep["src"]), broll, vo_key],
+                                      sort_keys=True, default=str).encode()).hexdigest()
+        cache = proj.get("plan_cache") or {}
+        plan = cache.get("plan") if cache.get("sig") == sig else None
         fin = engine.build(prep, proj["settings"], out, d, client, words=words, quick=quick, broll=broll,
                            progress=lambda p: _job_update(jid, progress=round(base + p * share, 3)),
-                           logo=logo if os.path.exists(logo) else None)
+                           logo=logo if os.path.exists(logo) else None, plan=plan)
+        plan = json.loads(json.dumps(fin.get("plan"), default=float))
         result = {"file": name, "duration": fin.get("duration"), "width": fin.get("width"),
-                  "height": fin.get("height")}
+                  "height": fin.get("height"), "plan_reused": plan is not None and bool(cache.get("plan"))
+                  and cache.get("sig") == sig}
         if not quick:
             say("Kuriu viršelį ir aprašymą…")
             try:
@@ -1965,6 +1977,7 @@ def _run_job(jid, user, pid, kind, quick, words):
                     st_f = dict(proj["settings"], format=f)
                     engine.build(dict(prep, src=src_f, format=f), st_f, os.path.join(d, f"reels_{tag}.mp4"), d,
                                  client, words=words, broll=broll, logo=logo if os.path.exists(logo) else None,
+                                 plan=plan,
                                  progress=lambda p: _job_update(jid, progress=round(lo + share * (0.3 + p * 0.7), 3)))
                     w_, h_ = engine.FORMAT_SIZES.get(f, (1080, 1920))
                     entry = {"fmt": f, "file": f"reels_{tag}.mp4"}
@@ -1980,6 +1993,7 @@ def _run_job(jid, user, pid, kind, quick, words):
                     traceback.print_exc()  # papildomas formatas nepavyko – pagrindinis video vis tiek paruoštas
         proj = _load(user, pid)
         proj["outputs"][("preview" if quick else "final")] = dict(result, at=time.time())
+        proj["plan_cache"] = {"sig": sig, "plan": plan}
         _save(user, proj)
         if jid in _cancelled:
             raise JobCancelled()
@@ -2098,11 +2112,11 @@ def render(pid: str, body: RenderBody, user=Depends(current_user)):
     return _start(user, pid, "render", body.quick, words)
 
 
-def _start(user, pid, kind, quick, words):
+def _start(user, pid, kind, quick, words, runner=None):
     _load(user, pid)
     with _jobs_lock:  # ankstesnis to paties projekto darbas nebereikalingas – stabdomas (kad nesikauptų eilė)
         for j in _jobs.values():
-            if j["user"] == user["username"] and j["project"] == pid and j["kind"] in ("render", "prepare") \
+            if j["user"] == user["username"] and j["project"] == pid and j["kind"] in ("render", "prepare", "auto") \
                     and j["status"] in ("queued", "running"):
                 _cancelled.add(j["id"])
                 if j["status"] == "queued":
@@ -2119,7 +2133,7 @@ def _start(user, pid, kind, quick, words):
         if jid in _cancelled:
             return
         _job_update(jid, status="running", message="Pradedu…")
-        _run_job(jid, user, pid, kind, quick, words)
+        (runner or _run_job)(jid, user, pid, kind, quick, words)
     _pool.submit(run)
     return _jobs[jid]
 
@@ -2171,7 +2185,7 @@ def _zip_formats(user, pid):
 def download(pid: str, name: str, download: bool = False, user=Depends(current_user)):
     if name == "visi_formatai.zip":
         return _zip_formats(user, pid)
-    if not re.fullmatch(r"(preview\.mp4|reels(_\d+x\d+)?\.mp4|cover(_\d+x\d+)?\.jpg)", name):
+    if not re.fullmatch(r"(preview\.mp4|fxprev_\w+\.mp4|reels(_\d+x\d+)?\.mp4|cover(_\d+x\d+)?\.jpg)", name):
         raise HTTPException(404, "Failas nerastas")
     path = os.path.join(_pdir(user, pid), name)
     if not os.path.exists(path):
@@ -2819,3 +2833,120 @@ def director(pid: str, body: DirectorBody, user=Depends(current_user)):
     return {"reply": reply, "actions": actions, "done": descr, "proposals": [], "ai_job": ai_job,
             "project": _public(proj),
             "preview": bool(actions), "left": accounts.left(user["username"], "director")}
+
+
+
+# ---------- 🪄 Automatinis montažas ----------
+import automontage  # noqa: E402
+
+AUTO_SETTINGS = {"remove_silence": True, "punch": True, "key_words": True, "jcut": True, "ducking": True}
+
+
+def _run_auto(jid, user, pid, kind, quick, words):
+    """Automatinis montažas taikomas redaguojamai kopijai: pradinė versija išsaugoma (galima grįžti), klipų
+    eilė nekeičiama; po to iškart sukuriama peržiūra."""
+    try:
+        proj = _load(user, pid)
+        if not proj["clips"]:
+            raise ValueError("Pirmiausia įkelkite video ar nuotraukų")
+        _job_update(jid, message="Analizuoju kalbą, veiksmą ir muziką…", progress=0.02)
+        if not proj.get("original"):
+            proj["original"] = {"clips": json.loads(json.dumps(proj["clips"])),
+                                "settings": json.loads(json.dumps(proj["settings"])), "at": time.time()}
+        lib = reels_studio.music_library()
+        music = proj["settings"].get("music")
+        cuts, beat = automontage.plan(proj["clips"], lib[music]["path"] if music in lib else None)
+        by_id = {c["id"]: c for c in proj["clips"]}
+        notes = []
+        for cut in cuts:
+            c = by_id.get(cut["id"])
+            if not c:
+                continue
+            a, b = cut["trim"]
+            c["trim"] = None if a <= 0.01 and b >= c["duration"] - 0.01 else [a, b]
+            notes.append(f"„{c.get('name', '')}“: {cut['why']} ({b - a:.1f} s)")
+        proj["settings"] = engine.settings_with_defaults(dict(proj["settings"], **AUTO_SETTINGS))
+        if proj["settings"].get("music"):
+            notes.append("Muzika kalbant automatiškai patyla" + (f"; taktas ≈ {60 / beat:.0f} BPM" if beat else ""))
+        notes.append("Svarbiausi žodžiai paryškinami priartinimu, kito kadro garsas prasideda truputį anksčiau")
+        proj["auto_notes"] = notes
+        proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+        _save(user, proj)
+        _job_update(jid, message="Kuriu sumontuotą peržiūrą…", progress=0.1)
+        _run_job(jid, user, pid, "render", True, None)
+    except Exception as e:
+        traceback.print_exc()
+        _job_update(jid, status="error", message=str(e)[:300])
+
+
+@app.post("/api/projects/{pid}/auto_edit")
+def auto_edit(pid: str, user=Depends(current_user)):
+    return _start(user, pid, "auto", True, None, runner=_run_auto)
+
+
+@app.post("/api/projects/{pid}/auto_edit/revert")
+def auto_edit_revert(pid: str, user=Depends(current_user)):
+    """↩ Grįžti prie pradinės versijos (prieš automatinį montažą): klipų kirpimai, eilė ir nustatymai."""
+    proj = _load(user, pid)
+    orig = proj.get("original")
+    if not orig:
+        raise HTTPException(400, "Pradinės versijos nėra – automatinis montažas dar nedarytas")
+    now = {c["id"]: c for c in proj["clips"]}
+    clips = [dict(now[c["id"]], trim=c.get("trim"), sound=c.get("sound")) for c in orig["clips"] if c["id"] in now]
+    clips += [c for c in proj["clips"] if c["id"] not in {x["id"] for x in orig["clips"]}]  # vėliau įkelti
+    proj["clips"], proj["settings"] = clips, engine.settings_with_defaults(orig["settings"])
+    for k in ("original", "auto_notes", "plan_cache"):
+        proj.pop(k, None)
+    proj["prepared"], proj["words"], proj["lines"], proj["line_texts"] = False, None, None, None
+    _save(user, proj)
+    return _public(proj)
+
+
+class FxPreviewBody(BaseModel):
+    kind: str
+    t: float
+
+
+def _run_fx_preview(jid, user, pid, kind, t, _words):
+    """👁 Trumpa efekto peržiūra: peržiūros video atkarpa nuo pasirinktos vietos su vienu efektu."""
+    try:
+        import fxpack
+        d = _pdir(user, pid)
+        src = os.path.join(d, "preview.mp4")
+        if not os.path.exists(src):
+            raise ValueError("Pirmiausia sukurkite peržiūrą – efektas rodomas ant jos")
+        proj = _load(user, pid)
+        dur = video_editor.probe(src)["duration"]
+        length = fxpack.LEN.get(kind, 2.5) + 0.5
+        t0 = max(0.0, min(float(t), dur - 1.0))
+        seg = os.path.join(d, f"fxseg_{jid}.mp4")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", f"{t0:.3f}", "-i", src, "-t", f"{length:.3f}",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac", seg], check=True)
+        words = [tuple(w) for w in ((proj.get("plan_cache") or {}).get("plan") or {}).get("words") or []]
+        speed = float(proj["settings"].get("speed") or 1.0)
+        g = engine.timeline_item({"kind": kind, "t": t0}, words, speed)
+        g["t"] = 0.05
+        _job_update(jid, message="Kuriu efekto peržiūrą…", progress=0.3)
+        out = os.path.join(d, f"fxprev_{kind}.mp4")
+        reels_studio.finish(seg, out, anims={"gfx": [g]}, color="Natūralios", effects=(), progress_bar="Ne",
+                            preview=True, accent=proj["settings"].get("accent") or "Auksas")
+        os.unlink(seg)
+        _job_update(jid, status="done", progress=1.0, message="Paruošta",
+                    result={"file": os.path.basename(out), "kind": kind, "t": round(t0, 2), "text": g.get("text")})
+    except Exception as e:
+        traceback.print_exc()
+        _job_update(jid, status="error", message=str(e)[:300])
+
+
+@app.post("/api/projects/{pid}/fx_preview")
+def fx_preview(pid: str, body: FxPreviewBody, user=Depends(current_user)):
+    import fxpack
+    if body.kind not in fxpack.TIMELINE_KINDS:
+        raise HTTPException(400, "Šio efekto negalima dėti į laiko juostą")
+    jid = uuid.uuid4().hex[:12]
+    _load(user, pid)
+    with _jobs_lock:
+        _jobs[jid] = {"id": jid, "user": user["username"], "project": pid, "kind": "fxprev", "status": "running",
+                      "progress": 0.0, "message": "Ruošiu efekto peržiūrą…", "created": time.time(), "result": None}
+    _pool.submit(_run_fx_preview, jid, user, pid, body.kind, body.t, None)
+    return _jobs[jid]

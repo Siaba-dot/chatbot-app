@@ -1073,13 +1073,16 @@ def _concat_with_transitions(paths, out_path, fmt, progress, image_duration, seg
 
 
 def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=IMAGE_DURATION, segments=None,
-                 transition=None, transition_duration=TRANSITION_DURATION, size=None, rate=None, fill=False):
+                 transition=None, transition_duration=TRANSITION_DURATION, size=None, rate=None, fill=False,
+                 jcut=0.0):
     """Sujungia kelis video į vieną (nurodyta tvarka). Visi įrašai suvienodinami: kadro dydis
     pagal pirmą įrašą (arba pasirinktą formatą), kadrų dažnis, garsas 48 kHz stereo.
     Įrašai be garso gauna tylą, kad garsas ir vaizdas nepasislinktų. Nuotraukos rodomos
     image_duration sekundžių. segments – kiekvienam įrašui paliekamos dalys [(nuo, iki), ...]
     (None – visas įrašas); taip įrašą galima apkarpyti ar iškirpti jo vidurį.
     fill – kitokios orientacijos įrašas užpildo visą kadrą (kraštai apkarpomi) vietoj sulieto fono.
+    jcut – J perėjimas: kito įrašo garsas prasideda tiek sekundžių anksčiau už jo vaizdą (jei įraše prieš
+    apkarpytą pradžią yra tiek medžiagos).
     Grąžina (kelias, [(pradžia, pabaiga)] – kiekvieno įrašo vieta sujungtame video)."""
     infos = [probe(p) for p in paths]
     images = [is_image(p) for p in paths]
@@ -1116,6 +1119,7 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
                     pieces.append((k, p, img, a, b - a))
     parts, total, spans = [], 0.0, [None] * len(paths)
     audio_ok = {}
+    jcuts = []  # papildomi garso įėjimai J perėjimams: (įėjimo nr., kelias, pradžia, trukmė)
     for i, (k, p, img, start, d) in enumerate(pieces):
         a0 = spans[k][0] if spans[k] else total
         spans[k] = (a0, total + d)
@@ -1139,14 +1143,32 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
             parts.append(f"[{i}:v]{fit},{tail}")
         if p not in audio_ok:
             audio_ok[p] = infos[k]["has_audio"] and len(_frame_levels(p)) > 0
-        if audio_ok[p]:
+        # J perėjimas: šio įrašo garsas „įlenda“ į ankstesnio pabaigą (ankstesnio garsas tiek pat trumpesnis)
+        lead = jcut if (jcut > 0 and i > 0 and pieces[i - 1][0] != k and not img and audio_ok[p]
+                        and start >= jcut and pieces[i - 1][4] > jcut + 0.3) else 0.0
+        nxt = pieces[i + 1] if i + 1 < len(pieces) else None
+        cut_tail = 0.0
+        if nxt and jcut > 0 and nxt[0] != k and not nxt[2] and nxt[3] >= jcut and d > jcut + 0.3:
+            if nxt[1] not in audio_ok:
+                audio_ok[nxt[1]] = infos[nxt[0]]["has_audio"] and len(_frame_levels(nxt[1])) > 0
+            cut_tail = jcut if audio_ok[nxt[1]] else 0.0
+        ad = d - cut_tail
+        fade_out = f",afade=t=out:st={max(0.0, ad - 0.06):.3f}:d=0.06" if cut_tail else ""
+        if lead:
+            jcuts.append((len(pieces) + len(jcuts), p, start - lead, d + lead))
+            src_a = f"[{jcuts[-1][0]}:a:0]"
+            parts.append(f"{src_a}aresample=48000,aformat=channel_layouts=stereo,apad,"
+                         f"atrim=duration={d + lead:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.06[a{i}]")
+        elif audio_ok[p]:
             parts.append(f"[{i}:a:0]aresample=48000,aformat=channel_layouts=stereo,apad,"
-                         f"atrim=duration={d:.3f},asetpts=PTS-STARTPTS[a{i}]")
+                         f"atrim=duration={ad:.3f},asetpts=PTS-STARTPTS{fade_out}[a{i}]")
         else:
-            parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={d:.3f}[a{i}]")
+            parts.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={ad:.3f}[a{i}]")
     spans = [sp or (total, total) for sp in spans]
-    graph = ";".join(parts) + ";" + "".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + \
-        f"concat=n={len(pieces)}:v=1:a=1[v][a]"
+    # vaizdas ir garsas sujungiami atskirai (su J perėjimais garso atkarpų ribos nesutampa su vaizdo)
+    graph = ";".join(parts) + ";" + "".join(f"[v{i}]" for i in range(len(pieces))) + \
+        f"concat=n={len(pieces)}:v=1:a=0[v];" + "".join(f"[a{i}]" for i in range(len(pieces))) + \
+        f"concat=n={len(pieces)}:v=0:a=1[a]"
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write(graph)
         script = f.name
@@ -1157,6 +1179,8 @@ def concat_clips(paths, out_path, fmt="original", progress=None, image_duration=
         elif start > 0 or d < infos[k]["duration"] - 0.01:
             cmd += ["-ss", f"{start:.3f}", "-t", f"{d + 0.1:.3f}"]
         cmd += ["-i", p]
+    for _, p, a0, dd in jcuts:
+        cmd += ["-ss", f"{a0:.3f}", "-t", f"{dd + 0.1:.3f}", "-i", p]
     cmd += ["-filter_complex_script", script, "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
             "-preset", "ultrafast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", out_path]
     try:
