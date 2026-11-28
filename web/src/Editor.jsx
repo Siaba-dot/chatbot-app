@@ -85,7 +85,7 @@ const CAN_SHARE = (() => {
 })();
 
 // 🧊 3D efektai rodomi atskirame bloke
-const FX3D = ["phone3d", "laptop3d", "frame3d"];
+const FX3D = ["gold3d", "phone3d", "laptop3d", "frame3d"];
 
 export default function Editor({ id, user }) {
   const [proj, setProj] = useState(null);

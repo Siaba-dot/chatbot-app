@@ -1133,6 +1133,15 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
         if card_len or outro_len:  # vieta kortelei / pabaigai (po ja – sustingęs paskutinis kadras)
             pre.append(f"tpad=stop_mode=clone:stop_duration={card_len + outro_len + 0.5:.3f}")
         post = [f"ass=filename='{_filter_path(ass)}':fontsdir='{_filter_path(FONT_DIR)}'"]
+        gold = next((g for g in (anims or {}).get("gfx", []) if g.get("kind") == "gold3d"), None)
+        if gold and subs_words:  # ✨ kol auksinės raidės ekrane – titrų nėra; po to tas pats žodis tampa titru
+            g0, g1 = gold["t"], gold["t"] + fxpack.LEN["gold3d"] * speed
+            rest = [w for w in subs_words if not (g0 - 0.05 <= w[1] < g1)]
+            first = next((w for w in subs_words if w[1] >= g0 - 0.05), None)
+            if first:
+                nxt = next((w[1] for w in rest if w[1] >= g1), g1 + 1.0)
+                rest.append((first[0], g1, max(g1 + 0.3, min(g1 + 0.9, nxt))))
+            subs_words = sorted(rest, key=lambda w: w[1])
         if subs_burn and subs_words:  # titrai piešiami čia – jau galutiniu laiku (po greičio pakeitimo), todėl
             # animacijos sutampa su auksiniu žodžio sluoksniu (kitaip pagreitinus jos prasilenkia)
             sp = os.path.join(tmp, "subs.ass")
