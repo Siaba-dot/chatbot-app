@@ -80,7 +80,7 @@ export default function Director({ id, user, busyJob, onChanged, onAiScene, setE
           {props.map(p => (
             <div key={p.clip_id} className="dir-prop">
               <span>✨ Siūlau sukurti AI kadrą scenai „{p.name}“: <i>{p.prompt}</i></span>
-              <button className="btn small gold" disabled={busyJob} onClick={() => { setProps([]); onAiScene(p.clip_id, p.prompt); }}>Sukurti AI kadrą</button>
+              <button className="btn small accent" disabled={busyJob} onClick={() => { setProps([]); onAiScene(p.clip_id, p.prompt); }}>Sukurti AI kadrą</button>
             </div>
           ))}
           <div className="chips" style={{ margin: "8px 0" }}>
@@ -89,7 +89,7 @@ export default function Director({ id, user, busyJob, onChanged, onAiScene, setE
           <form className="row" style={{ flexWrap: "nowrap", gap: 6 }} onSubmit={e => { e.preventDefault(); send(); }}>
             <input className="input" value={text} onChange={e => setText(e.target.value)} maxLength={1500}
                    placeholder="Ką pakeisti? Pvz.: muziką ramesnę, o titrus baltus" disabled={busy} />
-            <button className="btn gold" disabled={busy || busyJob || !text.trim()}>{busy ? "…" : "Siųsti"}</button>
+            <button className="btn accent" disabled={busy || busyJob || !text.trim()}>{busy ? "…" : "Siųsti"}</button>
           </form>
           {left != null && <div className="hint" style={{ marginTop: 6 }}>Šį mėnesį liko {left} žinučių. Po pakeitimų peržiūra sukuriama automatiškai.</div>}
         </div>

@@ -475,3 +475,25 @@ video:fullscreen, video:-webkit-full-screen, .screen video:fullscreen { object-f
 .fmt-img { height: 170px; border-radius: 8px; background: #000; display: grid; place-items: center; overflow: hidden; }
 .fmt-img img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 6px; }
 .fmt > .hint { margin-bottom: auto; }
+
+/* antrinis, bet veiksmingas mygtukas: gintaro kontūras (ryškiausias – tik „Kurti video“) */
+.btn.accent { background: transparent; border: 1px solid var(--amber); color: var(--honey); }
+.btn.accent:hover { background: rgba(227,155,46,.12); }
+/* telefone – prilipusi apatinė juosta su pagrindiniais veiksmais */
+.mobile-actions { display: none; }
+@media (max-width: 900px) {
+  .mobile-actions { display: flex; gap: 10px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: rgba(6, 18, 38, .96);
+    backdrop-filter: blur(10px); border-top: 1px solid var(--line); }
+  .mobile-actions > .btn { flex: 1; }
+  .mobile-progress { flex: 1; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .mobile-progress .bar { flex: 1; }
+  .mobile-progress span { flex: none; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stage .stage-actions { display: none; }
+  .editor { padding-bottom: 90px; }
+  .toast { bottom: 84px; }
+}
+@media (max-width: 600px) {
+  .tool-nav .group { padding: 7px 4px; font-size: 13px; border-radius: 10px; }
+  .tool-nav .groups { gap: 4px; }
+}
