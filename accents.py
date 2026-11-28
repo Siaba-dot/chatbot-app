@@ -400,7 +400,8 @@ def _glass(it, W, H, frames, n, fps):
     i_cut, frozen = _reveal_base(it, frames, n, W, H)
     u_cut = i_cut / max(1, n - 1)
     I = (float(it.get("x", 0.5)) * W, float(it.get("y", 0.45)) * H)
-    rng = np.random.default_rng(int(I[0] * 7 + I[1]))
+    # sėkla iš santykinės vietos – peržiūroje ir galutiniame video (kita raiška) šukės vienodos
+    rng = np.random.default_rng(int(float(it.get("x", 0.5)) * 7000 + float(it.get("y", 0.45)) * 1000))
     S = max(W, H)
     na = 12
     angs = np.sort(rng.random(na) * 2 * math.pi)
