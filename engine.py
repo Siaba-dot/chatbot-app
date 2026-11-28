@@ -23,6 +23,7 @@ import fxpack
 import reels_studio
 import video_editor
 from automontage import JCUT
+import accents
 
 FORMATS = {"9:16": "9:16 · Reels, TikTok, Shorts", "16:9": "16:9 · YouTube", "1:1": "1:1 · Kvadratas",
            "4:5": "4:5 · Instagram įrašas"}
@@ -110,7 +111,7 @@ def settings_with_defaults(settings):
     for it in s["fx_items"] if isinstance(s["fx_items"], list) else []:
         try:
             if it.get("kind") in fxpack.TIMELINE_KINDS and float(it.get("t", -1)) >= 0:
-                items.append({"id": str(it.get("id") or len(items)), "kind": it["kind"], "t": round(float(it["t"]), 2)})
+                items.append(clean_fx_item(it, len(items)))
         except (TypeError, ValueError, AttributeError):
             continue
     s["fx_items"] = sorted(items, key=lambda x: x["t"])[:12]
@@ -151,6 +152,8 @@ def options():
         "stickers": animations.STICKERS, "marks": animations.MARKS, "fx": animations.FX,
         "gfx": {k: v if isinstance(v, str) else v.get("title", k) for k, v in fxpack.KINDS.items()},
         "timeline_fx": list(fxpack.TIMELINE_KINDS),
+        "accents": {"kinds": accents.KINDS, "variants": accents.VARIANTS, "category": accents.CATEGORY,
+                    "len": accents.LEN},
         "defaults": DEFAULTS,
     }
 
@@ -1032,12 +1035,54 @@ def bubbles(words, s, client=None):
     return reels_studio.auto_bubbles(words)
 
 
+def clean_fx_item(it, n=0):
+    """Laiko juostos efektas / 3D akcentas su patikrintais parametrais (vieta 0..1, dydis, spalva, trukmė…)."""
+    out = {"id": str(it.get("id") or n)[:16], "kind": it["kind"], "t": round(max(0.0, float(it["t"])), 2)}
+    num = lambda k, lo, hi: None if it.get(k) in (None, "") else round(min(hi, max(lo, float(it[k]))), 3)  # noqa: E731
+    for k, lo, hi in (("x", 0.0, 1.0), ("y", 0.0, 1.0), ("size", 0.4, 2.5), ("dur", 0.4, 6.0)):
+        v = num(k, lo, hi)
+        if v is not None:
+            out[k] = v
+    if re.fullmatch(r"#[0-9A-Fa-f]{6}", str(it.get("color") or "")):
+        out["color"] = it["color"]
+    if it.get("text"):
+        out["text"] = str(it["text"])[:20]
+    if it.get("dir") in ("left", "right", "up", "down"):
+        out["dir"] = it["dir"]
+    return out
+
+
+def remap_xy(items, src_fmt, dst_fmt, fit="fill"):
+    """Akcentų vietos (0..1) kitam formatui: 16:9 – stačias kadras per vidurį su sulietu fonu, kiti – apkarpomi."""
+    def ratio(f):
+        try:
+            a, b = (float(x) for x in str(f).split(":"))
+            return a / b
+        except ValueError:
+            return None
+    rs, rd = ratio(src_fmt), ratio(dst_fmt)
+    out = []
+    for it in items or []:
+        it = dict(it)
+        if rs and rd and abs(rs - rd) > 0.01 and ("x" in it or "y" in it):
+            x, y = float(it.get("x", 0.5)), float(it.get("y", 0.5))
+            if rd > rs and (dst_fmt == "16:9" or fit != "fill"):
+                x = 0.5 + (x - 0.5) * rs / rd          # visas kadras per vidurį
+            elif rd > rs:
+                y = 0.5 + (y - 0.5) * rd / rs          # apkarpoma viršus / apačia
+            else:
+                x = 0.5 + (x - 0.5) * rs / rd          # apkarpomi šonai
+            it["x"], it["y"] = round(min(0.97, max(0.03, x)), 3), round(min(0.97, max(0.03, y)), 3)
+        out.append(it)
+    return out
+
+
 def timeline_item(it, words, speed=1.0):
     """Laiko juostos efektas (peržiūros laikas) -> grafikos planas (montažo laikas). Auksinėms raidėms –
     žodis, ištariamas tuo metu."""
     t = it["t"] * speed
-    g = {"kind": it["kind"], "t": round(t, 2)}
-    if it["kind"] == "gold3d":
+    g = dict({k: v for k, v in it.items() if k not in ("id", "t")}, kind=it["kind"], t=round(t, 2))
+    if it["kind"] in ("gold3d", "word3d") and not it.get("text"):
         w = next((w for w in words or [] if w[1] >= t - 0.3), None) or (words[-1] if words else None)
         g["text"] = video_editor.plain(w[0]) if w else ""
     return g

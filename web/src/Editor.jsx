@@ -8,6 +8,7 @@ import ClipSound from "./ClipSound.jsx";
 import ScriptGen from "./ScriptGen.jsx";
 import Director from "./Director.jsx";
 import FxTimeline from "./FxTimeline.jsx";
+import Accents3D from "./Accents3D.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
@@ -772,7 +773,10 @@ export default function Editor({ id, user }) {
 
         {tab === "anims" && (
           <>
+            <Accents3D id={id} opts={opts} s={s} set={set} setError={setError} hasPreview={!!(out.preview)}
+              previewSrc={out.preview ? fileUrl(`/projects/${id}/files/preview.mp4`, stamp(out.preview)) : null} />
             <FxTimeline id={id} opts={opts} s={s} set={set} setError={setError}
+              previewSrc={out.preview ? fileUrl(`/projects/${id}/files/preview.mp4`, stamp(out.preview)) : null}
               hasPreview={!!(out.preview)}
               getTime={() => (previewVideo.current ? previewVideo.current.currentTime : null)}
               seek={t => { setShow("preview"); setTimeout(() => { const v = previewVideo.current; if (v) { v.currentTime = t; v.pause(); } }, 300); }} />
