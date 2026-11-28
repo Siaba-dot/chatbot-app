@@ -448,3 +448,30 @@ video:fullscreen, video:-webkit-full-screen, .screen video:fullscreen { object-f
   .tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 0; }
   .tab { padding: 9px 10px 8px; }
 }
+
+/* ---------- 2026-11 tvarka: vienas puslapio slinkimas, įrankių grupės, ramesni antriniai mygtukai ---------- */
+:root { --muted: #B4C2D6; }
+.hint { font-size: 13.5px; line-height: 1.45; }
+.field label { font-size: 13.5px; }
+.clip .info span, .proj .meta span, .tile .name { font-size: 12.5px; }
+@media (min-width: 1280px) {
+  .editor > .ed-left, .editor > .ed-right { position: static; max-height: none; overflow: visible; padding-right: 0; }
+  .editor > .stage { position: sticky; top: 70px; align-self: start; }
+}
+.tool-nav { position: sticky; top: 55px; z-index: 6; background: rgba(6, 18, 38, .94); backdrop-filter: blur(8px);
+  padding: 6px 0 0; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.tool-nav .groups { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.tool-nav .group { border: 1px solid var(--line); background: var(--ink-2); color: var(--muted); font-weight: 700; font-size: 14px;
+  padding: 10px 6px; border-radius: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-nav .group.on { color: var(--text); border-color: var(--amber); background: rgba(227,155,46,.16); }
+.tool-nav .tabs { position: static; border-bottom: none; margin: 6px 0 0; background: none; backdrop-filter: none; flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .tool-nav .groups { grid-template-columns: repeat(2, 1fr); }
+  .tool-nav { top: 50px; }
+}
+/* atsisiuntimo kortelės – vienodo aukščio, mygtukai apačioje */
+.formats { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-items: stretch; }
+.fmt { height: 100%; }
+.fmt-img { height: 170px; border-radius: 8px; background: #000; display: grid; place-items: center; overflow: hidden; }
+.fmt-img img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 6px; }
+.fmt > .hint { margin-bottom: auto; }

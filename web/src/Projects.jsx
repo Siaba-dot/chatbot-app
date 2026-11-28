@@ -110,7 +110,7 @@ export default function Projects({ user, onUserChange }) {
       {user && user.plan === "admin" && <AdminKey kind="gemini" onChange={onUserChange} />}
       {user && user.plan === "admin" && <AdminKey kind="pixabay" onChange={onUserChange} />}
       <div className="grid-projects">
-        <div className="proj new" onClick={() => setNaming("")}>
+        <div className="proj new" onClick={() => setNaming(`Reels – ${new Date().toLocaleDateString("lt-LT", { month: "long", day: "numeric" })}`)}>
           <div><span>＋</span>{busy ? "Kuriama…" : "Naujas Reels"}</div>
         </div>
         {(list || []).map(p => {
@@ -139,8 +139,9 @@ export default function Projects({ user, onUserChange }) {
           <form className="card" onClick={e => e.stopPropagation()} onSubmit={create}>
             <h3 className="serif" style={{ marginTop: 0, fontSize: 22 }}>Kaip pavadinsime šį Reels?</h3>
             <input className="input" autoFocus value={naming} maxLength={80} placeholder="Pvz.: Automobilių priežiūra"
+                   onFocus={e => e.target.select()}
                    onChange={e => setNaming(e.target.value)} />
-            <div className="hint" style={{ margin: "6px 0 14px" }}>Pavadinimą matysite tik jūs – „Mano projektuose“.</div>
+            <div className="hint" style={{ margin: "6px 0 14px" }}>Parašykite, apie ką šis video (pvz. „Kalėdinė akcija“) – taip lengviau rasti „Mano projektuose“. Pavadinimą matote tik jūs.</div>
             <div className="row">
               <button type="button" className="btn ghost" onClick={() => setNaming(null)} disabled={busy}>Atšaukti</button>
               <span className="spacer" />
