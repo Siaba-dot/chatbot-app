@@ -51,3 +51,50 @@ def test_clean_voice_keeps_short_last_word(tmp_path):
     path = _voice_file(tmp_path, 0.3 * np.sin(2 * np.pi * 230 * t5) + 0.05 * np.sin(2 * np.pi * 690 * t5))
     engine.clean_voice(path)
     assert _dur(path) > 3.4
+
+
+def _sig_tools():
+    import numpy as np
+    sr = 24000
+
+    def speech(dur, f0=140):
+        t = np.arange(int(dur * sr)) / sr
+        v = sum(np.sin(2 * np.pi * f0 * k * t) / k for k in range(1, 12))
+        return 0.25 * v / 3 * (0.6 + 0.4 * np.sin(2 * np.pi * 4 * t) ** 2)
+
+    def noise(dur, amp):
+        return amp * np.diff(np.random.default_rng(1).normal(0, 1, int(dur * sr)), prepend=0)
+
+    def sil(d):
+        return np.zeros(int(d * sr))
+
+    def roundtrip(sig):
+        import os
+        import subprocess
+        import tempfile
+        p = os.path.join(tempfile.mkdtemp(), "v.mp3")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-", p],
+                       input=sig.astype("<f4").tobytes(), check=True)
+        engine.clean_voice(p)
+        r = subprocess.run(["ffmpeg", "-v", "error", "-i", p, "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"],
+                           capture_output=True)
+        return np.frombuffer(r.stdout, "<f4")
+    return np, sr, speech, noise, sil, roundtrip
+
+
+def test_clean_voice_removes_chirp_glued_to_last_word():
+    """Čirškėjimas be pauzės po paskutinio žodžio nukerpamas (lieka ≤0,15 s su užgesimu)."""
+    np, sr, speech, noise, sil, roundtrip = _sig_tools()
+    out = roundtrip(np.concatenate([speech(1.2), sil(0.3), speech(1.0), noise(0.5, 0.03), sil(0.3)]))
+    assert len(out) / sr < 2.5 + 0.15
+
+
+def test_clean_voice_silences_hiss_in_pauses_keeps_final_s():
+    """Šnypštimas pauzėse nuslopinamas, o žodžio gale esantis „s“ nenukerpamas."""
+    np, sr, speech, noise, sil, roundtrip = _sig_tools()
+    hf = lambda x: float(np.sqrt(np.mean(np.diff(x) ** 2)))  # noqa: E731
+    sig = np.concatenate([speech(1.2), noise(0.4, 0.01), speech(1.0), sil(0.3)])
+    out = roundtrip(sig)
+    assert hf(out[int(1.25 * sr):int(1.55 * sr)]) < hf(sig[int(1.25 * sr):int(1.55 * sr)]) / 8
+    out = roundtrip(np.concatenate([speech(1.2), sil(0.3), speech(0.8), noise(0.12, 0.05), sil(0.4)]))
+    assert len(out) / sr >= 2.3 + 0.12

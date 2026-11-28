@@ -576,7 +576,7 @@ def clean_voice(path):
         spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
         f = np.fft.rfftfreq(len(seg), 1 / sr)
         return float((spec * f).sum() / (spec.sum() + 1e-9))
-    speech_c = float(np.median([centroid(a, b) for a, b in segs[:-1]] or [0]))
+    speech_c = float(np.median([centroid(a, b) for a, b in segs[:-1]] or [centroid(*segs[0])]))
     speech_e = float(np.median(rms[voiced]))
     # pabaigos „čirškėjimas“: trumpa (<0,7 s), nuo kalbos atskirta (≥0,2 s) atkarpa, kuri skamba ne kaip kalba
     # (daug aukštesni dažniai arba gerokai tylesnė) – paskutinis tikras žodis (pvz. „Ačiū!“) paliekamas
@@ -589,12 +589,37 @@ def clean_voice(path):
             end = segs[-1][1]
         else:
             break
-    cut = min(len(x) / sr, end * 0.02 + 0.25)
-    fade = 0.18
+    # čirškėjimas, prilipęs prie paskutinio žodžio (be pauzės): nuo galo nukerpami „ne kalbos“ langeliai
+    a_last = segs[-1][0]
+    k = end
+    while k - 2 > max(a_last, end - 40):
+        c_ = centroid(k - 2, k)
+        if c_ > max(1.7 * speech_c, 2000) and float(rms[k - 2:k].mean()) < 0.6 * speech_e:
+            k -= 1
+        else:
+            break
+    chirp = end - k >= 13  # ilgiau nei 0,26 s – tai ne žodžio galo „s“, o čirškėjimas
+    if chirp:
+        end = segs[-1][1] = max(a_last + 1, k + 3)
+    cut = min(len(x) / sr, end * 0.02 + (0.03 if chirp else 0.12))
+    fade = 0.08 if chirp else 0.12
+    # pauzėse (tarp sakinių ir gale) – triukšmas / šnypštimas nuslopinamas (~30 dB), kad garsumo
+    # suvienodinimas jo vėliau nepagarsintų; žodžių viduje niekas nekeičiama
+    gain = np.full(n, 0.03, np.float32)
+    for a, b in segs:
+        gain[max(0, a - 2):min(n, b + 2)] = 1.0
+    gain = np.convolve(gain, np.ones(3) / 3, mode="same")
+    env = np.repeat(gain, hop)
+    y = x[: len(env)] * env
+    y = y[: int(cut * sr)]
+    nf = max(1, int(fade * sr))
+    y[-nf:] *= np.linspace(1, 0, min(nf, len(y)))[-len(y[-nf:]):]
+    nfi = min(len(y), int(0.02 * sr))
+    y[:nfi] *= np.linspace(0, 1, nfi)
     tmp = path + ".clean.mp3"
-    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", path, "-t", f"{cut:.3f}", "-af",
-                        f"lowpass=f=9500,afade=t=in:d=0.02,afade=t=out:st={max(0.0, cut - fade):.3f}:d={fade}",
-                        "-c:a", "libmp3lame", "-b:a", "160k", tmp], capture_output=True)
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-",
+                        "-af", "lowpass=f=9500", "-c:a", "libmp3lame", "-b:a", "160k", tmp],
+                       input=y.astype("<f4").tobytes(), capture_output=True)
     if r.returncode == 0 and os.path.exists(tmp):
         os.replace(tmp, path)
     return path
