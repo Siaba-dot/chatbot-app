@@ -1153,6 +1153,9 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             fx_list = [(t, k) for t, k in pl["fx"] if t < duration - 0.6]
             gfx = [dict(it, t=it["t"] / speed) for it in anims.get("gfx", [])
                    if it["t"] / speed < duration - fxpack.LEN.get(it.get("kind"), 2.5) * 0.6]
+            spins = [it for it in gfx if it["kind"] in fxpack.SPIN_KINDS][:3]
+            if spins:  # 📱 / 🖼 3D efektai įdedami į patį vaizdą – spalvos, titrai ir kt. ant viršaus
+                path = fxpack.apply_spins(path, spins, os.path.join(tmp, "spins.mp4"), W, H, fps, tmp, speed)
             for t, k in fx_list:  # glitch ir nespalvota akimirka – laiko lange (pastovus kadro dydis)
                 if k == "glitch":
                     e = f"enable='between(t,{t:.3f},{t + animations.GLITCH_LEN:.3f})'"

@@ -73,3 +73,22 @@ def test_render_job_all_formats(client, make_user, media):
     fmts = {f["fmt"] for f in st["result"]["formats"]}
     assert fmts == {"9:16", "16:9", "4:5"}
     assert client.get(f"/api/projects/{pid}/files/visi_formatai.zip", headers=h).status_code == 200
+
+
+@pytest.mark.parametrize("kind", ["phone3d", "frame3d"])
+def test_spin_effects_in_video(media, kind):
+    """📱 / 🖼 3D efektai: vaizdas sumažėja į telefoną / rėmą (aplink tamsus fonas) ir video sukuriamas be klaidų."""
+    import fxpack
+    from PIL import Image
+    d = tempfile.mkdtemp()
+    out = os.path.join(d, "s.mp4")
+    fxpack.render_spin(media["portrait"], 0.2, kind, out, 360, 640, 15)
+    mid = os.path.join(d, "m.png")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "1.0", "-i", out, "-frames:v", "1", mid], check=True)
+    img = np.asarray(Image.open(mid).convert("L"), dtype=np.int16)
+    assert img[:, :20].mean() < 70, "aplink telefoną / rėmą turi matytis tamsus fonas"
+    clips = [engine.add_clip(media["portrait"]), engine.add_clip(media["image"])]
+    st = {"subtitle_text": "Štai mūsų naujas salonas. Ateikite!", "gfx_kinds": [kind]}
+    prep = engine.prepare(clips, st, d)
+    fin = engine.build(prep, st, os.path.join(d, "o.mp4"), d, quick=True)
+    assert fin["duration"] > 3
