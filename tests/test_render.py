@@ -121,7 +121,7 @@ def test_shatter_at_clip_cut_and_has_glass_sound():
     assert "shatter" in kinds and kinds.count("crack") >= 3
 
 
-@pytest.mark.parametrize("kind", ["gold3d", "shatter3d"])
+@pytest.mark.parametrize("kind", ["gold3d", "shatter3d", "laptop3d"])
 def test_effect_sounds_heard_without_clip_audio(kind):
     """Efektų garsai girdisi net kai klipai be garso arba jų garsas išjungtas (pvz., su įgarsinimu)."""
     import reels_studio
