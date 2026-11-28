@@ -21,12 +21,12 @@ KINDS = {
     "filmstrip": "🎞️ Kino juosta", "fan": "🃏 Kortelių vėduoklė", "polaroids": "📸 Polaroidų lietus",
     "grid": "🖼️ Galerijos tinklelis", "pip": "🔲 Kadras kadre", "chat": "💬 Žinutės telefone",
     "review": "⭐ Atsiliepimo kortelė", "chart": "📈 Augantis grafikas", "notif": "🔔 Pranešimas",
-    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas",
+    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas", "laptop3d": "💻 Užsidarantis kompiuteris",
     "frame3d": "🖼 Paveikslo rėmas",
 }
 OVERLAY_KINDS = ("filmstrip", "fan", "polaroids", "grid")
 ASS_KINDS = ("chat", "review", "chart", "notif", "counter")
-LEN = {"reel": 1.0, "phone3d": 2.6, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
+LEN = {"reel": 1.0, "phone3d": 2.6, "laptop3d": 3.0, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
        "chart": 2.8, "notif": 2.8, "counter": 2.2}
 SEMI = "Montserrat SemiBold"
 
@@ -477,7 +477,7 @@ def auto_plan(words, allowed, busy=(), limit=4, gap=4.0):
             cand["t"] = round(a, 2)
             plan.append(cand)
             used.add(cand["kind"])
-    frame_kinds = [k for k in ("phone3d", "reel", "frame3d", "filmstrip", "fan", "polaroids", "grid", "pip") if k in allowed]
+    frame_kinds = [k for k in ("phone3d", "reel", "laptop3d", "frame3d", "filmstrip", "fan", "polaroids", "grid", "pip") if k in allowed]
     for idx in sents[1:]:  # likusios vietos – efektai su kadrais, vis kitokie
         if len(plan) >= limit or not frame_kinds:
             break
@@ -516,7 +516,7 @@ def ai_plan(client, words, allowed, ai_json, busy=(), limit=4):
 
 
 # ======================= 📱 3D telefonas / 🖼 paveikslo rėmas (kadrai piešiami PIL – realistiška perspektyva) ========
-SPIN_KINDS = ("phone3d", "frame3d")
+SPIN_KINDS = ("phone3d", "frame3d", "laptop3d")
 
 
 def _persp_coeffs(src, dst):
@@ -639,6 +639,8 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
     import math
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
+    if kind == "laptop3d":
+        return render_laptop(src, t, out_path, W, H, fps, dur)
     d = dur or LEN[kind]
     n = round(d * fps)
     raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
@@ -750,4 +752,187 @@ def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("Nepavyko įdėti 3D efekto: " + r.stderr[-300:])
+    return out_path
+
+
+# ======================= 💻 nešiojamas kompiuteris: atitolsta → užsidaro → nuskrenda tolyn =======================
+def _rot_x(p, a):
+    import math
+    x, y, z = p
+    c, s = math.cos(a), math.sin(a)
+    return x, y * c - z * s, y * s + z * c
+
+
+def _rot_y(p, a):
+    import math
+    x, y, z = p
+    c, s = math.cos(a), math.sin(a)
+    return x * c + z * s, y, -x * s + z * c
+
+
+def _area(q):
+    return 0.5 * sum(q[i][0] * q[(i + 1) % 4][1] - q[(i + 1) % 4][0] * q[i][1] for i in range(4))
+
+
+def _laptop_track(u):
+    """(mastelis, ekrano formos perėjimas 0..1, žiūrėjimo iš viršaus kampas, dangčio kampas, nuskridimas 0..1, video grįžimas)."""
+    import math
+    e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
+    z = e(u / 0.2)
+    return (1 - 0.42 * z, z, math.radians(30) * z, math.radians(90) * e((u - 0.3) / 0.28),
+            max(0.0, min(1.0, (u - 0.58) / 0.32)) ** 2, e((u - 0.84) / 0.16))
+
+
+def _laptop_base(bw, bd):
+    from PIL import Image, ImageDraw
+    import numpy as np
+    gy = np.linspace(0, 1, bd)[:, None] * np.ones((1, bw))
+    lum = 176 + 30 * gy
+    img = Image.fromarray(np.dstack([lum * 0.97, lum * 0.98, lum, np.full_like(lum, 255)]).astype("uint8"), "RGBA")
+    d = ImageDraw.Draw(img)
+    kx0, ky0, kx1, ky1 = bw * 0.1, bd * 0.08, bw * 0.9, bd * 0.56
+    d.rounded_rectangle((kx0, ky0, kx1, ky1), bw * 0.012, fill=(40, 41, 45, 255))
+    rows, cols = 6, 14
+    for r in range(rows):
+        for c in range(cols):
+            w = (kx1 - kx0) / cols
+            h = (ky1 - ky0) / rows
+            if r == rows - 1 and 4 <= c <= 9:
+                if c == 4:
+                    d.rounded_rectangle((kx0 + c * w + 2, ky0 + r * h + 2, kx0 + 10 * w - 2, ky0 + (r + 1) * h - 2), 3,
+                                        fill=(22, 22, 25, 255))
+                continue
+            d.rounded_rectangle((kx0 + c * w + 2, ky0 + r * h + 2, kx0 + (c + 1) * w - 2, ky0 + (r + 1) * h - 2), 3,
+                                fill=(22, 22, 25, 255))
+    d.rounded_rectangle((bw * 0.33, bd * 0.62, bw * 0.67, bd * 0.94), bw * 0.015, fill=(190, 192, 198, 255),
+                        outline=(150, 152, 158, 255), width=2)
+    return img
+
+
+def _laptop_lid_back(lw, lh):
+    from PIL import Image, ImageDraw
+    import numpy as np
+    gx = np.linspace(0, 1, lw)[None, :] * np.ones((lh, 1))
+    lum = 168 + 34 * (1 - np.abs(gx - 0.4))
+    img = Image.fromarray(np.dstack([lum * 0.97, lum * 0.98, lum, np.full_like(lum, 255)]).astype("uint8"), "RGBA")
+    m = Image.new("L", (lw, lh), 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, lw - 1, lh - 1), round(lw * 0.025), fill=255)
+    img.putalpha(m)
+    return img
+
+
+def render_laptop(src, t, out_path, W, H, fps=30, dur=None):
+    """💻 Kadras atitolsta ir tampa nešiojamo kompiuterio ekranu, dangtis užsidaro, kompiuteris nuskrenda tolyn
+    ir išnyksta – vėl matosi video. Grąžina video (be garso) lango trukmei."""
+    import math
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    d = dur or LEN["laptop3d"]
+    n = round(d * fps)
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
+                          f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps}",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    fsz = W * H * 3
+    frames = [raw[i:i + fsz] for i in range(0, len(raw) - fsz + 1, fsz)][:n]
+    if not frames:
+        raise RuntimeError("Nepavyko paimti kadrų efektui")
+    gy = np.linspace(0, 1, H)[:, None]
+    gx = np.abs(np.linspace(-1, 1, W))[None, :]
+    lum = (38 - 18 * gy - 10 * gx).clip(10, 60)
+    bg = Image.fromarray(np.dstack([lum * 0.9, lum * 0.92, lum]).astype("uint8"))
+    proc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+                             "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                             "-pix_fmt", "yuv420p", out_path], stdin=subprocess.PIPE)
+    sw_end = W * 0.92  # atitolus ekranas gulsčias (16:10)
+    sh_end = sw_end * 10 / 16
+    base_img = back_img = None
+    for i in range(n):
+        fr = Image.frombytes("RGB", (W, H), frames[min(i, len(frames) - 1)])
+        u = i / max(1, n - 1)
+        sc, morph, tilt, lid, fly, back_fade = _laptop_track(u)
+        if back_fade > 0.995 or fly > 0.995:
+            proc.stdin.write(Image.blend(bg, fr, back_fade).tobytes())
+            continue
+        if morph < 0.002:
+            proc.stdin.write(fr.tobytes())
+            continue
+        sw = round(W + (sw_end - W) * morph)  # ekrano forma: nuo viso kadro iki gulsčio ekrano
+        sh = round(H + (sh_end - H) * morph)
+        b = round(W * 0.025 * morph) + 1
+        chin = round(W * 0.03 * morph)
+        lw, lh = sw + 2 * b, sh + 2 * b + chin
+        # ekrano vaizdas – kadras „cover“ būdu
+        r_ = max(sw / W, sh / H)
+        scr = fr.resize((max(sw, round(W * r_)), max(sh, round(H * r_))))
+        scr = scr.crop(((scr.width - sw) // 2, (scr.height - sh) // 2, (scr.width - sw) // 2 + sw,
+                        (scr.height - sh) // 2 + sh))
+        front = Image.new("RGBA", (lw, lh), (18, 18, 20, 255))
+        front.paste(scr, (b, b))
+        ImageDraw.Draw(front).ellipse((lw / 2 - b * 0.25, b * 0.35, lw / 2 + b * 0.25, b * 0.85), fill=(60, 62, 70, 255))
+        bw, bd = lw * 1.04, lh * 1.0
+        if base_img is None:
+            base_img = _laptop_base(int(W * 0.95), int(W * 0.95 * 10 / 16))
+            back_img = _laptop_lid_back(int(W * 0.95), int(W * 0.95 * 10 / 16))
+        # pasaulio koordinatės: vyris ties y = 0, ekrano centras pradžioje – kadro centre
+        hinge_y = sh / 2 + b + chin
+        yaw = math.radians(35) * fly
+        dist = H * 2.4
+        tz = -dist * 9 * fly
+        ty = -H * 0.06 * morph - H * 0.25 * fly
+
+        def P(p, on_lid=False):
+            x, y, z = p
+            if on_lid:
+                y, z = y * math.cos(lid), -y * math.sin(lid)
+            p = (x * sc, (y + hinge_y) * sc, z * sc)
+            p = _rot_y(p, yaw)
+            p = _rot_x((p[0], p[1] - hinge_y * sc, p[2]), -tilt)
+            x, y, z = p[0], p[1] + hinge_y * sc + ty, p[2] + tz
+            f = dist / (dist - z)
+            return W / 2 + x * f, H / 2 + y * f
+
+        cv = bg.copy().convert("RGBA")
+        # šešėlis
+        if morph > 0.05:
+            q = [P((-bw / 2, 0, 0)), P((bw / 2, 0, 0)), P((bw / 2, 0, bd)), P((-bw / 2, 0, bd))]
+            xs, ys_ = [p[0] for p in q], [p[1] for p in q]
+            sh_ = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(sh_).ellipse((min(xs), max(ys_) - (max(ys_) - min(ys_)) * 0.15, max(xs),
+                                         max(ys_) + (max(ys_) - min(ys_)) * 0.25 + 4),
+                                        fill=(0, 0, 0, int(140 * morph * (1 - fly))))
+            cv.alpha_composite(sh_.filter(ImageFilter.GaussianBlur(W * 0.03)))
+        # apačia (klaviatūra) ir priekinis kraštas
+        th = lw * 0.018
+        q = [P((-bw / 2, 0, 0)), P((bw / 2, 0, 0)), P((bw / 2, 0, bd)), P((-bw / 2, 0, bd))]
+        if abs(_area(q)) > 40:
+            ImageDraw.Draw(cv).polygon([P((-bw / 2, 0, bd)), P((bw / 2, 0, bd)), P((bw / 2, th, bd)),
+                                        P((-bw / 2, th, bd))], fill=(120, 122, 128, 255))
+            src_pts = [(0, 0), (base_img.width, 0), (base_img.width, base_img.height), (0, base_img.height)]
+            cv.alpha_composite(base_img.transform((W, H), Image.PERSPECTIVE, _persp_coeffs(src_pts, q), Image.BICUBIC))
+        # dangtis: priekis (ekranas) arba nugarėlė, kai užsidaręs ir matomas iš viršaus
+        corners = [(-lw / 2, -lh, 0), (lw / 2, -lh, 0), (lw / 2, 0, 0), (-lw / 2, 0, 0)]
+        q = [P(c, True) for c in corners]
+        ar = _area(q)
+        if abs(ar) > 40:
+            img = front if ar > 0 else back_img
+            src_pts = [(0, 0), (img.width, 0), (img.width, img.height), (0, img.height)]
+            warped = img.transform((W, H), Image.PERSPECTIVE, _persp_coeffs(src_pts, q), Image.BICUBIC)
+            if ar > 0 and morph > 0.05:  # stiklo atspindys
+                gl = Image.new("L", (W, H), 0)
+                off = W * (0.3 + 0.6 * lid)
+                ImageDraw.Draw(gl).polygon([(off - W * 0.3, 0), (off - W * 0.1, 0), (off + W * 0.2, H),
+                                            (off, H)], fill=int(36 * morph))
+                gl = gl.filter(ImageFilter.GaussianBlur(W * 0.04))
+                glare = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+                glare.putalpha(Image.fromarray(np.minimum(np.asarray(gl), np.asarray(warped.getchannel("A")))))
+                warped.alpha_composite(glare)
+            cv.alpha_composite(warped)
+        out = cv.convert("RGB")
+        if back_fade > 0.005:
+            out = Image.blend(out, fr, back_fade)
+        proc.stdin.write(out.tobytes())
+    proc.stdin.close()
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError("Nepavyko sukurti 3D efekto")
     return out_path
