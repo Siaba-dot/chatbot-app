@@ -7,6 +7,7 @@ import Trimmer from "./Trimmer.jsx";
 import ClipSound from "./ClipSound.jsx";
 import ScriptGen from "./ScriptGen.jsx";
 import Director from "./Director.jsx";
+import FxTimeline from "./FxTimeline.jsx";
 
 const TABS = [
   ["media", "🎬 Medžiaga"], ["style", "🎨 Stilius"], ["subs", "💬 Titrai"], ["texts", "✍️ Tekstai"],
@@ -103,6 +104,7 @@ export default function Editor({ id, user }) {
   const saveTimer = useRef(null);
   const fileInput = useRef(null);
   const camInput = useRef(null);
+  const previewVideo = useRef(null);              // peržiūros grotuvas – efektų vietai laiko juostoje
   const [over, setOver] = useState(false);
   const [recording, setRecording] = useState(false);
   const [trimming, setTrimming] = useState(null);  // karpomas įrašas
@@ -275,6 +277,32 @@ export default function Editor({ id, user }) {
     } catch (e) { setJob(null); setError(e.message); }
   }
 
+  async function autoEdit() {  // 🪄 automatinis montažas (pradinė versija išsaugoma)
+    setError("");
+    try {
+      await api(`/projects/${id}/settings`, { method: "PUT", body: { settings: s } });
+      const j = await api(`/projects/${id}/auto_edit`, { method: "POST" });
+      setJob(j);
+      await waitJob(j.id, setJob);
+      const p = await api("/projects/" + id);
+      setProj(p); setS(p.settings); setLines(p.line_texts || (p.lines || []).map(l => l[2]));
+      setAutoplay(true); setShow("preview");
+      setToast("Sumontuota! Peržiūrėkite – kirpimus galite keisti ✂, o efektus – „✨ Animacijos ir grafika“ 🪄");
+    } catch (e) {
+      if (e.status === 499) setToast("Sustabdyta ■"); else setError(e.message);
+    } finally { setJob(null); }
+  }
+
+  async function revertAuto() {
+    if (!window.confirm("Grąžinti pradinę versiją (kirpimus ir nustatymus prieš automatinį montažą)?")) return;
+    setError("");
+    try {
+      const p = await api(`/projects/${id}/auto_edit/revert`, { method: "POST" });
+      setProj(p); setS(p.settings); setLines(null); setShow("live");
+      setToast("Grąžinta pradinė versija ↩");
+    } catch (e) { setError(e.message); }
+  }
+
   async function stopJob() {
     if (!job) return;
     try { setJob(await api(`/jobs/${job.id}/cancel`, { method: "POST" })); } catch (e) { setError(e.message); }
@@ -381,7 +409,7 @@ export default function Editor({ id, user }) {
                      controls playsInline poster={out.final.cover ? fileUrl(`/projects/${id}/files/cover.jpg`, stamp(out.final)) : undefined} />
             ) : show === "preview" && out.preview ? (
               <video key={"p" + out.preview.at} src={fileUrl(`/projects/${id}/files/preview.mp4`, stamp(out.preview))}
-                     controls autoPlay={autoplay} playsInline />
+                     ref={previewVideo} controls autoPlay={autoplay} playsInline />
             ) : (
               <>
                 <img src={live} alt="Peržiūra" />
@@ -533,6 +561,25 @@ export default function Editor({ id, user }) {
               <div className="row" style={{ margin: "10px 0" }}>
                 <button className="btn small" onClick={reshuffle} disabled={!!job}>🔄 Kiti vaizdai</button>
                 <span className="hint">Tas pats tekstas ir balsas – kiti automatiškai parinkti vaizdai (🎞).</span>
+              </div>
+            )}
+            {proj.clips.length > 0 && (
+              <div className="section card auto-edit">
+                <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <button type="button" className="btn gold" disabled={!!job} onClick={autoEdit}>🪄 Automatinis montažas</button>
+                  {proj.has_original && (
+                    <button type="button" className="btn small ghost" disabled={!!job} onClick={revertAuto}>↩ Grįžti prie pradinės versijos</button>
+                  )}
+                </div>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  Sukerpa pagal kalbą (frazių ribos, ilgos pauzės sutrumpinamos), be kalbos – pagal veiksmą ar muzikos taktą.
+                  Klipų eilė išlieka, titrai ir muzika derinami prie balso. Pradinė versija išsaugoma.
+                </div>
+                {proj.has_original && (proj.auto_notes || []).length > 0 && (
+                  <ul className="hint" style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                    {proj.auto_notes.map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                )}
               </div>
             )}
             {proj.clips.length > 0 && (
@@ -725,6 +772,10 @@ export default function Editor({ id, user }) {
 
         {tab === "anims" && (
           <>
+            <FxTimeline id={id} opts={opts} s={s} set={set} setError={setError}
+              hasPreview={!!(out.preview)}
+              getTime={() => (previewVideo.current ? previewVideo.current.currentTime : null)}
+              seek={t => { setShow("preview"); setTimeout(() => { const v = previewVideo.current; if (v) { v.currentTime = t; v.pause(); } }, 300); }} />
             <div className="section card">
               <Switch on={s.anims.stickers} onChange={v => setAnim("stickers", v)} title="✨ Animuoti lipdukai" desc="Širdelės, žvaigždutės, konfeti, liepsnelės – pagal tai, ką sakote." />
               <Switch on={s.anims.marks} onChange={v => setAnim("marks", v)} title="✏️ Ranka piešti žymėjimai" desc="Apvedamas ar parodomas svarbus pasakytas žodis." />

@@ -517,6 +517,9 @@ def ai_plan(client, words, allowed, ai_json, busy=(), limit=4):
 
 # ======================= 📱 3D telefonas / 🖼 paveikslo rėmas (kadrai piešiami PIL – realistiška perspektyva) ========
 SPIN_KINDS = ("phone3d", "frame3d", "laptop3d", "gold3d", "shatter3d")
+# 🎯 efektai, kuriuos galima pasirinkti konkrečioje laiko juostos vietoje (vaizdiniai – tekstas nereikalingas)
+TIMELINE_KINDS = ("gold3d", "shatter3d", "phone3d", "laptop3d", "frame3d", "reel", "filmstrip", "fan", "polaroids",
+                  "grid", "pip")
 
 
 def _persp_coeffs(src, dst):
