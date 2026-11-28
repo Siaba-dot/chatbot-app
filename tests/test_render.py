@@ -86,7 +86,11 @@ def test_spin_effects_in_video(media, kind):
     mid = os.path.join(d, "m.png")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "1.0", "-i", out, "-frames:v", "1", mid], check=True)
     img = np.asarray(Image.open(mid).convert("L"), dtype=np.int16)
-    assert img[:, :20].mean() < 70, "aplink telefoną / rėmą turi matytis tamsus fonas"
+    orig = os.path.join(d, "o.png")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "1.2", "-i", media["portrait"], "-vf",
+                    "scale=360:640:force_original_aspect_ratio=increase,crop=360:640", "-frames:v", "1", orig], check=True)
+    src = np.asarray(Image.open(orig).convert("L"), dtype=np.int16)
+    assert np.abs(img[:, :20] - src[:, :20]).mean() > 15, "aplink telefoną / rėmą turi matytis fonas, ne pats video"
     clips = [engine.add_clip(media["portrait"]), engine.add_clip(media["image"])]
     st = {"subtitle_text": "Štai mūsų naujas salonas. Ateikite!", "gfx_kinds": [kind]}
     prep = engine.prepare(clips, st, d)
