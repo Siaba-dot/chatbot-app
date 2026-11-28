@@ -1116,6 +1116,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
     phone_times = []
     fx_list = []
     gfx = []
+    sfx = []  # 3D efektų garsai (galutinio video laiku): atskiras takelis, nepriklausomas nuo klipų garso
     if anims and anims.get("outro") and not card_len:
         outro_len = animations.OUTRO_LEN
     total = duration + card_len + outro_len
@@ -1165,6 +1166,7 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
             spins = [it for it in gfx if it["kind"] in fxpack.SPIN_KINDS][:3]
             if spins:  # 📱 / 🖼 3D efektai įdedami į patį vaizdą – spalvos, titrai ir kt. ant viršaus
                 path = fxpack.apply_spins(path, spins, os.path.join(tmp, "spins.mp4"), W, H, fps, tmp, speed)
+                sfx = [(t / speed, k) for t, k in fxpack.sfx_events(spins, speed)]
             for t, k in fx_list:  # glitch ir nespalvota akimirka – laiko lange (pastovus kadro dydis)
                 if k == "glitch":
                     e = f"enable='between(t,{t:.3f},{t + animations.GLITCH_LEN:.3f})'"
@@ -1374,6 +1376,15 @@ def finish(path, out_path, hook="", hook_duration=3.0, cta="", cta_duration=2.5,
                 aout = "[mix]"
             else:
                 aout = "[music]"
+        if sfx:  # efektų garsai virš visko – girdisi ir su įgarsinimu, ir kai klipų garsas išjungtas
+            k = add_input("-i", fxpack.sfx_wav(sfx, os.path.join(tmp, "sfx.wav")))
+            graph.append(f"[{k}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                         f"apad=whole_dur={total + 1:.3f},atrim=duration={total + 1:.3f}[sfx]")
+            if aout:
+                graph.append(f"{aout}[sfx]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[withsfx]")
+                aout = "[withsfx]"
+            else:
+                aout = "[sfx]"
         if aout and (music or trimmed) and total > 2:
             graph.append(f"{aout}afade=t=out:st={total - 0.8:.3f}:d=0.8[aend]")
             aout = "[aend]"

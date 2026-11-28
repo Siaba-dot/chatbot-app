@@ -119,3 +119,20 @@ def test_shatter_at_clip_cut_and_has_glass_sound():
     assert sh and abs(sh[0]["t"] + fxpack.SHATTER_AT * fxpack.LEN["shatter3d"] - 2.9) < 0.02
     kinds = [k for _, k in fxpack.sfx_events(sh)]
     assert "shatter" in kinds and kinds.count("crack") >= 3
+
+
+@pytest.mark.parametrize("kind", ["gold3d", "shatter3d"])
+def test_effect_sounds_heard_without_clip_audio(kind):
+    """Efektų garsai girdisi net kai klipai be garso arba jų garsas išjungtas (pvz., su įgarsinimu)."""
+    import reels_studio
+    d = tempfile.mkdtemp()
+    src = os.path.join(d, "v.mp4")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=360x640:r=15:d=5",
+                    "-pix_fmt", "yuv420p", src], check=True)
+    out = os.path.join(d, "o.mp4")
+    reels_studio.finish(src, out, anims={"gfx": [{"kind": kind, "t": 0.5, "text": "Labas"}]}, clip_gain=0.0,
+                        progress_bar="Ne", preview=True)
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-i", out, "-af", "volumedetect", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    peak = float(r.stderr.split("max_volume:")[1].split("dB")[0])
+    assert peak > -25, f"efekto garsas per tylus arba jo nėra ({peak} dB)"

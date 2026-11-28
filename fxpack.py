@@ -746,7 +746,7 @@ def gold_land_times(text, dur):
     return [(0.2 + i * gold_stagger(nl) + 0.17 * 0.9) * dur for i in range(nl)]
 
 
-def _snd_clink(rng, sr, volume=0.22):
+def _snd_clink(rng, sr, volume=0.34):
     """Metalinis dzingtelėjimas (auksinė raidė krinta ant stalo)."""
     import numpy as np
     n = int(0.45 * sr)
@@ -840,20 +840,7 @@ def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
         cmd += ["-i", clip]
         chain.append(f"[{k}:v]setpts=PTS-STARTPTS+{t:.3f}/TB[s{k}];[{last}][s{k}]overlay=eof_action=pass[o{k}]")
         last = f"o{k}"
-    # ✨ auksinių raidių kritimo garsas – tik jis, jokių kitų garsų
-    lands = sfx_events(items, speed)
-    has_a = bool(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
-                                 "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip())
-    amap, acodec = ["-map", "0:a?"], ["-c:a", "copy"]
-    if lands:
-        k = len(rendered) + 1
-        cmd += ["-i", sfx_wav(lands, os.path.join(tmp, "sfx.wav"))]
-        if has_a:
-            chain.append(f"[0:a][{k}:a]amix=inputs=2:normalize=0:duration=first[aout]")
-            amap = ["-map", "[aout]"]
-        else:
-            amap = ["-map", f"{k}:a"]
-        acodec = ["-c:a", "aac", "-b:a", "192k"]
+    amap, acodec = ["-map", "0:a?"], ["-c:a", "copy"]  # garsas nekeičiamas; efektų garsai įmaišomi apdailoje
     cmd += ["-filter_complex", ";".join(chain), "-map", f"[{last}]", *amap, "-c:v", "libx264", "-preset",
             "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", *acodec, out_path]
     r = subprocess.run(cmd, capture_output=True, text=True)
