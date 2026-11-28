@@ -21,11 +21,12 @@ KINDS = {
     "filmstrip": "🎞️ Kino juosta", "fan": "🃏 Kortelių vėduoklė", "polaroids": "📸 Polaroidų lietus",
     "grid": "🖼️ Galerijos tinklelis", "pip": "🔲 Kadras kadre", "chat": "💬 Žinutės telefone",
     "review": "⭐ Atsiliepimo kortelė", "chart": "📈 Augantis grafikas", "notif": "🔔 Pranešimas",
-    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta",
+    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas",
+    "frame3d": "🖼 Paveikslo rėmas",
 }
 OVERLAY_KINDS = ("filmstrip", "fan", "polaroids", "grid")
 ASS_KINDS = ("chat", "review", "chart", "notif", "counter")
-LEN = {"reel": 1.0, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
+LEN = {"reel": 1.0, "phone3d": 2.2, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
        "chart": 2.8, "notif": 2.8, "counter": 2.2}
 SEMI = "Montserrat SemiBold"
 
@@ -476,7 +477,7 @@ def auto_plan(words, allowed, busy=(), limit=4, gap=4.0):
             cand["t"] = round(a, 2)
             plan.append(cand)
             used.add(cand["kind"])
-    frame_kinds = [k for k in ("reel", "filmstrip", "fan", "polaroids", "grid", "pip") if k in allowed]
+    frame_kinds = [k for k in ("phone3d", "reel", "frame3d", "filmstrip", "fan", "polaroids", "grid", "pip") if k in allowed]
     for idx in sents[1:]:  # likusios vietos – efektai su kadrais, vis kitokie
         if len(plan) >= limit or not frame_kinds:
             break
@@ -512,3 +513,187 @@ def ai_plan(client, words, allowed, ai_json, busy=(), limit=4):
         if k in kinds and 0 <= t <= end and all(abs(t - p["t"]) >= 3.5 for p in out):
             out.append({"t": round(t, 2), "kind": k, **{f: str(it.get(f, ""))[:120] for f in ("title", "text", "value")}})
     return sorted(out, key=lambda p: p["t"])[:limit]
+
+
+# ======================= 📱 3D telefonas / 🖼 paveikslo rėmas (kadrai piešiami PIL – realistiška perspektyva) ========
+SPIN_KINDS = ("phone3d", "frame3d")
+
+
+def _persp_coeffs(src, dst):
+    """PIL PERSPECTIVE koeficientai: išvesties taškas -> įvesties taškas (dst – kur atsiduria src kampai)."""
+    import numpy as np
+    m = []
+    for (x, y), (u, v) in zip(dst, src):
+        m.append([x, y, 1, 0, 0, 0, -u * x, -u * y])
+        m.append([0, 0, 0, x, y, 1, -v * x, -v * y])
+    a = np.array(m, dtype=float)
+    b = np.array([p for uv in src for p in uv], dtype=float)
+    return np.linalg.solve(a, b).tolist()
+
+
+def _proj(pts, ang, cx, cy, dist):
+    """3D taškai (x, y, z) pasukti apie vertikalią ašį ir suprojektuoti į ekraną."""
+    import math
+    c, s = math.cos(ang), math.sin(ang)
+    out = []
+    for x, y, z in pts:
+        xr, zr = x * c + z * s, -x * s + z * c
+        f = dist / (dist - zr)
+        out.append((cx + xr * f, cy + y * f))
+    return out
+
+
+def _spin_track(u):
+    """Animacija (0..1): mastelis ir pasukimo kampas (rad). Išsitraukia → pasisuka į abi puses → grįžta."""
+    import math
+    e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
+    small = 0.6
+    if u < 0.2:
+        sc = 1 - (1 - small) * e(u / 0.2)
+    elif u > 0.8:
+        sc = small + (1 - small) * e((u - 0.8) / 0.2)
+    else:
+        sc = small * (1 + 0.015 * math.sin((u - 0.2) * 9))
+    k = max(0.0, min(1.0, (u - 0.14) / 0.72))
+    ang = math.radians(48) * math.sin(2 * math.pi * k) * (1 - 0.35 * k) * (1 if 0 < k < 1 else 0)
+    return sc, ang
+
+
+def _phone_front(screen, W, H, kind, fade=1.0):
+    """Priekinė telefono / rėmo pusė su įdėtu kadru. Grąžina (paveikslas, rėmo storis px)."""
+    from PIL import Image, ImageDraw, ImageFilter
+    if kind == "phone3d":
+        b = round(W * 0.035)
+        img = Image.new("RGBA", (W + 2 * b, H + 2 * b), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        r = max(2, round(W * 0.13 * fade))
+        d.rounded_rectangle((0, 0, img.width - 1, img.height - 1), r, fill=(24, 24, 27, 255))  # korpusas
+        d.rounded_rectangle((2, 2, img.width - 3, img.height - 3), r - 2, outline=(150, 152, 160, 255), width=3)
+        mask = Image.new("L", screen.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), round(r * 0.78), fill=255)
+        img.paste(screen, (b, b), mask)
+        isl_w, isl_h = round(W * 0.27), round(W * 0.075)  # „dinaminė sala“
+        d.rounded_rectangle((img.width / 2 - isl_w / 2, b + isl_h * 0.5, img.width / 2 + isl_w / 2, b + isl_h * 1.5),
+                            isl_h // 2, fill=(0, 0, 0, round(255 * fade)))
+        return img, b
+    b = round(W * 0.075)  # 🖼 paauksuotas medinis rėmas
+    img = Image.new("RGBA", (W + 2 * b, H + 2 * b), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    for i in range(b):
+        t = i / b
+        col = (int(96 + 120 * (1 - abs(t - 0.45) * 2)), int(62 + 80 * (1 - abs(t - 0.45) * 2)), int(24 + 30 * t), 255)
+        d.rectangle((i, i, img.width - 1 - i, img.height - 1 - i), outline=col)
+    img.paste(screen, (b, b))
+    edge = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(edge).rectangle((b - 3, b - 3, b + W + 2, b + H + 2), outline=(40, 22, 8, 255), width=4)
+    img.alpha_composite(edge.filter(ImageFilter.GaussianBlur(2)))
+    return img, b
+
+
+def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None):
+    """📱 Kadras „įlenda“ į realistišką telefoną (arba 🖼 paveikslo rėmą), kuris pasisuka 3D erdvėje ir grįžta.
+    Grąžina video (be garso) lango trukmei – uždedamas ant pagrindinio video nuo t."""
+    import math
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    d = dur or LEN[kind]
+    n = round(d * fps)
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
+                          f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps}",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    fsz = W * H * 3
+    frames = [raw[i:i + fsz] for i in range(0, len(raw) - fsz + 1, fsz)][:n]
+    if not frames:
+        raise RuntimeError("Nepavyko paimti kadrų efektui")
+    bg = Image.new("RGB", (W, H))
+    gy = np.linspace(0, 1, H)[:, None]
+    gx = np.abs(np.linspace(-1, 1, W))[None, :]
+    lum = (38 - 18 * gy - 10 * gx).clip(10, 60)
+    bg = Image.fromarray(np.dstack([lum * 0.9, lum * 0.92, lum]).astype("uint8"))
+    proc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+                             "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                             "-pix_fmt", "yuv420p", out_path], stdin=subprocess.PIPE)
+    for i in range(n):
+        fr = Image.frombytes("RGB", (W, H), frames[min(i, len(frames) - 1)])
+        u = i / max(1, n - 1)
+        sc, ang = _spin_track(u)
+        if sc > 0.995 and abs(ang) < 0.005:  # pilnas ekranas – tiesiog kadras (sklandi pradžia ir pabaiga)
+            proc.stdin.write(fr.tobytes())
+            continue
+        front, b = _phone_front(fr.convert("RGBA"), W, H, kind, min(1.0, (1 - sc) / 0.15))
+        fw, fh = front.size
+        # masteliuojam taip, kad esant sc = 1 ekranas (be rėmo) uždengtų visą kadrą
+        k = sc * W / W
+        hw, hh = fw / 2 * k, fh / 2 * k
+        thick = fw * k * (0.075 if kind == "phone3d" else 0.06)  # korpuso storis (mastelis kartu su telefonu)
+        cx, cy, dist = W / 2, H / 2 - H * 0.02 * (1 - sc) / 0.4, H * 2.4
+        corners = [(-hw, -hh, 0), (hw, -hh, 0), (hw, hh, 0), (-hw, hh, 0)]
+        dst = _proj(corners, ang, cx, cy, dist)
+        cv = bg.copy().convert("RGBA")
+        if sc < 0.995:  # šešėlis po telefonu
+            sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            sw = hw * abs(math.cos(ang)) * 1.05
+            ImageDraw.Draw(sh).ellipse((cx - sw, cy + hh * 0.92, cx + sw, cy + hh * 1.08), fill=(0, 0, 0, 150))
+            cv.alpha_composite(sh.filter(ImageFilter.GaussianBlur(W * 0.03)))
+        if abs(ang) > 0.01:  # matomas šonas (korpuso storis) su mygtukais, šešėliuotas juostomis
+            side = 1 if ang < 0 else -1
+            x = side * hw
+            sd = ImageDraw.Draw(cv)
+            ys = 0.94 if kind == "phone3d" else 1.0
+            steps = 10
+            for j in range(steps):  # apvalus šonas: šviesesnis viduryje, tamsesni kraštai
+                z0, z1 = -thick * j / steps, -thick * (j + 1) / steps
+                q = _proj([(x, -hh * ys, z0), (x, hh * ys, z0), (x, hh * ys, z1), (x, -hh * ys, z1)], ang, cx, cy, dist)
+                lt = 1 - abs((j + 0.5) / steps - 0.4) * 1.4
+                base = (78, 80, 88) if kind == "phone3d" else (110, 70, 28)
+                sd.polygon(q, fill=tuple(int(c * (0.55 + 0.75 * lt)) for c in base) + (255,))
+            if kind == "phone3d":
+                btns = ((-0.56, -0.46), (-0.40, -0.26), (-0.22, -0.08)) if side < 0 else ((-0.38, -0.16),)
+                for y0, y1 in btns:
+                    bp = _proj([(x + side * 3, hh * y0, -thick * 0.3), (x + side * 3, hh * y1, -thick * 0.3),
+                                (x + side * 3, hh * y1, -thick * 0.7), (x + side * 3, hh * y0, -thick * 0.7)],
+                               ang, cx, cy, dist)
+                    sd.polygon(bp, fill=(150, 152, 160, 255), outline=(60, 60, 66, 255))
+        src_pts = [(0, 0), (fw, 0), (fw, fh), (0, fh)]
+        warped = front.transform((W, H), Image.PERSPECTIVE, _persp_coeffs(src_pts, dst), Image.BICUBIC)
+        if kind == "phone3d" and sc < 0.995:  # stiklo atspindys, kuris slenka sukantis
+            gl = Image.new("L", (W, H), 0)
+            off = W * (0.5 + math.sin(ang) * 1.4)
+            ImageDraw.Draw(gl).polygon([(off - W * 0.35, 0), (off - W * 0.15, 0), (off + W * 0.25, H),
+                                        (off + W * 0.05, H)], fill=46)
+            gl = gl.filter(ImageFilter.GaussianBlur(W * 0.04))
+            a = warped.getchannel("A")
+            glare = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+            glare.putalpha(Image.fromarray(np.minimum(np.asarray(gl), np.asarray(a))))
+            warped.alpha_composite(glare)
+        cv.alpha_composite(warped)
+        proc.stdin.write(cv.convert("RGB").tobytes())
+    proc.stdin.close()
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError("Nepavyko sukurti 3D efekto")
+    return out_path
+
+
+def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
+    """Įdeda 3D efektus į video (prieš spalvas, titrus ir kt. – jie piešiami ant viršaus kaip įprasta)."""
+    rendered = []
+    for i, it in enumerate(items):
+        t = it["t"] * speed
+        clip = os.path.join(tmp, f"spin{i}.mp4")
+        render_spin(path, t, it["kind"], clip, W, H, fps, LEN[it["kind"]] * speed)
+        rendered.append((t, clip))
+    if not rendered:
+        return path
+    cmd = ["ffmpeg", "-y", "-v", "error", "-i", path]
+    chain, last = [], "0:v"
+    for k, (t, clip) in enumerate(rendered, 1):
+        cmd += ["-i", clip]
+        chain.append(f"[{k}:v]setpts=PTS-STARTPTS+{t:.3f}/TB[s{k}];[{last}][s{k}]overlay=eof_action=pass[o{k}]")
+        last = f"o{k}"
+    cmd += ["-filter_complex", ";".join(chain), "-map", f"[{last}]", "-map", "0:a?", "-c:v", "libx264", "-preset",
+            "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-c:a", "copy", out_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("Nepavyko įdėti 3D efekto: " + r.stderr[-300:])
+    return out_path
