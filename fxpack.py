@@ -733,6 +733,45 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None, text=""):
     return out_path
 
 
+def gold_stagger(nl):
+    return min(0.06, 0.18 / max(1, nl - 1))
+
+
+def gold_land_times(text, dur):
+    """Kada (s nuo efekto pradžios) kiekviena auksinė raidė nusileidžia ir atsistoja ant stalo."""
+    word = re.sub(r"[^\w\-]", "", (text or "").replace(video_editor.KEY_MARK, "")).upper()[:12] or "WOW"
+    nl = len(word)
+    return [(0.2 + i * gold_stagger(nl) + 0.17 * 0.9) * dur for i in range(nl)]
+
+
+def clink_wav(times, out_path, sr=44100, volume=0.22):
+    """Trumpi metaliniai dzingtelėjimai (raidė krinta ant stalo): aukšti netolygūs tonai + duslus bumtelėjimas."""
+    import wave
+    import numpy as np
+    total = (max(times) if times else 0) + 0.6
+    y = np.zeros(int(total * sr), np.float32)
+    rng = np.random.default_rng(9)
+    for i, t0 in enumerate(times):
+        n = int(0.45 * sr)
+        tt = np.arange(n) / sr
+        pitch = 1 + 0.04 * rng.normal()
+        ping = sum(a * np.sin(2 * np.pi * f * pitch * tt) * np.exp(-tt / d)
+                   for f, a, d in ((2350, 0.5, 0.09), (3720, 0.35, 0.06), (5310, 0.25, 0.04), (7930, 0.15, 0.025)))
+        thud = 0.6 * np.sin(2 * np.pi * 150 * tt) * np.exp(-tt / 0.035)
+        click = np.zeros(n)
+        click[:120] = rng.normal(0, 0.5, 120) * np.linspace(1, 0, 120)
+        snd = (ping + thud + click) * volume * (0.85 + 0.3 * rng.random())
+        a = int(t0 * sr)
+        y[a:a + n] += snd[: len(y) - a]
+    pcm = (np.clip(y, -1, 1) * 32767).astype("<i2")
+    with wave.open(out_path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
+    return out_path
+
+
 def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
     """Įdeda 3D efektus į video (prieš spalvas, titrus ir kt. – jie piešiami ant viršaus kaip įprasta)."""
     rendered = []
@@ -749,8 +788,23 @@ def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
         cmd += ["-i", clip]
         chain.append(f"[{k}:v]setpts=PTS-STARTPTS+{t:.3f}/TB[s{k}];[{last}][s{k}]overlay=eof_action=pass[o{k}]")
         last = f"o{k}"
-    cmd += ["-filter_complex", ";".join(chain), "-map", f"[{last}]", "-map", "0:a?", "-c:v", "libx264", "-preset",
-            "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-c:a", "copy", out_path]
+    # ✨ auksinių raidių kritimo garsas – tik jis, jokių kitų garsų
+    lands = [it["t"] * speed + x for it in items if it["kind"] == "gold3d"
+             for x in gold_land_times(it.get("text", ""), LEN["gold3d"] * speed)]
+    has_a = bool(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                                 "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip())
+    amap, acodec = ["-map", "0:a?"], ["-c:a", "copy"]
+    if lands:
+        k = len(rendered) + 1
+        cmd += ["-i", clink_wav(lands, os.path.join(tmp, "clinks.wav"))]
+        if has_a:
+            chain.append(f"[0:a][{k}:a]amix=inputs=2:normalize=0:duration=first[aout]")
+            amap = ["-map", "[aout]"]
+        else:
+            amap = ["-map", f"{k}:a"]
+        acodec = ["-c:a", "aac", "-b:a", "192k"]
+    cmd += ["-filter_complex", ";".join(chain), "-map", f"[{last}]", *amap, "-c:v", "libx264", "-preset",
+            "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", *acodec, out_path]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("Nepavyko įdėti 3D efekto: " + r.stderr[-300:])
@@ -1041,6 +1095,19 @@ def _wood(w, h, seed=11):
     return Image.fromarray(np.dstack([rgb, np.full((h, w), 255)]).astype("uint8"), "RGBA")
 
 
+def _stone(w, h, seed=21):
+    """Šviesiai pilkas grūdėtas (odos / akmens) stalviršis su reljefu, apšviestu iš viršaus."""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    rng = np.random.default_rng(seed)
+    n = Image.fromarray((rng.random((h, w)) * 255).astype("uint8")).filter(ImageFilter.GaussianBlur(1.6))
+    a = np.asarray(n, np.float32)
+    gy, gx = np.gradient(a)
+    lum = 116 + (-gy * 1.4 - gx * 0.6) * 3.2 + rng.normal(0, 1.5, (h, w))
+    rgb = np.dstack([lum * 0.96, lum * 0.99, lum * 1.04]).clip(0, 255)
+    return Image.fromarray(np.dstack([rgb, np.full((h, w), 255)]).astype("uint8"), "RGBA")
+
+
 def _gold_text(text, height, full=None):
     """Šlifuoto aukso raidės: (veidas su briaunų šviesa, šonas, kaukė). full – viso žodžio aukščio riboms."""
     import numpy as np
@@ -1055,7 +1122,7 @@ def _gold_text(text, height, full=None):
     ImageDraw.Draw(m).text((pad - l, pad - t), text, font=font, fill=255)
     M = np.asarray(m, dtype=np.float32) / 255
     yy = np.linspace(0, 1, h)[:, None] * np.ones((1, w))
-    stops = [(0, (255, 238, 176)), (0.42, (226, 174, 72)), (0.55, (170, 112, 30)), (1, (238, 196, 104))]
+    stops = [(0, (232, 194, 120)), (0.5, (208, 164, 90)), (1, (178, 134, 64))]  # matinis satininis auksas
     rgb = np.zeros((h, w, 3), np.float32)
     for (a0, c0), (a1, c1) in zip(stops, stops[1:]):
         k = ((yy - a0) / (a1 - a0)).clip(0, 1)[..., None]
@@ -1066,9 +1133,9 @@ def _gold_text(text, height, full=None):
     bl = np.asarray(m.filter(ImageFilter.GaussianBlur(height * 0.03)), dtype=np.float32) / 255
     gy_, gx_ = np.gradient(bl)
     bevel = (-(gx_ * 0.6 + gy_ * 1.0) * height * 0.9)[..., None]  # briaunos: šviesa iš viršaus kairės
-    rgb = (rgb + bevel * 120).clip(0, 255)
+    rgb = (rgb + bevel * 70).clip(0, 255)
     face = Image.fromarray(np.dstack([rgb, M * 255]).astype("uint8"), "RGBA")
-    side = Image.fromarray(np.dstack([np.full((h, w), 118), np.full((h, w), 76), np.full((h, w), 20), M * 255])
+    side = Image.fromarray(np.dstack([np.full((h, w), 196), np.full((h, w), 154), np.full((h, w), 82), M * 255])
                            .astype("uint8"), "RGBA")
     return face, side, m
 
@@ -1104,11 +1171,11 @@ def render_gold(src, t, text, out_path, W, H, fps=30, dur=None):
     word = re.sub(r"[^\w\-]", "", (text or "").replace(video_editor.KEY_MARK, "")).upper()[:12] or "WOW"
     face, side, mask = _gold_text(word, 260)
     letters, word_w = _gold_letters(word, 260)
-    table = _wood(900, 1400)
+    table = _stone(2000, 2600)
     e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
     yy, xx = np.mgrid[0:H, 0:W]
-    vign = (1 - 0.75 * (((xx - W / 2) / (W * 0.75)) ** 2 + ((yy - H * 0.55) / (H * 0.6)) ** 2)).clip(0.12, 1)
-    bgc = Image.fromarray((np.dstack([vign * 40, vign * 26, vign * 17])).astype("uint8"))
+    vign = (1 - 0.4 * (((xx - W * 0.4) / (W * 0.9)) ** 2 + ((yy - H * 0.35) / (H * 0.8)) ** 2)).clip(0.55, 1)
+    bgc = Image.fromarray((np.dstack([vign * 108, vign * 112, vign * 118])).astype("uint8"))
     proc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
                              "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
                              "-pix_fmt", "yuv420p", out_path], stdin=subprocess.PIPE)
@@ -1126,9 +1193,9 @@ def render_gold(src, t, text, out_path, W, H, fps=30, dur=None):
         if back > 0.995:
             proc.stdin.write(fr.tobytes())
             continue
-        sc = (1 - 0.6 * z) * (1 + 0.16 * e((u - 0.6) / 0.25))
-        tilt = math.radians(56) * z
-        ty = -H * 0.16 * z
+        sc = (1 - 0.3 * z) * (1 + 0.12 * max(0.0, u - 0.15))  # kamera visą laiką lėtai artėja
+        tilt = math.radians(42) * z
+        ty = -H * 0.24 * z
         front, b = _phone_front(fr.convert("RGBA"), W, H, "phone3d", min(1.0, z / 0.15))
         fw, fh = front.size
         pt = fw * 0.07
@@ -1156,15 +1223,16 @@ def render_gold(src, t, text, out_path, W, H, fps=30, dur=None):
         w_ = _warp(table, tq, W, H)
         if w_:
             cv.alpha_composite(w_[0], (w_[1], w_[2]))
-        cv = Image.fromarray((np.asarray(cv.convert("RGB"), np.float32) * vign[..., None] * 1.25).clip(0, 255)
+        cv = Image.fromarray((np.asarray(cv.convert("RGB"), np.float32) * vign[..., None] * 1.05).clip(0, 255)
                              .astype("uint8")).convert("RGBA")
         # telefono šešėlis ant stalo
         sq = [proj(tr(p)) for p in ((-fw / 2 + 8, -fh / 2 + 18, -pt), (fw / 2 + 8, -fh / 2 + 18, -pt),
                                      (fw / 2 + 16, fh / 2 + 30, -pt), (-fw / 2 + 16, fh / 2 + 30, -pt))]
         sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ImageDraw.Draw(sh).polygon(sq, fill=(0, 0, 0, int(170 * z)))
+        ImageDraw.Draw(sh).polygon(sq, fill=(0, 0, 0, int(120 * z)))
         cv.alpha_composite(sh.filter(ImageFilter.GaussianBlur(max(2, W * 0.02))))
         # telefono šonai
+        pt_ = pt
         r = fw * 0.1
         for pts, nv in (([(-fw / 2 + r, fh / 2, 0), (fw / 2 - r, fh / 2, 0), (fw / 2 - r, fh / 2, -pt),
                           (-fw / 2 + r, fh / 2, -pt)], (0, 1, 0)),
@@ -1176,26 +1244,26 @@ def render_gold(src, t, text, out_path, W, H, fps=30, dur=None):
             nv_ = nrm(nv)
             if visible(vs, nv_):
                 sh_ = 0.4 + 0.7 * max(0.0, float(nv_ @ L))
-                ImageDraw.Draw(cv).polygon([proj(v) for v in vs], fill=tuple(int(c * sh_) for c in (92, 94, 102)) + (255,))
+                ImageDraw.Draw(cv).polygon([proj(v) for v in vs], fill=tuple(int(c * sh_) for c in (176, 170, 160)) + (255,))
         scr_q = [proj(tr(p)) for p in ((-fw / 2, -fh / 2, 0), (fw / 2, -fh / 2, 0), (fw / 2, fh / 2, 0),
                                        (-fw / 2, fh / 2, 0))]
         w_ = _warp(front, scr_q, W, H)
         if w_:
             cv.alpha_composite(w_[0], (w_[1], w_[2]))
         # raidės: po vieną greitai viena paskui kitą išslysta iš ekrano apačios ant stalo ir atsistoja
-        tw2 = fw * 0.8  # stambios raidės – platesnės už telefoną
-        th = min(tw2 * 2 * face.height / face.width, fh * 0.42)
+        tw2 = fw * 0.36  # raidės – apie du trečdalius telefono pločio
+        th = min(tw2 * 2 * face.height / face.width, fh * 0.24)
         ppx = th / face.height  # pasaulio vienetai vienam raidės paveikslo taškui
         x_start = -word_w * ppx / 2
         nl = len(letters)
-        stagger = min(0.06, 0.18 / max(1, nl - 1))  # visas žodis susidėlioja ~per 0,5 s
+        stagger = gold_stagger(nl)  # visas žodis susidėlioja ~per 0,5 s
         items = []
         for li, (lf, ls, lm, lx) in enumerate(letters):
             uu = (u - 0.2 - li * stagger) / 0.17  # vienos raidės laikas 0..1
             if uu <= 0:
                 continue
             k_out = e(uu / 0.75)
-            yb = fh / 2 - th * 0.35 + th * 0.85 * k_out
+            yb = fh / 2 - th * 0.35 + th * 1.9 * k_out
             zb = -pt * e((yb - fh / 2) / (th * 0.2) + 0.5)
             if uu < 1:
                 a = math.radians(90) * min(1.0, e((uu - 0.3) / 0.7) * 1.1)
@@ -1244,7 +1312,7 @@ def render_gold(src, t, text, out_path, W, H, fps=30, dur=None):
             band = Image.new("L", f2.size, 0)
             bx = (-0.3 + 1.6 * e((u - 0.55) / 0.3)) * (xr - x_start * -1 - x_start) / ppx - (xl - x_start) / ppx
             ImageDraw.Draw(band).polygon([(bx, 0), (bx + th * 0.5 / ppx * 0.3, 0), (bx - th * 0.2 / ppx * 0.3, f2.height),
-                                          (bx - th * 0.7 / ppx * 0.3, f2.height)], fill=150)
+                                          (bx - th * 0.7 / ppx * 0.3, f2.height)], fill=60)
             band = Image.fromarray(np.minimum(np.asarray(band.filter(ImageFilter.GaussianBlur(f2.height * 0.05))),
                                               np.asarray(lm)))
             white = Image.new("RGBA", f2.size, (255, 248, 225, 0))
