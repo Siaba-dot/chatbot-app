@@ -22,7 +22,7 @@ KINDS = {
     "grid": "🖼️ Galerijos tinklelis", "pip": "🔲 Kadras kadre", "chat": "💬 Žinutės telefone",
     "review": "⭐ Atsiliepimo kortelė", "chart": "📈 Augantis grafikas", "notif": "🔔 Pranešimas",
     "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas", "laptop3d": "💻 Užsidarantis kompiuteris",
-    "frame3d": "🖼 Paveikslo rėmas",
+    "frame3d": "🖼 Besisukantis paveikslo rėmas",
 }
 OVERLAY_KINDS = ("filmstrip", "fan", "polaroids", "grid")
 ASS_KINDS = ("chat", "review", "chart", "notif", "counter")
