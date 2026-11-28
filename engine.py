@@ -995,7 +995,7 @@ def bubbles(words, s, client=None):
     return reels_studio.auto_bubbles(words)
 
 
-def anim_spec(words, s, client=None):
+def anim_spec(words, s, client=None, cuts=()):
     """Animacijų planas (kaip studijoje): AI arba taisyklės. None – viskas išjungta."""
     an = s["anims"]
     if not (any(an.values()) or s["gfx_kinds"]):
@@ -1020,6 +1020,19 @@ def anim_spec(words, s, client=None):
         gap = fxpack.LEN["gold3d"] + 1.0
         gfx = [{"kind": "gold3d", "t": round(t0, 2), "text": video_editor.plain(words[0][0])}] + \
               [g for g in gfx if g["t"] - t0 >= gap]
+    gfx = [g for g in gfx if g.get("kind") != "shatter3d"]
+    if "shatter3d" in s["gfx_kinds"] and words:  # 💥 dūžtantis ekranas – ties kadrų sandūra (po šukėmis kitas kadras)
+        L = fxpack.LEN["shatter3d"]
+        busy_t = [g["t"] for g in gfx]
+        pre = fxpack.SHATTER_AT * L
+        end = words[-1][2]
+        cand = [c - pre for c in cuts if c - pre > 0.3 and c + L * (1 - fxpack.SHATTER_AT) < end + 0.5]
+        if not cand:  # vienas kadras – dūžta antrojo sakinio pradžioje
+            starts = [w[1] for i, w in enumerate(words) if i and re.search(r"[.!?…]$", words[i - 1][0])]
+            cand = [x for x in starts if x + L < end + 0.5] or ([words[0][1] + 0.5] if end > L + 1 else [])
+        free = [c for c in cand if all(abs(c - b) >= L + 0.5 for b in busy_t)]
+        if free:
+            gfx = sorted(gfx + [{"kind": "shatter3d", "t": round(free[0], 2)}], key=lambda g: g["t"])
     if gfx and plan.get("fx"):
         plan = dict(plan, fx=[(t, k) for t, k in plan["fx"] if all(abs(t - g["t"]) >= 2.8 for g in gfx)])
     return {"gfx": gfx, "plan": {k: plan.get(k, []) if an[k] else [] for k in
@@ -1042,7 +1055,8 @@ def build(prep, settings, out_path, workdir, client=None, words=None, quick=Fals
                  else [(video_editor.plain(w), a, b) for w, a, b in words])
         if vo:  # įgarsinimo titrai – galutinio video laiku; montaže jie pagreitinami kartu su vaizdu
             words = [(w, a * s["speed"], b * s["speed"]) for w, a, b in words]
-        bubble_list, anims = bubbles(words, s, client), anim_spec(words, s, client)
+        bubble_list, anims = bubbles(words, s, client), anim_spec(
+            words, s, client, [sp[1] for sp in (prep.get("spans") or []) if sp][:-1])
         src = prep["src"]
         if broll:
             prog(0.02)

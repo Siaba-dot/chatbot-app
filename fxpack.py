@@ -21,12 +21,12 @@ KINDS = {
     "filmstrip": "🎞️ Kino juosta", "fan": "🃏 Kortelių vėduoklė", "polaroids": "📸 Polaroidų lietus",
     "grid": "🖼️ Galerijos tinklelis", "pip": "🔲 Kadras kadre", "chat": "💬 Žinutės telefone",
     "review": "⭐ Atsiliepimo kortelė", "chart": "📈 Augantis grafikas", "notif": "🔔 Pranešimas",
-    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas", "laptop3d": "💻 Užsidarantis kompiuteris", "gold3d": "✨ Auksinės raidės",
+    "counter": "🔢 Skaitiklis", "reel": "🎞️ Prasisukanti kino juosta", "phone3d": "📱 Besisukantis telefonas", "laptop3d": "💻 Užsidarantis kompiuteris", "gold3d": "✨ Auksinės raidės", "shatter3d": "💥 Dūžtantis ekranas",
     "frame3d": "🖼 Besisukantis paveikslo rėmas",
 }
 OVERLAY_KINDS = ("filmstrip", "fan", "polaroids", "grid")
 ASS_KINDS = ("chat", "review", "chart", "notif", "counter")
-LEN = {"reel": 1.0, "phone3d": 2.6, "laptop3d": 3.2, "gold3d": 2.8, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
+LEN = {"reel": 1.0, "phone3d": 2.6, "laptop3d": 3.2, "gold3d": 2.8, "shatter3d": 2.6, "frame3d": 1.8, "filmstrip": 2.6, "fan": 2.6, "polaroids": 2.8, "grid": 2.2, "pip": 2.8, "chat": 3.2, "review": 3.2,
        "chart": 2.8, "notif": 2.8, "counter": 2.2}
 SEMI = "Montserrat SemiBold"
 
@@ -516,7 +516,7 @@ def ai_plan(client, words, allowed, ai_json, busy=(), limit=4):
 
 
 # ======================= 📱 3D telefonas / 🖼 paveikslo rėmas (kadrai piešiami PIL – realistiška perspektyva) ========
-SPIN_KINDS = ("phone3d", "frame3d", "laptop3d", "gold3d")
+SPIN_KINDS = ("phone3d", "frame3d", "laptop3d", "gold3d", "shatter3d")
 
 
 def _persp_coeffs(src, dst):
@@ -643,6 +643,8 @@ def render_spin(src, t, kind, out_path, W, H, fps=30, dur=None, text=""):
         return render_laptop(src, t, out_path, W, H, fps, dur)
     if kind == "gold3d":
         return render_gold(src, t, text, out_path, W, H, fps, dur)
+    if kind == "shatter3d":
+        return render_shatter(src, t, out_path, W, H, fps, dur)
     d = dur or LEN[kind]
     n = round(d * fps)
     raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
@@ -744,25 +746,62 @@ def gold_land_times(text, dur):
     return [(0.2 + i * gold_stagger(nl) + 0.17 * 0.9) * dur for i in range(nl)]
 
 
-def clink_wav(times, out_path, sr=44100, volume=0.22):
-    """Trumpi metaliniai dzingtelėjimai (raidė krinta ant stalo): aukšti netolygūs tonai + duslus bumtelėjimas."""
+def _snd_clink(rng, sr, volume=0.22):
+    """Metalinis dzingtelėjimas (auksinė raidė krinta ant stalo)."""
+    import numpy as np
+    n = int(0.45 * sr)
+    tt = np.arange(n) / sr
+    pitch = 1 + 0.04 * rng.normal()
+    ping = sum(a * np.sin(2 * np.pi * f * pitch * tt) * np.exp(-tt / d)
+               for f, a, d in ((2350, 0.5, 0.09), (3720, 0.35, 0.06), (5310, 0.25, 0.04), (7930, 0.15, 0.025)))
+    thud = 0.6 * np.sin(2 * np.pi * 150 * tt) * np.exp(-tt / 0.035)
+    click = np.zeros(n)
+    click[:120] = rng.normal(0, 0.5, 120) * np.linspace(1, 0, 120)
+    return (ping + thud + click) * volume * (0.85 + 0.3 * rng.random())
+
+
+def _snd_crack(rng, sr):
+    """Stiklo įtrūkimo traškesys – trumpas aukštas spragtelėjimas."""
+    import numpy as np
+    n = int(0.06 * sr)
+    tt = np.arange(n) / sr
+    x = rng.normal(0, 1, n)
+    x = np.diff(x, prepend=0) * np.exp(-tt / 0.008)
+    return x * 0.18 * (0.6 + 0.8 * rng.random())
+
+
+def _snd_shatter(rng, sr):
+    """Dūžtantis stiklas: aukštų dažnių triukšmo pliūpsnis + daug smulkių šukių skambesių ir pabyrų."""
+    import numpy as np
+    n = int(1.3 * sr)
+    tt = np.arange(n) / sr
+    burst = np.diff(rng.normal(0, 1, n), prepend=0) * (np.exp(-tt / 0.07) * 0.8 + np.exp(-tt / 0.35) * 0.15)
+    low = np.sin(2 * np.pi * 90 * tt) * np.exp(-tt / 0.05) * 0.5
+    y = burst * 0.5 + low
+    for _ in range(70):  # šukių skambėjimas ir byrėjimas ant stalo
+        t0 = abs(rng.normal(0, 0.28)) + rng.random() * 0.1
+        m = int(0.12 * sr)
+        a = int(t0 * sr)
+        if a + m >= n:
+            continue
+        tk = np.arange(m) / sr
+        f = 2800 + rng.random() * 6500
+        dec = 0.015 + 0.05 * rng.random()
+        y[a:a + m] += np.sin(2 * np.pi * f * tk) * np.exp(-tk / dec) * (0.05 + 0.18 * rng.random()) * np.exp(-t0 * 1.5)
+    return y * 0.38
+
+
+def sfx_wav(events, out_path, sr=44100):
+    """Garso efektai pagal laiką: events = [(laikas s, "clink" | "crack" | "shatter")] -> WAV."""
     import wave
     import numpy as np
-    total = (max(times) if times else 0) + 0.6
+    total = (max(t for t, _ in events) if events else 0) + 1.5
     y = np.zeros(int(total * sr), np.float32)
     rng = np.random.default_rng(9)
-    for i, t0 in enumerate(times):
-        n = int(0.45 * sr)
-        tt = np.arange(n) / sr
-        pitch = 1 + 0.04 * rng.normal()
-        ping = sum(a * np.sin(2 * np.pi * f * pitch * tt) * np.exp(-tt / d)
-                   for f, a, d in ((2350, 0.5, 0.09), (3720, 0.35, 0.06), (5310, 0.25, 0.04), (7930, 0.15, 0.025)))
-        thud = 0.6 * np.sin(2 * np.pi * 150 * tt) * np.exp(-tt / 0.035)
-        click = np.zeros(n)
-        click[:120] = rng.normal(0, 0.5, 120) * np.linspace(1, 0, 120)
-        snd = (ping + thud + click) * volume * (0.85 + 0.3 * rng.random())
+    for t0, kind in events:
+        snd = {"clink": _snd_clink, "crack": _snd_crack, "shatter": _snd_shatter}[kind](rng, sr)
         a = int(t0 * sr)
-        y[a:a + n] += snd[: len(y) - a]
+        y[a:a + len(snd)] += snd[: len(y) - a]
     pcm = (np.clip(y, -1, 1) * 32767).astype("<i2")
     with wave.open(out_path, "wb") as w:
         w.setnchannels(1)
@@ -770,6 +809,19 @@ def clink_wav(times, out_path, sr=44100, volume=0.22):
         w.setframerate(sr)
         w.writeframes(pcm.tobytes())
     return out_path
+
+
+def sfx_events(items, speed=1.0):
+    """3D efektų garsai (absoliutus laikas sumontuotame video): auksinių raidžių kritimas, stiklo dūžis."""
+    ev = []
+    for it in items:
+        t, d = it["t"] * speed, LEN[it["kind"]] * speed
+        if it["kind"] == "gold3d":
+            ev += [(t + x, "clink") for x in gold_land_times(it.get("text", ""), d)]
+        elif it["kind"] == "shatter3d":
+            ev += [(t + d * (SHATTER_AT - 0.2 + 0.19 * k / 6), "crack") for k in range(7)]
+            ev.append((t + d * SHATTER_AT, "shatter"))
+    return ev
 
 
 def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
@@ -789,14 +841,13 @@ def apply_spins(path, items, out_path, W, H, fps, tmp, speed=1.0):
         chain.append(f"[{k}:v]setpts=PTS-STARTPTS+{t:.3f}/TB[s{k}];[{last}][s{k}]overlay=eof_action=pass[o{k}]")
         last = f"o{k}"
     # ✨ auksinių raidių kritimo garsas – tik jis, jokių kitų garsų
-    lands = [it["t"] * speed + x for it in items if it["kind"] == "gold3d"
-             for x in gold_land_times(it.get("text", ""), LEN["gold3d"] * speed)]
+    lands = sfx_events(items, speed)
     has_a = bool(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
                                  "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip())
     amap, acodec = ["-map", "0:a?"], ["-c:a", "copy"]
     if lands:
         k = len(rendered) + 1
-        cmd += ["-i", clink_wav(lands, os.path.join(tmp, "clinks.wav"))]
+        cmd += ["-i", sfx_wav(lands, os.path.join(tmp, "sfx.wav"))]
         if has_a:
             chain.append(f"[0:a][{k}:a]amix=inputs=2:normalize=0:duration=first[aout]")
             amap = ["-map", "[aout]"]
@@ -1327,6 +1378,241 @@ def render_gold(src, t, text, out_path, W, H, fps=30, dur=None):
         out = cv.convert("RGB")
         if back > 0.005:
             out = Image.blend(out, fr, back)
+        proc.stdin.write(out.tobytes())
+    proc.stdin.close()
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError("Nepavyko sukurti 3D efekto")
+    return out_path
+
+
+# ======================= 💥 dūžtantis ekranas: įtrūkimai → 3D šukės išlekia → po jomis kitas kadras =======================
+def _clip_poly(poly, W, H):
+    """Sutherland–Hodgman: daugiakampis apkerpamas stačiakampiu [0,W]x[0,H]."""
+    def clip(pts, inside, inter):
+        out = []
+        for i in range(len(pts)):
+            a, b = pts[i - 1], pts[i]
+            if inside(b):
+                if not inside(a):
+                    out.append(inter(a, b))
+                out.append(b)
+            elif inside(a):
+                out.append(inter(a, b))
+        return out
+
+    def ix(x0):
+        return lambda a, b: (x0, a[1] + (b[1] - a[1]) * (x0 - a[0]) / ((b[0] - a[0]) or 1e-9))
+
+    def iy(y0):
+        return lambda a, b: (a[0] + (b[0] - a[0]) * (y0 - a[1]) / ((b[1] - a[1]) or 1e-9), y0)
+    for ins, it in ((lambda p: p[0] >= 0, ix(0)), (lambda p: p[0] <= W, ix(W)),
+                    (lambda p: p[1] >= 0, iy(0)), (lambda p: p[1] <= H, iy(H))):
+        poly = clip(poly, ins, it)
+        if not poly:
+            return []
+    return poly
+
+
+def _shards(W, H, seed=5):
+    """Ekrano stiklo šukės: radialiniai įtrūkimai ir žiedai nuo smūgio taško. Grąžina (smūgio taškas, [daugiakampiai])."""
+    import math
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    I = (W * 0.7, H * 0.74)
+    S = max(W, H)
+    na = 13
+    angs = np.sort(rng.random(na) * 2 * math.pi)
+    rings = [0.0, 0.05, 0.13, 0.25, 0.4, 0.6, 0.9, 1.6]
+    rad = [[r * (1 + (0.25 * (rng.random() - 0.5) if 0 < r < 1.5 else 0)) for _ in range(na)] for r in rings]
+    polys = []
+    for i in range(len(rings) - 1):
+        for j in range(na):
+            a0, a1 = angs[j], angs[(j + 1) % na] + (2 * math.pi if j == na - 1 else 0)
+            pts = [(I[0] + rad[i][j] * S * math.cos(a0), I[1] + rad[i][j] * S * math.sin(a0)),
+                   (I[0] + rad[i][(j + 1) % na] * S * math.cos(a1), I[1] + rad[i][(j + 1) % na] * S * math.sin(a1)),
+                   (I[0] + rad[i + 1][(j + 1) % na] * S * math.cos(a1), I[1] + rad[i + 1][(j + 1) % na] * S * math.sin(a1)),
+                   (I[0] + rad[i + 1][j] * S * math.cos(a0), I[1] + rad[i + 1][j] * S * math.sin(a0))]
+            if i == 0:
+                pts = pts[1:]
+            p = _clip_poly(pts, W, H)
+            if len(p) >= 3 and abs(_poly_area(p)) > W * H * 0.0004:
+                polys.append(p)
+    return I, polys
+
+
+def _poly_area(p):
+    return 0.5 * sum(p[i][0] * p[(i + 1) % len(p)][1] - p[(i + 1) % len(p)][0] * p[i][1] for i in range(len(p)))
+
+
+def _rotm(axis, ang):
+    import numpy as np
+    x, y, z = axis / np.linalg.norm(axis)
+    c, s = np.cos(ang), np.sin(ang)
+    C = 1 - c
+    return np.array([[c + x * x * C, x * y * C - z * s, x * z * C + y * s],
+                     [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
+                     [z * x * C - y * s, z * y * C + x * s, c + z * z * C]])
+
+
+SHATTER_AT = 0.42  # efekto dalis, kai stiklas subyra (kadrų sandūra)
+
+
+def render_shatter(src, t, out_path, W, H, fps=30, dur=None):
+    """💥 Kadras atitolsta – telefonas ant stalo; stiklu pasklinda įtrūkimai, ekranas subyra į 3D šukes su
+    kadro gabalais, kurios išlekia, o po jomis jau rodomas kitas kadras. Tada vėl per visą ekraną."""
+    import math
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    d = dur or LEN["shatter3d"]
+    n = round(d * fps)
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", src, "-t", f"{d:.3f}", "-vf",
+                          f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps}",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    fsz = W * H * 3
+    frames = [raw[i:i + fsz] for i in range(0, len(raw) - fsz + 1, fsz)][:n]
+    if not frames:
+        raise RuntimeError("Nepavyko paimti kadrų efektui")
+    i_sh = max(0, min(len(frames) - 1, round(SHATTER_AT * (n - 1)) - 1))
+    frozen = Image.frombytes("RGB", (W, H), frames[i_sh]).convert("RGBA")  # kadras, kuris subyra
+    I, polys = _shards(W, H)
+    rng = np.random.default_rng(8)
+    S = max(W, H)
+    shards = []
+    for p in polys:
+        xs, ys = [q[0] for q in p], [q[1] for q in p]
+        x0, y0, x1, y1 = int(min(xs)), int(min(ys)), int(math.ceil(max(xs))), int(math.ceil(max(ys)))
+        x1, y1 = max(x1, x0 + 2), max(y1, y0 + 2)
+        m = Image.new("L", (x1 - x0, y1 - y0), 0)
+        ImageDraw.Draw(m).polygon([(q[0] - x0, q[1] - y0) for q in p], fill=255)
+        patch = frozen.crop((x0, y0, x1, y1))
+        patch.putalpha(m)
+        ImageDraw.Draw(patch).polygon([(q[0] - x0, q[1] - y0) for q in p], outline=(235, 245, 255, 190))
+        cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+        dv = np.array((cx - I[0], cy - I[1]))
+        dist_ = float(np.linalg.norm(dv))
+        dv = dv / (dist_ or 1)
+        spd = W * (0.5 + 0.9 * rng.random()) * (1.3 - 0.6 * min(1, dist_ / (S * 0.7)))
+        shards.append(dict(poly=p, box=(x0, y0, x1, y1), patch=patch, mask=m, c=(cx, cy),
+                           rel=SHATTER_AT + 0.1 * min(1.0, dist_ / (S * 0.75)),
+                           v=np.array((dv[0] * spd, dv[1] * spd, W * (0.6 + 1.1 * rng.random()))),
+                           axis=rng.normal(0, 1, 3), w=4 + 8 * rng.random(), dist=dist_))
+    table = _stone(2000, 2600)
+    e = lambda x: 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x)))  # noqa: E731
+    yy, xx = np.mgrid[0:H, 0:W]
+    vign = (1 - 0.4 * (((xx - W * 0.4) / (W * 0.9)) ** 2 + ((yy - H * 0.35) / (H * 0.8)) ** 2)).clip(0.55, 1)
+    bgc = Image.fromarray((np.dstack([vign * 108, vign * 112, vign * 118])).astype("uint8"))
+    proc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+                             "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                             "-pix_fmt", "yuv420p", out_path], stdin=subprocess.PIPE)
+    L = np.array([-0.35, -0.8, 0.5])
+    L = L / np.linalg.norm(L)
+    dist = H * 2.0
+    for i in range(n):
+        fr = Image.frombytes("RGB", (W, H), frames[min(i, len(frames) - 1)])
+        u = i / max(1, n - 1)
+        z = e(u / 0.22) * (1 - e((u - 0.8) / 0.2))
+        if z < 0.002:
+            proc.stdin.write(fr.tobytes())
+            continue
+        sc = (1 - 0.3 * z) * (1 + 0.1 * max(0.0, u - 0.15) * z)
+        tilt = math.radians(36) * z
+        ty = -H * 0.03 * z
+        # ekrano tekstūra: gyvas kadras + dar nenukritusios šukės (sustingęs kadras) su įtrūkimais
+        scr = fr.convert("RGBA")
+        if u >= SHATTER_AT - 0.2:
+            grow = e((u - (SHATTER_AT - 0.2)) / 0.18) * S * 1.1
+            stay = [s_ for s_ in shards if u < s_["rel"]]
+            if u >= SHATTER_AT - 1.0 / n:
+                for s_ in stay:
+                    scr.alpha_composite(s_["patch"], s_["box"][:2])
+            cr = ImageDraw.Draw(scr)
+            for s_ in shards:
+                if s_["dist"] > grow or u >= s_["rel"]:
+                    continue
+                pts = s_["poly"] + [s_["poly"][0]]
+                for a_, b_ in zip(pts, pts[1:]):
+                    if math.dist(a_, I) <= grow and math.dist(b_, I) <= grow:
+                        cr.line([a_, b_], fill=(20, 24, 30, 120), width=3)
+                        cr.line([a_, b_], fill=(235, 245, 255, 210), width=1)
+        front, b = _phone_front(scr, W, H, "phone3d", min(1.0, z / 0.15))
+        fw, fh = front.size
+        pt = fw * 0.07
+
+        def tr(p):
+            x, y, zz = p[0] * sc, p[1] * sc, p[2] * sc
+            x, y, zz = _rot_x((x, y, zz), tilt)
+            return np.array((x, y + ty, zz))
+
+        def proj(v):
+            f = dist / max(1.0, dist - v[2])
+            return W / 2 + v[0] * f, H / 2 + v[1] * f
+
+        cv = bgc.copy().convert("RGBA")
+        tq = [proj(tr(p)) for p in ((-fw * 2.6, -fh * 2.4, -pt), (fw * 2.6, -fh * 2.4, -pt),
+                                     (fw * 2.6, fh * 2.6, -pt), (-fw * 2.6, fh * 2.6, -pt))]
+        w_ = _warp(table, tq, W, H)
+        if w_:
+            cv.alpha_composite(w_[0], (w_[1], w_[2]))
+        cv = Image.fromarray((np.asarray(cv.convert("RGB"), np.float32) * vign[..., None] * 1.05).clip(0, 255)
+                             .astype("uint8")).convert("RGBA")
+        sq = [proj(tr(p)) for p in ((-fw / 2 + 8, -fh / 2 + 18, -pt), (fw / 2 + 8, -fh / 2 + 18, -pt),
+                                     (fw / 2 + 16, fh / 2 + 30, -pt), (-fw / 2 + 16, fh / 2 + 30, -pt))]
+        sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).polygon(sq, fill=(0, 0, 0, int(120 * z)))
+        cv.alpha_composite(sh.filter(ImageFilter.GaussianBlur(max(2, W * 0.02))))
+        r = fw * 0.1
+        for pts, nv in (([(-fw / 2 + r, fh / 2, 0), (fw / 2 - r, fh / 2, 0), (fw / 2 - r, fh / 2, -pt),
+                          (-fw / 2 + r, fh / 2, -pt)], (0, 1, 0)),
+                        ([(fw / 2, -fh / 2 + r, 0), (fw / 2, fh / 2 - r, 0), (fw / 2, fh / 2 - r, -pt),
+                          (fw / 2, -fh / 2 + r, -pt)], (1, 0, 0)),
+                        ([(-fw / 2, -fh / 2 + r, 0), (-fw / 2, fh / 2 - r, 0), (-fw / 2, fh / 2 - r, -pt),
+                          (-fw / 2, -fh / 2 + r, -pt)], (-1, 0, 0))):
+            vs = [tr(p) for p in pts]
+            nv_ = np.array(_rot_x(nv, tilt))
+            c_ = sum(vs) / 4
+            if float(nv_ @ (np.array((0, 0, dist)) - c_)) > 0:
+                k_ = 0.4 + 0.7 * max(0.0, float(nv_ @ L))
+                ImageDraw.Draw(cv).polygon([proj(v) for v in vs], fill=tuple(int(c * k_) for c in (176, 170, 160)) + (255,))
+        scr_q = [proj(tr(p)) for p in ((-fw / 2, -fh / 2, 0), (fw / 2, -fh / 2, 0), (fw / 2, fh / 2, 0),
+                                       (-fw / 2, fh / 2, 0))]
+        w_ = _warp(front, scr_q, W, H)
+        if w_:
+            cv.alpha_composite(w_[0], (w_[1], w_[2]))
+        # išlėkusios šukės (3D: skrieja nuo smūgio taško, sukasi, krenta)
+        fly = []
+        for s_ in shards:
+            if u < s_["rel"]:
+                continue
+            tau = (u - s_["rel"]) * d
+            R = _rotm(s_["axis"], s_["w"] * tau)
+            x0, y0, x1, y1 = s_["box"]
+            loc = lambda px, py: np.array((b + px - fw / 2, b + py - fh / 2, 0.0))  # noqa: E731
+            c0 = loc(*s_["c"])
+            pos = c0 + s_["v"] * tau + np.array((0, 0, -W * 1.6)) * tau * tau * 0.5
+            corners = [pos + R @ (loc(px, py) - c0) for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+            vs = [tr(p) for p in corners]
+            fly.append((float(sum(v[2] for v in vs)) / 4, vs, R, s_))
+        fly.sort(key=lambda x: x[0])
+        for _, vs, R, s_ in fly:
+            q = [proj(v) for v in vs]
+            w_ = _warp(s_["patch"], q, W, H)
+            if not w_:
+                continue
+            nloc = R @ np.array((0, 0, 1.0))
+            nv_ = np.array(_rot_x(nloc, tilt))
+            facing = float(nv_[2]) > 0
+            hv = L + np.array((0, 0, 1.0))
+            spec = max(0.0, float(nv_ @ (hv / np.linalg.norm(hv)))) ** 16
+            a = np.asarray(w_[0], np.float32)
+            if facing:
+                a[..., :3] = (a[..., :3] * (0.85 + 0.25 * spec) + 160 * spec).clip(0, 255)
+            else:  # matoma šukės nugarėlė – blyškesnis, melsvas stiklas
+                a[..., :3] = (a[..., :3] * 0.55 + np.array((120, 150, 175)) * 0.45).clip(0, 255)
+            cv.alpha_composite(Image.fromarray(a.astype("uint8"), "RGBA"), (w_[1], w_[2]))
+        out = cv.convert("RGB")
+        if z < 0.999:
+            out = Image.blend(fr, out, min(1.0, z * 1.2))
         proc.stdin.write(out.tobytes())
     proc.stdin.close()
     proc.wait()

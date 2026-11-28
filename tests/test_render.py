@@ -75,7 +75,7 @@ def test_render_job_all_formats(client, make_user, media):
     assert client.get(f"/api/projects/{pid}/files/visi_formatai.zip", headers=h).status_code == 200
 
 
-@pytest.mark.parametrize("kind", ["phone3d", "frame3d", "laptop3d", "gold3d"])
+@pytest.mark.parametrize("kind", ["phone3d", "frame3d", "laptop3d", "gold3d", "shatter3d"])
 def test_spin_effects_in_video(media, kind):
     """📱 / 🖼 3D efektai: vaizdas sumažėja į telefoną / rėmą (aplink tamsus fonas) ir video sukuriamas be klaidų."""
     import fxpack
@@ -107,3 +107,15 @@ def test_gold_letters_follow_first_word():
     gold = [g for g in spec["gfx"] if g["kind"] == "gold3d"]
     assert gold and gold[0]["t"] == WORDS[0][1] and gold[0]["text"] == "Bendradarbiavimas"
     assert all(g["t"] - gold[0]["t"] >= 2.8 for g in spec["gfx"] if g is not gold[0])
+
+
+def test_shatter_at_clip_cut_and_has_glass_sound():
+    """💥 Dūžtantis ekranas statomas ties kadrų sandūra; garsas – įtrūkimai ir dūžis."""
+    import fxpack
+    st = {"anims": {k: False for k in ("stickers", "marks", "cards", "phone", "fx", "intro", "outro")},
+          "gfx_kinds": ["shatter3d"], "handle": ""}
+    spec = engine.anim_spec(WORDS, st, cuts=[2.9])
+    sh = [g for g in spec["gfx"] if g["kind"] == "shatter3d"]
+    assert sh and abs(sh[0]["t"] + fxpack.SHATTER_AT * fxpack.LEN["shatter3d"] - 2.9) < 0.02
+    kinds = [k for _, k in fxpack.sfx_events(sh)]
+    assert "shatter" in kinds and kinds.count("crack") >= 3
