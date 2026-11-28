@@ -126,7 +126,7 @@ export default function Voice({ id, s, set, setS, opts, user, setToast, setError
               {clipsCount ? `Projekte yra ${clipsCount} kadr. – spauskite „▶ Peržiūra“, o jei patinka – „KURTI VIDEO“. Arba leiskite studijai parinkti vaizdus pagal tekstą.`
                 : "Projekte dar nėra vaizdų. Įkelkite ar nufilmuokite savo medžiagą skiltyje „🎬 Medžiaga“ – arba leiskite studijai parinkti vaizdus pagal šį tekstą."}
             </div>
-            <button className="btn gold" disabled={busyJob} onClick={() => onAuto(vo.text, vo.on ? vo.voice : null)}>🎬 Parinkti vaizdus automatiškai</button>
+            <button className="btn accent" disabled={busyJob} onClick={() => onAuto(vo.text, vo.on ? vo.voice : null)}>🎬 Parinkti vaizdus automatiškai</button>
           </div>
         )}
       </div>

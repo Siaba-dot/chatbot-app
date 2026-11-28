@@ -110,7 +110,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                 <textarea className="input" rows={4} maxLength={1500} value={prompt} onChange={e => setPrompt(e.target.value)}
                           placeholder="Pvz.: 30 s video mano kavinei Kaune: jaukus rytas, kava ir šilti croissant'ai, pakviesk į pusryčius savaitgalį. Nuotaika šilta, balsas moteriškas." />
               </div>
-              <button className="btn gold" onClick={makePlan} disabled={!!busy || prompt.trim().length < 10}>
+              <button className="btn accent" onClick={makePlan} disabled={!!busy || prompt.trim().length < 10}>
                 {busy === "plan" ? "AI planuoja…" : plan ? "✨ Suplanuoti iš naujo" : "✨ Suplanuoti video"}</button>
               {plan && (
                 <div className="card variant" style={{ marginTop: 14 }}>
@@ -134,7 +134,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                     </div>
                   )}
                   <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                    <button className="btn gold" onClick={() => auto(plan, plan.sector)} disabled={!!busy}>
+                    <button className="btn accent" onClick={() => auto(plan, plan.sector)} disabled={!!busy}>
                       {busy === "auto" ? "Kuriama…" : "🎬 Kurti video"}</button>
                     <button className="btn small" onClick={() => onPrompter(plan.text)} disabled={!!busy}>📜 Filmuosiu pati (sufleris)</button>
                   </div>
@@ -170,7 +170,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
             <div className="chips">{o.lengths.map(n => (
               <button key={n} type="button" className={"chip" + (secs === n ? " on" : "")} onClick={() => setSecs(n)}>~{n} s</button>))}</div>
           </div>
-          <button className="btn gold" onClick={() => generate(false)} disabled={!!busy}>
+          <button className="btn accent" onClick={() => generate(false)} disabled={!!busy}>
             {busy === "gen" ? "Rašoma…" : "✨ Sukurti 3 variantus"}</button>
           {!user.ai && <div className="hint" style={{ marginTop: 6 }}>Pagrindiniame plane – paruošti šablonai. Premium plane tekstus kiekvieną kartą naujai parašo AI.</div>}
 
@@ -201,7 +201,7 @@ export default function ScriptGen({ id, user, opts, s, onPrompter, onVoice, onAu
                     <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                       <button className="btn small" onClick={() => onPrompter(v.text)} disabled={!!busy}>📜 Į suflerį ir filmuoti</button>
                       {aiVoice && <button className="btn small" onClick={() => onVoice(v.text, voice !== "none" ? voice : null)} disabled={!!busy}>🎙 Į įgarsinimą</button>}
-                      <button className="btn small gold" onClick={() => auto(v)} disabled={!!busy}>
+                      <button className="btn small accent" onClick={() => auto(v)} disabled={!!busy}>
                         {busy === "auto" ? "Dėliojama…" : "🎬 Video automatiškai"}</button>
                     </div>
                   </div>

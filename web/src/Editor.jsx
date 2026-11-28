@@ -391,6 +391,19 @@ export default function Editor({ id, user }) {
           <button className="btn" disabled={busy || !hasClips} onClick={() => run("preview")}>▶ Peržiūra</button>
           <button className="btn gold" disabled={busy || !hasClips} onClick={() => run("final")}>Kurti video</button>
         </div>
+        {/* telefone – pagrindiniai veiksmai visada matomi apačioje */}
+        <div className="mobile-actions">
+          {busy ? (
+            <div className="mobile-progress"><div className="bar"><i style={{ width: `${Math.round((job.progress || 0) * 100)}%` }} /></div>
+              <span>{job.message} {Math.round((job.progress || 0) * 100)}%</span>
+              <button className="btn small ghost" onClick={stopJob}>■</button></div>
+          ) : (
+            <>
+              <button className="btn" disabled={!hasClips} onClick={() => { run("preview"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>▶ Peržiūra</button>
+              <button className="btn gold" disabled={!hasClips} onClick={() => { run("final"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Kurti video</button>
+            </>
+          )}
+        </div>
         <div className="row" style={{ justifyContent: "center" }}>
           {out.preview && <button className={"chip" + (show === "preview" ? " on" : "")} onClick={() => setShow("preview")}>Peržiūra</button>}
           {out.final && <button className={"chip" + (show === "final" ? " on" : "")} onClick={() => setShow("final")}>Galutinis</button>}
@@ -533,7 +546,7 @@ export default function Editor({ id, user }) {
                       <button className="btn small" onClick={() => aiScene(c)} disabled={!!job} title="Sukurti šios scenos vaizdą su AI">✨</button>
                     )}
                     {!c.image && <button className="btn small" onClick={() => setTrimming(c)} title="Karpyti">✂</button>}
-                    <button className={"btn small" + (c.sound ? " gold" : "")} onClick={() => setSounding(c)} title="Muzika ar įgarsinimas šiam kadrui" aria-label="Kadro garsas">🎵</button>
+                    <button className={"btn small" + (c.sound ? " accent" : "")} onClick={() => setSounding(c)} title="Muzika ar įgarsinimas šiam kadrui" aria-label="Kadro garsas">🎵</button>
                     <button className="btn small ghost" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Aukštyn">↑</button>
                     <button className="btn small ghost" onClick={() => move(i, 1)} disabled={i === proj.clips.length - 1} aria-label="Žemyn">↓</button>
                     <button className="btn small ghost danger" onClick={() => removeClip(c.id)} aria-label="Pašalinti">✕</button>
@@ -560,7 +573,7 @@ export default function Editor({ id, user }) {
             <input ref={camInput} type="file" accept="video/*" capture="user" hidden
                    onChange={e => { addFiles([...e.target.files], true); e.target.value = ""; }} />
             <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn gold" onClick={() => setRecording(true)}>🎥 Filmuoti dabar (su sufleriu)</button>
+              <button className="btn accent" onClick={() => setRecording(true)}>🎥 Filmuoti dabar (su sufleriu)</button>
               <button className="btn" onClick={() => camInput.current.click()}>📱 Telefono kamera</button>
             </div>
             <div className="hint" style={{ marginTop: 6 }}>„Filmuoti dabar“ – kamera čia pat naršyklėje, virš jos lėtai slenka jūsų tekstas.</div>
