@@ -13,6 +13,17 @@ const TABS = [
   ["broll", "🎞 Intarpai"], ["voice", "🎙 Įgarsinimas"], ["anims", "✨ Animacijos ir grafika"], ["sound", "🎵 Garsas"],
   ["pace", "⏱ Tempas"],
 ];
+// Bendrinis / tuščias pavadinimas – rodom pasiūlymą įrašyti savo (o ne „Naujas Reels“)
+const GENERIC_TITLE = /^\s*(naujas reels|be pavadinimo|untitled)?\s*$/i;
+// Įrankiai sugrupuoti: vienu metu matoma 4 grupės ir tik pasirinktos grupės skirtukai (ne 9 iš karto)
+const GROUPS = [
+  ["media", "🎬 Medžiaga", ["media"]],
+  ["look", "🎨 Išvaizda", ["style", "subs", "anims"]],
+  ["sound", "🎙 Garsas", ["voice", "sound", "texts"]],
+  ["edit", "✂ Montažas", ["broll", "pace"]],
+];
+const TAB_LABEL = Object.fromEntries(TABS);
+const groupOf = t => (GROUPS.find(g => g[2].includes(t)) || GROUPS[0]);
 const PHONE = { "9:16": "", "16:9": "f169", "1:1": "f11", "4:5": "f45" };
 
 function Tile({ src, label, on, onClick, multi, small }) {
@@ -392,7 +403,8 @@ export default function Editor({ id, user }) {
       <div className="ed-left">
         <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
           <label className="title-wrap" title="Spustelėkite, kad pervadintumėte">
-            <input className="title-input" defaultValue={proj.title} onBlur={e => rename(e.target.value)}
+            <input className="title-input" key={proj.title} defaultValue={GENERIC_TITLE.test(proj.title) ? "" : proj.title}
+                   placeholder="Pavadinkite projektą, pvz. „Kalėdinė akcija“" onBlur={e => rename(e.target.value)}
                    onKeyDown={e => e.key === "Enter" && e.target.blur()} aria-label="Projekto pavadinimas" maxLength={80} />
             <span className="pen">✏️</span>
           </label>
@@ -416,20 +428,19 @@ export default function Editor({ id, user }) {
               <h3 style={{ margin: 0 }}>🎉 Jūsų video paruoštas</h3>
               <span className="spacer" />
               {(out.final.formats || []).length > 1 && (
-                <a className="btn gold small" href={fileUrl(`/projects/${id}/files/visi_formatai.zip`, "&download=1&v=" + out.final.at)}>📦 Visi (ZIP)</a>
+                <a className="btn ghost small" href={fileUrl(`/projects/${id}/files/visi_formatai.zip`, "&download=1&v=" + out.final.at)}>📦 Visi (ZIP)</a>
               )}
             </div>
             <div className="formats">
               {(out.final.formats || [{ fmt: s.format, file: "reels.mp4", cover: out.final.cover }]).map(f => (
                 <div className="fmt" key={f.fmt}>
-                  {f.cover && <img src={fileUrl(`/projects/${id}/files/${f.cover}`, "&v=" + out.final.at)} alt=""
-                                   style={{ aspectRatio: f.fmt.replace(":", " / ") }} />}
+                  <div className="fmt-img">{f.cover && <img src={fileUrl(`/projects/${id}/files/${f.cover}`, "&v=" + out.final.at)} alt="" />}</div>
                   <b>{f.fmt}</b>
                   <span className="hint">{{ "9:16": "Reels, TikTok, Shorts", "16:9": "YouTube", "4:5": "Instagram įrašas", "1:1": "Kvadratas" }[f.fmt]}</span>
                   {CAN_SHARE && <button className="btn small gold" onClick={() => shareVideo(f)} disabled={!!sharing}>
                     {sharing === f.file ? "Ruošiama…" : "📲 Dalintis"}</button>}
-                  <a className={"btn small" + (CAN_SHARE ? "" : " gold")} href={fileUrl(`/projects/${id}/files/${f.file}`, "&download=1")}>⬇ Video</a>
-                  {f.cover && <a className="btn small" href={fileUrl(`/projects/${id}/files/${f.cover}`, "&download=1")}>⬇ Viršelis</a>}
+                  <a className="btn small" href={fileUrl(`/projects/${id}/files/${f.file}`, "&download=1")}>⬇ Video</a>
+                  {f.cover && <a className="btn small ghost" href={fileUrl(`/projects/${id}/files/${f.cover}`, "&download=1")}>⬇ Viršelis</a>}
                 </div>
               ))}
             </div>
@@ -470,10 +481,20 @@ export default function Editor({ id, user }) {
 
       {/* ---------- dešinė: nustatymai (skirtukai) ---------- */}
       <div className="ed-right">
-        <div className="tabs">
-          {TABS.map(([k, label]) => (
-            <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => { setTab(k); setError(""); }}>{label}</button>
-          ))}
+        <div className="tool-nav">
+          <div className="groups" role="tablist">
+            {GROUPS.map(([g, label, tabs]) => (
+              <button key={g} className={"group" + (groupOf(tab)[0] === g ? " on" : "")}
+                      onClick={() => { if (groupOf(tab)[0] !== g) setTab(tabs[0]); setError(""); }}>{label}</button>
+            ))}
+          </div>
+          {groupOf(tab)[2].length > 1 && (
+            <div className="tabs">
+              {groupOf(tab)[2].map(k => (
+                <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => { setTab(k); setError(""); }}>{TAB_LABEL[k]}</button>
+              ))}
+            </div>
+          )}
         </div>
 
         {tab === "media" && (
